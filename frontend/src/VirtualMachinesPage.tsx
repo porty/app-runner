@@ -27,7 +27,7 @@ import {
   PowerSettingsNewRounded,
   StopRounded,
 } from '@mui/icons-material'
-import { useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 
 import {
   createVM,
@@ -62,7 +62,6 @@ const statusDetails: Record<VMStatus, { label: string; color: 'default' | 'succe
 }
 
 export default function VirtualMachinesPage() {
-  const navigate = useNavigate()
   const [virtualMachines, setVirtualMachines] = useState<VirtualMachine[]>([])
   const [images, setImages] = useState<ISOImage[]>([])
   const [hostStatus, setHostStatus] = useState<HostStatus | null>(null)
@@ -188,7 +187,12 @@ export default function VirtualMachinesPage() {
                   <TableCell align="right">
                     <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
                       {running && (
-                        <Button size="small" startIcon={<DesktopWindowsRounded />} onClick={() => navigate(`/compute/virtual-machines/${vm.id}/console`)}>
+                        <Button
+                          component={Link}
+                          to={`/compute/virtual-machines/${vm.id}/console`}
+                          size="small"
+                          startIcon={<DesktopWindowsRounded />}
+                        >
                           Console
                         </Button>
                       )}
