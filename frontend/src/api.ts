@@ -26,6 +26,7 @@ export interface VirtualMachine {
   disk_gib: number
   iso_name: string
   network_mode: NetworkMode
+  bridge_name?: string
   status: VMStatus
   created_at: string
   last_error?: string
@@ -52,6 +53,90 @@ export interface CreateVMRequest {
   disk_gib: number
   iso_name: string
   network_mode: NetworkMode
+  bridge_name?: string
+}
+
+export type DiagnosticStatus =
+  | 'DIAGNOSTIC_STATUS_PASS'
+  | 'DIAGNOSTIC_STATUS_WARNING'
+  | 'DIAGNOSTIC_STATUS_FAIL'
+  | 'DIAGNOSTIC_STATUS_INFO'
+  | 'DIAGNOSTIC_STATUS_UNSPECIFIED'
+
+export type NetworkChangeType =
+  | 'NETWORK_CHANGE_TYPE_CREATE_BRIDGE'
+  | 'NETWORK_CHANGE_TYPE_DELETE_BRIDGE'
+  | 'NETWORK_CHANGE_TYPE_SET_BRIDGE_UP'
+  | 'NETWORK_CHANGE_TYPE_SET_BRIDGE_DOWN'
+  | 'NETWORK_CHANGE_TYPE_ATTACH_INTERFACE'
+  | 'NETWORK_CHANGE_TYPE_DETACH_INTERFACE'
+
+export interface NetworkDiagnostic {
+  key: string
+  label: string
+  status: DiagnosticStatus
+  detail: string
+  remediation?: string
+}
+
+export interface UserIdentity {
+  username: string
+  uid: number
+  groups?: string[]
+  is_root: boolean
+  has_cap_net_admin: boolean
+}
+
+export interface NetworkInterface {
+  name: string
+  is_up: boolean
+  mtu: number
+  hardware_address: string
+  addresses?: string[]
+  master?: string
+  is_bridge: boolean
+  can_attach: boolean
+}
+
+export interface WorkloadAttachment {
+  id: string
+  name: string
+  workload_type: string
+  running: boolean
+}
+
+export interface NetworkBridge {
+  name: string
+  is_up: boolean
+  mtu: number
+  hardware_address: string
+  addresses?: string[]
+  member_interfaces?: string[]
+  workloads?: WorkloadAttachment[]
+  diagnostics?: NetworkDiagnostic[]
+  usable_by_qemu: boolean
+}
+
+export interface PendingNetworkChange {
+  id: string
+  description: string
+  expires_at: string
+}
+
+export interface NetworkingStatus {
+  user: UserIdentity
+  diagnostics?: NetworkDiagnostic[]
+  bridges?: NetworkBridge[]
+  interfaces?: NetworkInterface[]
+  pending_change?: PendingNetworkChange
+  can_manage: boolean
+}
+
+export interface NetworkChangeRequest {
+  type: NetworkChangeType
+  bridge_name: string
+  interface_name?: string
+  migrate_addresses?: boolean
 }
 
 interface TwirpErrorBody {
@@ -131,4 +216,24 @@ export async function stopVM(id: string, force = false): Promise<VirtualMachine>
 
 export async function deleteVM(id: string): Promise<void> {
   await callTwirp<{ id: string }>('DeleteVM', { id })
+}
+
+export async function getNetworkingStatus(): Promise<NetworkingStatus> {
+  const response = await callTwirp<{ status: NetworkingStatus }>('GetNetworkingStatus', {})
+  return response.status
+}
+
+export async function applyNetworkChange(request: NetworkChangeRequest): Promise<PendingNetworkChange> {
+  const response = await callTwirp<{ pending_change: PendingNetworkChange }>('ApplyNetworkChange', request)
+  return response.pending_change
+}
+
+export async function confirmNetworkChange(id: string): Promise<NetworkingStatus> {
+  const response = await callTwirp<{ status: NetworkingStatus }>('ConfirmNetworkChange', { id })
+  return response.status
+}
+
+export async function revertNetworkChange(id: string): Promise<NetworkingStatus> {
+  const response = await callTwirp<{ status: NetworkingStatus }>('RevertNetworkChange', { id })
+  return response.status
 }

@@ -166,6 +166,31 @@ func TestVMManagerPersistsDefinitions(t *testing.T) {
 	}
 }
 
+func TestVMManagerMigratesLegacyBridgeName(t *testing.T) {
+	workingDirectory := t.TempDir()
+	settings := defaultConfig(workingDirectory)
+	settings.BridgeName = "legacy0"
+	if err := prepareDirectories(settings); err != nil {
+		t.Fatal(err)
+	}
+	store := &memoryVMStore{vms: []virtualMachine{{
+		ID: "legacy-vm", Name: "Legacy", NetworkMode: networkModeBridge, Status: vmStatusStopped,
+	}}}
+	manager, err := newVMManager(settings, store, newFakeHypervisor(), func() hostCapabilities {
+		return hostCapabilities{QEMUAvailable: true, KVMAvailable: true, BridgeName: "legacy0"}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vms, err := manager.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vms[0].BridgeName != "legacy0" || store.vms[0].BridgeName != "legacy0" {
+		t.Fatalf("legacy bridge name was not persisted: %#v", vms[0])
+	}
+}
+
 func TestVMManagerRejectsUnavailableBridgeAtStart(t *testing.T) {
 	manager, _, _ := newTestVMManager(t)
 	manager.bridgeCapability = func(string) (bool, string) { return false, "bridge br0 is unavailable" }

@@ -48,6 +48,14 @@ func TestClientAddressContextAllowsOnlyLoopback(t *testing.T) {
 	if loopback {
 		t.Fatal("remote request was identified as loopback")
 	}
+
+	loopback = true
+	request.RemoteAddr = "127.0.0.1:12345"
+	request.Header.Set("X-Forwarded-For", "192.0.2.10")
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	if loopback {
+		t.Fatal("remote request forwarded by the local development proxy was identified as loopback")
+	}
 }
 
 func TestDevelopmentHandlerDescribesFrontendWorkflow(t *testing.T) {

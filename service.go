@@ -169,12 +169,16 @@ func (s *appRunnerService) ApplyNetworkChange(ctx context.Context, request *appr
 	if err != nil {
 		return nil, err
 	}
-	pending, err := s.networking.Apply(ctx, networkChange{
+	change := networkChange{
 		Type: changeType, BridgeName: request.GetBridgeName(), InterfaceName: request.GetInterfaceName(),
 		MigrateAddresses: request.GetMigrateAddresses(),
-	})
+	}
+	if err := validateNetworkChange(change); err != nil {
+		return nil, twirp.InvalidArgumentError("network_change", err.Error())
+	}
+	pending, err := s.networking.Apply(ctx, change)
 	if err != nil {
-		return nil, rpcError(err)
+		return nil, twirp.NewError(twirp.FailedPrecondition, err.Error())
 	}
 	return &apprunnerv1.ApplyNetworkChangeResponse{PendingChange: pendingNetworkChangeToProto(&pending)}, nil
 }
@@ -187,7 +191,7 @@ func (s *appRunnerService) ConfirmNetworkChange(ctx context.Context, request *ap
 		return nil, twirp.NewError(twirp.PermissionDenied, "network changes are accepted only from a browser connected through loopback")
 	}
 	if err := s.networking.Confirm(request.GetId()); err != nil {
-		return nil, rpcError(err)
+		return nil, twirp.NotFoundError(err.Error())
 	}
 	status, err := s.networking.Status()
 	if err != nil {
@@ -204,7 +208,7 @@ func (s *appRunnerService) RevertNetworkChange(ctx context.Context, request *app
 		return nil, twirp.NewError(twirp.PermissionDenied, "network changes are accepted only from a browser connected through loopback")
 	}
 	if err := s.networking.Revert(request.GetId()); err != nil {
-		return nil, rpcError(err)
+		return nil, twirp.NewError(twirp.FailedPrecondition, err.Error())
 	}
 	status, err := s.networking.Status()
 	if err != nil {

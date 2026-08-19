@@ -32,14 +32,14 @@ import { Link } from 'react-router-dom'
 import {
   createVM,
   deleteVM,
-  getHostStatus,
+  getNetworkingStatus,
   listISOs,
   listVMs,
   startVM,
   stopVM,
   type CreateVMRequest,
-  type HostStatus,
   type ISOImage,
+  type NetworkingStatus,
   type VirtualMachine,
   type VMStatus,
 } from './api'
@@ -51,6 +51,7 @@ const defaultCreateRequest: CreateVMRequest = {
   disk_gib: 20,
   iso_name: '',
   network_mode: 'NETWORK_MODE_NAT',
+  bridge_name: '',
 }
 
 const statusDetails: Record<VMStatus, { label: string; color: 'default' | 'success' | 'warning' | 'error' }> = {
@@ -64,7 +65,7 @@ const statusDetails: Record<VMStatus, { label: string; color: 'default' | 'succe
 export default function VirtualMachinesPage() {
   const [virtualMachines, setVirtualMachines] = useState<VirtualMachine[]>([])
   const [images, setImages] = useState<ISOImage[]>([])
-  const [hostStatus, setHostStatus] = useState<HostStatus | null>(null)
+  const [networking, setNetworking] = useState<NetworkingStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [busyID, setBusyID] = useState('')
   const [error, setError] = useState('')
@@ -74,11 +75,17 @@ export default function VirtualMachinesPage() {
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true)
     try {
-      const [vms, isos, status] = await Promise.all([listVMs(), listISOs(), getHostStatus()])
+      const [vms, isos, networkStatus] = await Promise.all([listVMs(), listISOs(), getNetworkingStatus()])
       setVirtualMachines(vms)
       setImages(isos)
-      setHostStatus(status)
-      setCreateRequest((current) => ({ ...current, iso_name: current.iso_name || isos[0]?.name || '' }))
+      setNetworking(networkStatus)
+      const bridges = networkStatus.bridges ?? []
+      const suggestedBridge = bridges.find((bridge) => bridge.usable_by_qemu)?.name ?? bridges[0]?.name ?? ''
+      setCreateRequest((current) => ({
+        ...current,
+        iso_name: current.iso_name || isos[0]?.name || '',
+        bridge_name: current.bridge_name || suggestedBridge,
+      }))
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to load virtual machines')
     } finally {
@@ -182,7 +189,7 @@ export default function VirtualMachinesPage() {
                   </TableCell>
                   <TableCell><Chip size="small" label={status.label} color={status.color} /></TableCell>
                   <TableCell>{vm.cpus} vCPU · {formatMemory(vm.memory_mib)} · {vm.disk_gib} GiB</TableCell>
-                  <TableCell>{vm.network_mode === 'NETWORK_MODE_BRIDGE' ? `Bridge (${hostStatus?.bridge_name ?? 'br0'})` : 'NAT'}</TableCell>
+                  <TableCell>{vm.network_mode === 'NETWORK_MODE_BRIDGE' ? `Bridge (${vm.bridge_name || 'missing'})` : 'NAT'}</TableCell>
                   <TableCell>{vm.iso_name}</TableCell>
                   <TableCell align="right">
                     <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
@@ -252,16 +259,40 @@ export default function VirtualMachinesPage() {
               label="Network mode"
               value={createRequest.network_mode}
               onChange={(event) => setCreateRequest({ ...createRequest, network_mode: event.target.value as CreateVMRequest['network_mode'] })}
-              helperText={createRequest.network_mode === 'NETWORK_MODE_BRIDGE' && !hostStatus?.bridge_available ? hostStatus?.bridge_warning : undefined}
             >
               <MenuItem value="NETWORK_MODE_NAT">User-mode NAT</MenuItem>
-              <MenuItem value="NETWORK_MODE_BRIDGE">Host bridge ({hostStatus?.bridge_name ?? 'br0'})</MenuItem>
+              <MenuItem value="NETWORK_MODE_BRIDGE">Host bridge</MenuItem>
             </TextField>
+            {createRequest.network_mode === 'NETWORK_MODE_BRIDGE' && (
+              <TextField
+                select
+                label="Bridge"
+                value={createRequest.bridge_name ?? ''}
+                onChange={(event) => setCreateRequest({ ...createRequest, bridge_name: event.target.value })}
+                helperText={
+                  (networking?.bridges ?? []).length === 0
+                    ? 'No Linux bridges were detected. Create one in Configuration → Networking.'
+                    : !(networking?.bridges ?? []).find((bridge) => bridge.name === createRequest.bridge_name)?.usable_by_qemu
+                      ? 'This bridge has failed diagnostics. Review Configuration → Networking before starting the VM.'
+                      : undefined
+                }
+              >
+                {(networking?.bridges ?? []).map((bridge) => (
+                  <MenuItem key={bridge.name} value={bridge.name}>
+                    {bridge.name}{bridge.usable_by_qemu ? '' : ' · diagnostics required'}
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCreateOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={() => void submitCreate()} disabled={busyID === 'create' || !createRequest.name.trim() || !createRequest.iso_name}>
+          <Button
+            variant="contained"
+            onClick={() => void submitCreate()}
+            disabled={busyID === 'create' || !createRequest.name.trim() || !createRequest.iso_name || (createRequest.network_mode === 'NETWORK_MODE_BRIDGE' && !createRequest.bridge_name)}
+          >
             {busyID === 'create' ? 'Creating…' : 'Create'}
           </Button>
         </DialogActions>

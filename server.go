@@ -49,6 +49,12 @@ func withClientAddress(next http.Handler) http.Handler {
 			host = request.RemoteAddr
 		}
 		address := net.ParseIP(host)
+		if address != nil && address.IsLoopback() {
+			forwardedFor := strings.TrimSpace(strings.Split(request.Header.Get("X-Forwarded-For"), ",")[0])
+			if forwardedAddress := net.ParseIP(forwardedFor); forwardedAddress != nil {
+				address = forwardedAddress
+			}
+		}
 		ctx := context.WithValue(request.Context(), clientAddressContextKey{}, address)
 		next.ServeHTTP(response, request.WithContext(ctx))
 	})

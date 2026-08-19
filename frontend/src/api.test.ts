@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createVM, echo, listVMs, ping } from './api'
+import { applyNetworkChange, createVM, echo, getNetworkingStatus, listVMs, ping } from './api'
 
 describe('Twirp API client', () => {
   afterEach(() => {
@@ -94,6 +94,62 @@ describe('Twirp API client', () => {
           disk_gib: 20,
           iso_name: 'installer.iso',
           network_mode: 'NETWORK_MODE_NAT',
+        }),
+      }),
+    )
+  })
+
+  it('loads structured network diagnostics', async () => {
+    const status = {
+      user: { username: 'app-runner', uid: 1000, is_root: false, has_cap_net_admin: false },
+      diagnostics: [],
+      bridges: [],
+      interfaces: [],
+      can_manage: false,
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ status }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+
+    await expect(getNetworkingStatus()).resolves.toEqual(status)
+  })
+
+  it('applies bridge changes with the requested migration behavior', async () => {
+    const pending = {
+      id: 'change-id',
+      description: 'Attach eth0 to br0',
+      expires_at: '2026-08-19T05:30:15Z',
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ pending_change: pending }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      applyNetworkChange({
+        type: 'NETWORK_CHANGE_TYPE_ATTACH_INTERFACE',
+        bridge_name: 'br0',
+        interface_name: 'eth0',
+        migrate_addresses: true,
+      }),
+    ).resolves.toEqual(pending)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/twirp/apprunner.v1.AppRunnerService/ApplyNetworkChange',
+      expect.objectContaining({
+        body: JSON.stringify({
+          type: 'NETWORK_CHANGE_TYPE_ATTACH_INTERFACE',
+          bridge_name: 'br0',
+          interface_name: 'eth0',
+          migrate_addresses: true,
         }),
       }),
     )

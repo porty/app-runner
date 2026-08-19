@@ -121,3 +121,27 @@ func TestValidateNetworkChangeRejectsUnsafeNames(t *testing.T) {
 		}
 	}
 }
+
+func TestNetworkingStatusMapsManagedVMsToTheirBridges(t *testing.T) {
+	vms, _, settings := newTestVMManager(t)
+	if _, err := vms.Create(t.Context(), createVMOptions{
+		Name: "Bridge workload", CPUs: 1, MemoryMiB: 512, DiskGiB: 1,
+		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br-lab",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeNetworkProvider{status: networkingStatus{
+		Bridges: []networkBridgeInfo{{Name: "br-lab", IsUp: true}},
+	}}
+	manager, err := newNetworkManager(provider, vms, settings.DiskDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := manager.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Bridges) != 1 || len(status.Bridges[0].Workloads) != 1 || status.Bridges[0].Workloads[0].Name != "Bridge workload" {
+		t.Fatalf("managed workload was not mapped to its bridge: %#v", status.Bridges)
+	}
+}

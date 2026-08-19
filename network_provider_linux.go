@@ -368,11 +368,11 @@ func inspectNetworkAccess() networkAccessDiagnostics {
 		setuid := info.Mode()&os.ModeSetuid != 0
 		capabilities := fileHasCapabilities(result.helperPath)
 		helperDiagnostic.Detail = fmt.Sprintf("%s is owned by %s:%s, mode %s, executable=%t, setuid=%t, file-capabilities=%t.", result.helperPath, owner, group, info.Mode().Perm(), result.helperExecutable, setuid, capabilities)
-		if result.helperExecutable && (identity.IsRoot || setuid || capabilities || identity.HasCAPNetAdmin) {
+		if result.helperExecutable && (identity.IsRoot || setuid || capabilities) {
 			helperDiagnostic.Status = diagnosticPass
 		} else {
 			helperDiagnostic.Status = diagnosticFail
-			helperDiagnostic.Remediation = "Restore the distribution-provided qemu-bridge-helper permissions, or grant the backend CAP_NET_ADMIN. Do not make the helper world-writable."
+			helperDiagnostic.Remediation = "Restore the distribution-provided qemu-bridge-helper setuid permissions or grant CAP_NET_ADMIN to the helper itself, or run App Runner as root. Do not make the helper world-writable."
 		}
 	}
 	result.diagnostics = append(result.diagnostics, helperDiagnostic)

@@ -43,6 +43,7 @@ import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 
 import { echo, ping, type PingResponse } from './api'
 import HostWarnings from './HostWarnings'
+import NetworkingPage from './NetworkingPage'
 import VirtualMachinesPage from './VirtualMachinesPage'
 
 const ConsolePage = lazy(() => import('./ConsolePage'))
@@ -396,7 +397,7 @@ export default function App({ mode, onToggleMode }: AppProps) {
             />
             <Route path="/compute/containers" element={<PlaceholderPage title="Containers" description="Manage Docker, Podman, and system containers." />} />
             <Route path="/configuration/storage" element={<PlaceholderPage title="Storage" description="Configure image and workload storage." />} />
-            <Route path="/configuration/networking" element={<PlaceholderPage title="Networking" description="Configure host bridges and workload networks." />} />
+            <Route path="/configuration/networking" element={<NetworkingPage />} />
             <Route path="/configuration/preferences" element={<PlaceholderPage title="Preferences" description="Tune the App Runner experience." />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
