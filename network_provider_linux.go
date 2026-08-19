@@ -327,7 +327,7 @@ func inspectNetworkAccess() networkAccessDiagnostics {
 	} else {
 		manageDiagnostic.Status = diagnosticFail
 		manageDiagnostic.Detail = "The backend does not have CAP_NET_ADMIN. Read-only diagnostics remain available."
-		manageDiagnostic.Remediation = "Run App Runner as root, or grant CAP_NET_ADMIN only to the production executable with: sudo setcap cap_net_admin=+ep ./bin/app-runner"
+		manageDiagnostic.Remediation = "Run App Runner as root, or grant `CAP_NET_ADMIN` only to the production executable:\n$ sudo setcap cap_net_admin=+ep ./bin/app-runner"
 	}
 	result.diagnostics = append(result.diagnostics, manageDiagnostic)
 
@@ -335,7 +335,7 @@ func inspectNetworkAccess() networkAccessDiagnostics {
 	if info, err := os.Stat("/dev/net/tun"); err != nil {
 		tunDiagnostic.Status = diagnosticFail
 		tunDiagnostic.Detail = fmt.Sprintf("/dev/net/tun cannot be inspected: %v", err)
-		tunDiagnostic.Remediation = "Load the tun kernel module and ensure /dev/net/tun exists."
+		tunDiagnostic.Remediation = "Load the tun kernel module and ensure `/dev/net/tun` exists."
 	} else {
 		owner, group := fileOwnerNames(info)
 		file, openErr := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
@@ -347,7 +347,7 @@ func inspectNetworkAccess() networkAccessDiagnostics {
 		} else {
 			tunDiagnostic.Status = diagnosticFail
 			tunDiagnostic.Detail = fmt.Sprintf("Present as %s:%s with mode %s, but opening read/write failed: %v", owner, group, info.Mode().Perm(), openErr)
-			tunDiagnostic.Remediation = fmt.Sprintf("Add %s to the device-owning group %s or configure an ACL granting read/write access, then start a new login session.", identity.Username, group)
+			tunDiagnostic.Remediation = fmt.Sprintf("Add `%s` to the device-owning group `%s` or configure an ACL granting read/write access, then start a new login session.", identity.Username, group)
 		}
 	}
 	result.diagnostics = append(result.diagnostics, tunDiagnostic)
@@ -357,7 +357,7 @@ func inspectNetworkAccess() networkAccessDiagnostics {
 	if result.helperPath == "" {
 		helperDiagnostic.Status = diagnosticFail
 		helperDiagnostic.Detail = "qemu-bridge-helper was not found in PATH or a standard QEMU library directory."
-		helperDiagnostic.Remediation = "Install the distribution package that provides qemu-bridge-helper."
+		helperDiagnostic.Remediation = "Install the distribution package that provides `qemu-bridge-helper`."
 	} else if info, err := os.Stat(result.helperPath); err != nil {
 		helperDiagnostic.Status = diagnosticFail
 		helperDiagnostic.Detail = err.Error()
@@ -372,7 +372,7 @@ func inspectNetworkAccess() networkAccessDiagnostics {
 			helperDiagnostic.Status = diagnosticPass
 		} else {
 			helperDiagnostic.Status = diagnosticFail
-			helperDiagnostic.Remediation = "Restore the distribution-provided qemu-bridge-helper setuid permissions or grant CAP_NET_ADMIN to the helper itself, or run App Runner as root. Do not make the helper world-writable."
+			helperDiagnostic.Remediation = "Restore the distribution-provided `qemu-bridge-helper` setuid permissions or grant `CAP_NET_ADMIN` to the helper itself, or run App Runner as root. Do not make the helper world-writable."
 		}
 	}
 	result.diagnostics = append(result.diagnostics, helperDiagnostic)
@@ -382,7 +382,7 @@ func inspectNetworkAccess() networkAccessDiagnostics {
 	if err != nil {
 		configDiagnostic.Status = diagnosticFail
 		configDiagnostic.Detail = fmt.Sprintf("/etc/qemu/bridge.conf is not readable: %v", err)
-		configDiagnostic.Remediation = "Create a root-owned, readable /etc/qemu/bridge.conf with an explicit 'allow BRIDGE_NAME' line for each permitted bridge."
+		configDiagnostic.Remediation = "Create a root-owned, readable `/etc/qemu/bridge.conf` with one line for each permitted bridge:\nallow BRIDGE_NAME"
 	} else {
 		result.bridgeConfig = string(configuration)
 		result.bridgeConfigLoaded = true
@@ -407,7 +407,7 @@ func bridgeDiagnostics(access networkAccessDiagnostics, bridge networkBridgeInfo
 	} else {
 		configDiagnostic.Status = diagnosticFail
 		configDiagnostic.Detail = fmt.Sprintf("/etc/qemu/bridge.conf does not allow %s.", bridge.Name)
-		configDiagnostic.Remediation = fmt.Sprintf("Add 'allow %s' to /etc/qemu/bridge.conf as root.", bridge.Name)
+		configDiagnostic.Remediation = fmt.Sprintf("Add this line to `/etc/qemu/bridge.conf` as root:\nallow %s", bridge.Name)
 	}
 	diagnostics = append(diagnostics, configDiagnostic)
 	usable := bridge.IsUp && access.tunAvailable && access.helperAvailable && access.helperExecutable && allowed

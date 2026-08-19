@@ -352,8 +352,8 @@ function DiagnosticList({ diagnostics, compact = false }: { diagnostics: Network
         return (
           <Alert key={diagnostic.key} severity={severity} icon={icon} variant={compact ? 'outlined' : 'standard'}>
             <AlertTitle>{diagnostic.label}</AlertTitle>
-            {diagnostic.detail}
-            {diagnostic.remediation && <Typography variant="body2" sx={{ mt: 0.75, fontWeight: 650 }}>{diagnostic.remediation}</Typography>}
+            <DiagnosticOutput text={diagnostic.detail} />
+            {diagnostic.remediation && <Box sx={{ mt: 1 }}><RemediationText text={diagnostic.remediation} /></Box>}
           </Alert>
         )
       })}
@@ -391,9 +391,9 @@ function DiagnosticTable({ diagnostics }: { diagnostics: NetworkDiagnostic[] }) 
                   <Chip size="small" color={presentation.color} icon={presentation.icon} label={presentation.label} />
                 </TableCell>
                 <TableCell sx={{ verticalAlign: 'top', fontWeight: 650 }}>{diagnostic.label}</TableCell>
-                <TableCell sx={{ verticalAlign: 'top' }}>{diagnostic.detail}</TableCell>
+                <TableCell sx={{ verticalAlign: 'top' }}><DiagnosticOutput text={diagnostic.detail} /></TableCell>
                 <TableCell sx={{ verticalAlign: 'top' }}>
-                  {diagnostic.remediation || <Typography component="span" color="text.secondary">—</Typography>}
+                  {diagnostic.remediation ? <RemediationText text={diagnostic.remediation} /> : <Typography component="span" color="text.secondary">—</Typography>}
                 </TableCell>
               </TableRow>
             )
@@ -402,6 +402,85 @@ function DiagnosticTable({ diagnostics }: { diagnostics: NetworkDiagnostic[] }) 
       </Table>
     </TableContainer>
   )
+}
+
+function DiagnosticOutput({ text }: { text: string }) {
+  return (
+    <Box
+      component="pre"
+      aria-label="Diagnostic output"
+      sx={{
+        m: 0,
+        px: 1,
+        py: 0.75,
+        border: 1,
+        borderColor: 'divider',
+        borderRadius: 1,
+        bgcolor: 'action.hover',
+        color: 'text.secondary',
+        fontFamily: 'monospace',
+        fontSize: '0.78rem',
+        lineHeight: 1.5,
+        overflowX: 'auto',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+      }}
+    >
+      {text}
+    </Box>
+  )
+}
+
+function RemediationText({ text }: { text: string }) {
+  const lines = text.split('\n')
+  return (
+    <Stack spacing={0.75}>
+      {lines.map((line, index) => {
+        const isTerminalLine = line.startsWith('$ ') || line.startsWith('allow ')
+        if (isTerminalLine) {
+          return (
+            <Box
+              key={`${index}-${line}`}
+              component="pre"
+              sx={{
+                m: 0,
+                px: 1,
+                py: 0.75,
+                borderRadius: 1,
+                bgcolor: 'grey.900',
+                color: 'grey.100',
+                fontFamily: 'monospace',
+                fontSize: '0.78rem',
+                lineHeight: 1.5,
+                overflowX: 'auto',
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {line}
+            </Box>
+          )
+        }
+        return <Typography key={`${index}-${line}`} variant="body2">{formatInlineCode(line)}</Typography>
+      })}
+    </Stack>
+  )
+}
+
+function formatInlineCode(text: string) {
+  return text.split(/(`[^`]+`)/g).filter(Boolean).map((part, index) => {
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return (
+        <Box
+          key={`${index}-${part}`}
+          component="code"
+          sx={{ px: 0.5, py: 0.125, borderRadius: 0.75, bgcolor: 'action.hover', fontFamily: 'monospace', fontSize: '0.85em' }}
+        >
+          {part.slice(1, -1)}
+        </Box>
+      )
+    }
+    return part
+  })
 }
 
 function PendingChangeAlert({ pending, busy, onConfirm, onRevert }: {

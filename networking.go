@@ -192,7 +192,7 @@ func (m *networkManager) Status() (networkingStatus, error) {
 				Diagnostics: []networkDiagnostic{{
 					Key: "bridge_missing", Label: "Bridge exists", Status: diagnosticFail,
 					Detail:      "This bridge is referenced by a managed VM but does not exist on the host.",
-					Remediation: fmt.Sprintf("Create bridge %s or move the VM to another bridge.", vm.BridgeName),
+					Remediation: fmt.Sprintf("Create bridge `%s` or move the VM to another bridge.", vm.BridgeName),
 				}},
 			})
 			index = len(status.Bridges) - 1
