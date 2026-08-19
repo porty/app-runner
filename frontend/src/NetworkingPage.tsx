@@ -352,8 +352,8 @@ function DiagnosticList({ diagnostics, compact = false }: { diagnostics: Network
         return (
           <Alert key={diagnostic.key} severity={severity} icon={icon} variant={compact ? 'outlined' : 'standard'}>
             <AlertTitle>{diagnostic.label}</AlertTitle>
-            <DiagnosticOutput text={diagnostic.detail} />
-            {diagnostic.remediation && <Box sx={{ mt: 1 }}><RemediationText text={diagnostic.remediation} /></Box>}
+            <DiagnosticText text={diagnostic.detail} />
+            {diagnostic.remediation && <Box sx={{ mt: 1 }}><DiagnosticText text={diagnostic.remediation} /></Box>}
           </Alert>
         )
       })}
@@ -391,9 +391,9 @@ function DiagnosticTable({ diagnostics }: { diagnostics: NetworkDiagnostic[] }) 
                   <Chip size="small" color={presentation.color} icon={presentation.icon} label={presentation.label} />
                 </TableCell>
                 <TableCell sx={{ verticalAlign: 'top', fontWeight: 650 }}>{diagnostic.label}</TableCell>
-                <TableCell sx={{ verticalAlign: 'top' }}><DiagnosticOutput text={diagnostic.detail} /></TableCell>
+                <TableCell sx={{ verticalAlign: 'top' }}><DiagnosticText text={diagnostic.detail} /></TableCell>
                 <TableCell sx={{ verticalAlign: 'top' }}>
-                  {diagnostic.remediation ? <RemediationText text={diagnostic.remediation} /> : <Typography component="span" color="text.secondary">—</Typography>}
+                  {diagnostic.remediation ? <DiagnosticText text={diagnostic.remediation} /> : <Typography component="span" color="text.secondary">—</Typography>}
                 </TableCell>
               </TableRow>
             )
@@ -404,44 +404,17 @@ function DiagnosticTable({ diagnostics }: { diagnostics: NetworkDiagnostic[] }) 
   )
 }
 
-function DiagnosticOutput({ text }: { text: string }) {
-  return (
-    <Box
-      component="pre"
-      aria-label="Diagnostic output"
-      sx={{
-        m: 0,
-        px: 1,
-        py: 0.75,
-        border: 1,
-        borderColor: 'divider',
-        borderRadius: 1,
-        bgcolor: 'action.hover',
-        color: 'text.secondary',
-        fontFamily: 'monospace',
-        fontSize: '0.78rem',
-        lineHeight: 1.5,
-        overflowX: 'auto',
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-      }}
-    >
-      {text}
-    </Box>
-  )
-}
-
-function RemediationText({ text }: { text: string }) {
-  const lines = text.split('\n')
+function DiagnosticText({ text }: { text: string }) {
+  const segments = splitDiagnosticText(text)
   return (
     <Stack spacing={0.75}>
-      {lines.map((line, index) => {
-        const isTerminalLine = line.startsWith('$ ') || line.startsWith('allow ')
-        if (isTerminalLine) {
+      {segments.map((segment, index) => {
+        if (segment.terminal) {
           return (
             <Box
-              key={`${index}-${line}`}
+              key={`${index}-${segment.text}`}
               component="pre"
+              aria-label="Terminal command"
               sx={{
                 m: 0,
                 px: 1,
@@ -456,29 +429,57 @@ function RemediationText({ text }: { text: string }) {
                 whiteSpace: 'pre-wrap',
               }}
             >
-              {line}
+              {segment.text}
             </Box>
           )
         }
-        return <Typography key={`${index}-${line}`} variant="body2">{formatInlineCode(line)}</Typography>
+        return <Typography key={`${index}-${segment.text}`} variant="body2">{formatInlineCode(segment.text)}</Typography>
       })}
     </Stack>
   )
 }
 
+function splitDiagnosticText(text: string): Array<{ text: string; terminal: boolean }> {
+  const segments: Array<{ text: string; terminal: boolean }> = []
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim()
+    if (!line) continue
+    if (line.startsWith('$ ') || line.startsWith('allow ') || line.startsWith('deny ')) {
+      segments.push({ text: line, terminal: true })
+      continue
+    }
+
+    // Older backends returned this shell command inline after the remediation prose.
+    const commandIndex = line.indexOf('sudo setcap ')
+    if (commandIndex >= 0) {
+      const prose = line.slice(0, commandIndex).trimEnd()
+      if (prose) segments.push({ text: prose, terminal: false })
+      segments.push({ text: `$ ${line.slice(commandIndex).replace(/\.$/, '')}`, terminal: true })
+      continue
+    }
+    segments.push({ text: line, terminal: false })
+  }
+  return segments
+}
+
 function formatInlineCode(text: string) {
-  return text.split(/(`[^`]+`)/g).filter(Boolean).map((part, index) => {
-    if (part.startsWith('`') && part.endsWith('`')) {
+  const normalized = text.replace(/'((?:allow|deny)\s+[^']+)'/g, '`$1`')
+  const codePattern = /(`[^`]+`|(?:\.{0,2}\/|\/)(?:[\w.-]+\/)*[\w.-]+|\bCAP_NET_ADMIN\b|\b(?:executable|setuid|file-capabilities)=(?:true|false)\b|\b[\w.-]+:[\w.-]+\b|\b0?[0-7]{3,4}\b)/g
+  return normalized.split(codePattern).filter(Boolean).map((part, index) => {
+    const explicitlyMarked = part.startsWith('`') && part.endsWith('`')
+    if (explicitlyMarked || codePattern.test(part)) {
+      codePattern.lastIndex = 0
       return (
         <Box
           key={`${index}-${part}`}
           component="code"
           sx={{ px: 0.5, py: 0.125, borderRadius: 0.75, bgcolor: 'action.hover', fontFamily: 'monospace', fontSize: '0.85em' }}
         >
-          {part.slice(1, -1)}
+          {explicitlyMarked ? part.slice(1, -1) : part}
         </Box>
       )
     }
+    codePattern.lastIndex = 0
     return part
   })
 }
