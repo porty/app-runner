@@ -56,7 +56,6 @@ App Runner reads `app-runner.json` from its current directory when the file exis
   "listen": "127.0.0.1:8080",
   "iso_dir": "iso",
   "disk_dir": "disk",
-  "bridge_name": "br0",
   "qemu_binary": "qemu-system-x86_64",
   "qemu_img_binary": "qemu-img"
 }
@@ -71,15 +70,16 @@ Command-line values override the configuration file:
   -config ./app-runner.json \
   -listen 127.0.0.1:9000 \
   -iso-dir ./images \
-  -disk-dir ./virtual-machines \
-  -bridge br0
+  -disk-dir ./virtual-machines
 ```
 
 Use `-qemu` and `-qemu-img` when those binaries are not on the normal executable path.
 
 ## VM networking
 
-User-mode NAT works without host network setup. Bridge mode connects a VM to the configured Linux bridge and relies on QEMU's bridge helper. App Runner logs a warning and shows dismissible guidance in the UI when the bridge cannot be used.
+User-mode NAT works without host network setup. Bridge mode stores a specific bridge name on each VM, so different workloads can use different Linux bridges.
+
+Configuration → Networking provides a live inventory of bridges, member interfaces, addresses, link state, and managed workloads. It also reports the backend's effective username and groups, CAP_NET_ADMIN state, actual `/dev/net/tun` read/write result, and `qemu-bridge-helper` path, ownership, mode, setuid state, file capabilities and per-bridge allow-list result.
 
 A typical Linux setup requires:
 
@@ -89,7 +89,21 @@ A typical Linux setup requires:
 - access to `/dev/net/tun`, normally through the device's owning group; and
 - membership in the `kvm` group, or equivalent ACL access, for `/dev/kvm`.
 
-Exact bridge creation and physical-interface attachment commands are distribution and network specific. Changing them can interrupt the host's network connection, so configure the bridge outside App Runner.
+App Runner can make runtime-only bridge changes through Linux netlink: create or delete a bridge, bring it up or down, and attach or detach interfaces. Attaching an interface can optionally move its global addresses and non-kernel routes onto the bridge.
+
+Every mutation is snapshotted before it is applied. The frontend must confirm connectivity within 15 seconds or the backend restores the affected link state, bridge membership, addresses and routes. Only one transaction can be pending, rollback state is stored under `disk/`, and an unconfirmed change is restored immediately after an App Runner restart.
+
+Network mutations require root or `CAP_NET_ADMIN`, never invoke `sudo`, and are accepted only from loopback clients. To grant only the bridge-management capability to a production build:
+
+```sh
+sudo setcap cap_net_admin=+ep ./bin/app-runner
+```
+
+Reapply the capability after replacing or rebuilding the executable. QEMU bridge operation separately requires a correctly permissioned `qemu-bridge-helper` and an `allow BRIDGE_NAME` entry in `/etc/qemu/bridge.conf`; the Networking page reports the exact state it observes.
+
+Confirmed changes are not written to NetworkManager, systemd-networkd, Netplan, or distribution configuration and therefore do not survive reboot. Attaching the interface carrying the current connection can still interrupt networking; read the proposed operation carefully and use the rollback countdown.
+
+The optional legacy `bridge_name` configuration or `-bridge` flag is retained only as a migration fallback for VM definitions created before per-VM bridge selection.
 
 ## VM lifecycle and console
 

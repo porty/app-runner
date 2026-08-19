@@ -2,7 +2,6 @@
   "listen": "127.0.0.1:8080",
   "iso_dir": "iso",
   "disk_dir": "disk",
-  "bridge_name": "br0",
   "qemu_binary": "qemu-system-x86_64",
   "qemu_img_binary": "qemu-img"
 }

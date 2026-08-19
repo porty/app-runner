@@ -32,10 +32,18 @@ Launch and manage QEMU/KVM virtual machines from the web interface.
 ## Networking
 
 - supports user-mode NAT and host bridge networking
-- the bridge name is configurable and defaults to `br0`
-- detects whether bridge networking appears usable by the current process
-- logs a backend warning and shows a dismissible frontend warning when bridge networking cannot be configured
-- the warning briefly describes likely fixes, including creating the bridge, allowing it in QEMU bridge configuration, and correcting user/group or helper permissions
+- stores the selected bridge on each bridged VM and supports multiple host bridges
+- provides a Networking page that lists Linux bridges, member interfaces, addresses, operational state, and assigned managed workloads
+- distinguishes managed VMs and containers from host interfaces that cannot be attributed to an App Runner workload
+- reports the backend username, UID, groups, CAP_NET_ADMIN state, actual `/dev/net/tun` read/write access, `qemu-bridge-helper` ownership and permissions, file capabilities, and bridge allow-list results
+- provides specific remediation for each failed diagnostic
+- can create and delete runtime Linux bridges, bring them up or down, and attach or detach host interfaces
+- can migrate global addresses and non-kernel routes when attaching an interface
+- snapshots affected link state, bridge membership, addresses, and routes before a mutation
+- allows one pending network mutation at a time and automatically restores its snapshot unless confirmed from the frontend within 15 seconds
+- persists pending rollback data and restores it immediately if App Runner restarts before confirmation
+- accepts network mutation RPCs only from loopback clients and requires root or CAP_NET_ADMIN
+- does not invoke `sudo` and does not write persistent NetworkManager, systemd-networkd, Netplan, or distribution network configuration
 
 ## Console
 
@@ -49,5 +57,7 @@ Launch and manage QEMU/KVM virtual machines from the web interface.
 - the frontend can create a persistent VM from an ISO already in `iso/`
 - the VM can be started, viewed and interacted with through noVNC, gracefully stopped or force stopped, restarted, and deleted
 - both NAT and bridge configurations generate the expected QEMU device arguments
+- networking inventory and diagnostics identify bridge usability and managed workload assignments
+- unconfirmed network mutations are reverted after 15 seconds and after a backend restart
 - direct navigation to the VM list and console routes works in the production executable
 - configuration precedence, persistence, lifecycle behavior, QEMU argument construction, and relevant frontend API behavior have automated tests
