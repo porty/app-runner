@@ -1,4 +1,5 @@
 /bin/
+/disk/
 /frontend/dist/
 /frontend/node_modules/
-
+/iso/

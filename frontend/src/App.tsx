@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { lazy, Suspense, useState, type ReactNode } from 'react'
 import {
   AppBar,
   Box,
@@ -6,6 +6,7 @@ import {
   Card,
   CardContent,
   Chip,
+  CircularProgress,
   Collapse,
   Divider,
   Drawer,
@@ -41,6 +42,10 @@ import {
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 
 import { echo, ping, type PingResponse } from './api'
+import HostWarnings from './HostWarnings'
+import VirtualMachinesPage from './VirtualMachinesPage'
+
+const ConsolePage = lazy(() => import('./ConsolePage'))
 
 const expandedWidth = 272
 const collapsedWidth = 76
@@ -376,10 +381,19 @@ export default function App({ mode, onToggleMode }: AppProps) {
         }}
       >
         <Box sx={{ p: { xs: 2.5, md: 4 }, maxWidth: 1280, mx: 'auto' }}>
+          <HostWarnings />
           <Routes>
             <Route path="/" element={<Overview />} />
             <Route path="/activity" element={<PlaceholderPage title="Activity" description="Recent control plane events and operations." />} />
-            <Route path="/compute/virtual-machines" element={<PlaceholderPage title="Virtual machines" description="Create and manage QEMU/KVM virtual machines." />} />
+            <Route path="/compute/virtual-machines" element={<VirtualMachinesPage />} />
+            <Route
+              path="/compute/virtual-machines/:id/console"
+              element={
+                <Suspense fallback={<Box sx={{ minHeight: 320, display: 'grid', placeItems: 'center' }}><CircularProgress /></Box>}>
+                  <ConsolePage />
+                </Suspense>
+              }
+            />
             <Route path="/compute/containers" element={<PlaceholderPage title="Containers" description="Manage Docker, Podman, and system containers." />} />
             <Route path="/configuration/storage" element={<PlaceholderPage title="Storage" description="Configure image and workload storage." />} />
             <Route path="/configuration/networking" element={<PlaceholderPage title="Networking" description="Configure host bridges and workload networks." />} />
