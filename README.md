@@ -1,12 +1,13 @@
 # App Runner
 
-App Runner is a web-based control plane for virtual machines and containers. The project currently contains the management shell and its Go/Twirp API foundation.
+App Runner is a single-user web control plane for local QEMU/KVM virtual machines. It packages the Go/Twirp backend, React management interface, and noVNC console client in one executable.
 
 ## Requirements
 
 - Go 1.25 or newer
 - Node.js and npm
 - Buf, only when regenerating protobuf sources
+- `qemu-system-x86_64`, `qemu-img`, and access to `/dev/kvm` to run VMs
 
 ## Development
 
@@ -43,6 +44,58 @@ make build
 ```
 
 The production application is then available at <http://localhost:8080>. Use `-listen` to select another address, for example `./bin/app-runner -listen 127.0.0.1:9000`.
+
+App Runner currently has no authentication and therefore listens on loopback by default. Do not expose it to an untrusted network.
+
+## Configuration and storage
+
+App Runner reads `app-runner.json` from its current directory when the file exists. Start from [app-runner.example.json](app-runner.example.json) if custom settings are needed. Relative paths are resolved from the current directory.
+
+```json
+{
+  "listen": "127.0.0.1:8080",
+  "iso_dir": "iso",
+  "disk_dir": "disk",
+  "bridge_name": "br0",
+  "qemu_binary": "qemu-system-x86_64",
+  "qemu_img_binary": "qemu-img"
+}
+```
+
+Without configuration, `iso/` and `disk/` are created automatically. Place installation images in `iso/`; the UI lists files ending in `.iso`. VM definitions, qcow2 disks, and local QEMU runtime sockets live under `disk/`.
+
+Command-line values override the configuration file:
+
+```sh
+./bin/app-runner \
+  -config ./app-runner.json \
+  -listen 127.0.0.1:9000 \
+  -iso-dir ./images \
+  -disk-dir ./virtual-machines \
+  -bridge br0
+```
+
+Use `-qemu` and `-qemu-img` when those binaries are not on the normal executable path.
+
+## VM networking
+
+User-mode NAT works without host network setup. Bridge mode connects a VM to the configured Linux bridge and relies on QEMU's bridge helper. App Runner logs a warning and shows dismissible guidance in the UI when the bridge cannot be used.
+
+A typical Linux setup requires:
+
+- an active bridge such as `br0`;
+- `allow br0` in `/etc/qemu/bridge.conf`;
+- an installed and executable `qemu-bridge-helper` with the permissions configured by the distribution;
+- access to `/dev/net/tun`, normally through the device's owning group; and
+- membership in the `kvm` group, or equivalent ACL access, for `/dev/kvm`.
+
+Exact bridge creation and physical-interface attachment commands are distribution and network specific. Changing them can interrupt the host's network connection, so configure the bridge outside App Runner.
+
+## VM lifecycle and console
+
+The UI can create, start, gracefully shut down, force stop, and delete persistent VM definitions. VMs use the Q35 machine, KVM acceleration, the host CPU model, qcow2 disks, virtio devices, and either NAT or bridge networking.
+
+Each running VM exposes VNC only through a local Unix socket. The Go backend proxies the binary connection to the embedded noVNC client at the VM's console route; no QEMU VNC TCP port is opened.
 
 ## RPC source generation
 

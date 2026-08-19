@@ -24,7 +24,7 @@ type config struct {
 
 func defaultConfig(workingDirectory string) config {
 	return config{
-		Listen:        ":8080",
+		Listen:        "127.0.0.1:8080",
 		ISODir:        filepath.Join(workingDirectory, "iso"),
 		DiskDir:       filepath.Join(workingDirectory, "disk"),
 		BridgeName:    "br0",

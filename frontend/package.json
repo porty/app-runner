@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:all": "concurrently --kill-others --names backend,frontend --prefix-colors blue,magenta \"go run ..\" \"vite --host\"",
+    "dev:all": "concurrently --kill-others --names backend,frontend --prefix-colors blue,magenta \"go -C .. run .\" \"vite --host\"",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
