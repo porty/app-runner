@@ -195,7 +195,7 @@ export default function NetworkingPage() {
       </TableContainer>
 
       <Typography variant="h5" sx={{ mt: 4, mb: 2 }}>Backend diagnostics</Typography>
-      <DiagnosticList diagnostics={status?.diagnostics ?? []} />
+      <DiagnosticTable diagnostics={status?.diagnostics ?? []} />
 
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle>Create Linux bridge</DialogTitle>
@@ -358,6 +358,49 @@ function DiagnosticList({ diagnostics, compact = false }: { diagnostics: Network
         )
       })}
     </Stack>
+  )
+}
+
+function DiagnosticTable({ diagnostics }: { diagnostics: NetworkDiagnostic[] }) {
+  if (diagnostics.length === 0) return <Typography color="text.secondary">No diagnostics reported.</Typography>
+
+  return (
+    <TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>Status</TableCell>
+            <TableCell>Check</TableCell>
+            <TableCell>Diagnostic result</TableCell>
+            <TableCell>Remediation</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {diagnostics.map((diagnostic) => {
+            const presentation = diagnostic.status === 'DIAGNOSTIC_STATUS_FAIL'
+              ? { color: 'error' as const, icon: <ErrorOutlineRounded />, label: 'Failed' }
+              : diagnostic.status === 'DIAGNOSTIC_STATUS_WARNING'
+                ? { color: 'warning' as const, icon: <WarningAmberRounded />, label: 'Warning' }
+                : diagnostic.status === 'DIAGNOSTIC_STATUS_PASS'
+                  ? { color: 'success' as const, icon: <CheckCircleRounded />, label: 'Passed' }
+                  : { color: 'default' as const, icon: undefined, label: 'Unknown' }
+
+            return (
+              <TableRow key={diagnostic.key} hover>
+                <TableCell sx={{ verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                  <Chip size="small" color={presentation.color} icon={presentation.icon} label={presentation.label} />
+                </TableCell>
+                <TableCell sx={{ verticalAlign: 'top', fontWeight: 650 }}>{diagnostic.label}</TableCell>
+                <TableCell sx={{ verticalAlign: 'top' }}>{diagnostic.detail}</TableCell>
+                <TableCell sx={{ verticalAlign: 'top' }}>
+                  {diagnostic.remediation || <Typography component="span" color="text.secondary">—</Typography>}
+                </TableCell>
+              </TableRow>
+            )
+          })}
+        </TableBody>
+      </Table>
+    </TableContainer>
   )
 }
 
