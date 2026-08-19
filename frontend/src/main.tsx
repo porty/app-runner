@@ -5,6 +5,12 @@ import { CssBaseline, ThemeProvider, createTheme } from '@mui/material'
 
 import App from './App'
 import './index.css'
+import {
+  defaultRefreshSpeed,
+  isRefreshSpeed,
+  refreshSpeedStorageKey,
+  type RefreshSpeed,
+} from './refreshSettings'
 
 type ColourMode = 'light' | 'dark'
 
@@ -16,8 +22,14 @@ function initialColourMode(): ColourMode {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
+function initialRefreshSpeed(): RefreshSpeed {
+  const savedSpeed = localStorage.getItem(refreshSpeedStorageKey)
+  return isRefreshSpeed(savedSpeed) ? savedSpeed : defaultRefreshSpeed(window.location.hostname)
+}
+
 function Root() {
   const [mode, setMode] = useState<ColourMode>(initialColourMode)
+  const [refreshSpeed, setRefreshSpeed] = useState<RefreshSpeed>(initialRefreshSpeed)
   const theme = useMemo(
     () =>
       createTheme({
@@ -57,11 +69,21 @@ function Root() {
     })
   }
 
+  const changeRefreshSpeed = (speed: RefreshSpeed) => {
+    localStorage.setItem(refreshSpeedStorageKey, speed)
+    setRefreshSpeed(speed)
+  }
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <BrowserRouter>
-        <App mode={mode} onToggleMode={toggleMode} />
+        <App
+          mode={mode}
+          onToggleMode={toggleMode}
+          refreshSpeed={refreshSpeed}
+          onRefreshSpeedChange={changeRefreshSpeed}
+        />
       </BrowserRouter>
     </ThemeProvider>
   )
@@ -72,4 +94,3 @@ createRoot(document.getElementById('root')!).render(
     <Root />
   </StrictMode>,
 )
-

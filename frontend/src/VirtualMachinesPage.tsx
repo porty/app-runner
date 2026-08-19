@@ -62,7 +62,7 @@ const statusDetails: Record<VMStatus, { label: string; color: 'default' | 'succe
   VM_STATUS_ERROR: { label: 'Error', color: 'error' },
 }
 
-export default function VirtualMachinesPage() {
+export default function VirtualMachinesPage({ refreshInterval }: { refreshInterval: number | null }) {
   const [virtualMachines, setVirtualMachines] = useState<VirtualMachine[]>([])
   const [images, setImages] = useState<ISOImage[]>([])
   const [networking, setNetworking] = useState<NetworkingStatus | null>(null)
@@ -95,9 +95,10 @@ export default function VirtualMachinesPage() {
 
   useEffect(() => {
     void refresh(true)
-    const timer = window.setInterval(() => void refresh(), 3000)
+    if (refreshInterval === null) return
+    const timer = window.setInterval(() => void refresh(), refreshInterval)
     return () => window.clearInterval(timer)
-  }, [refresh])
+  }, [refresh, refreshInterval])
 
   const runOperation = async (id: string, operation: () => Promise<unknown>) => {
     setBusyID(id)

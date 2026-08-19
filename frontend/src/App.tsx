@@ -15,6 +15,7 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  MenuItem,
   Stack,
   TextField,
   Toolbar,
@@ -45,6 +46,7 @@ import { echo, ping, type PingResponse } from './api'
 import HostWarnings from './HostWarnings'
 import NetworkingPage from './NetworkingPage'
 import VirtualMachinesPage from './VirtualMachinesPage'
+import { refreshIntervals, type RefreshSpeed } from './refreshSettings'
 
 const ConsolePage = lazy(() => import('./ConsolePage'))
 
@@ -54,6 +56,8 @@ const collapsedWidth = 76
 interface AppProps {
   mode: 'light' | 'dark'
   onToggleMode: () => void
+  refreshSpeed: RefreshSpeed
+  onRefreshSpeedChange: (speed: RefreshSpeed) => void
 }
 
 interface NavigationGroup {
@@ -337,7 +341,7 @@ function PlaceholderPage({ title, description }: { title: string; description: s
   )
 }
 
-export default function App({ mode, onToggleMode }: AppProps) {
+export default function App({ mode, onToggleMode, refreshSpeed, onRefreshSpeedChange }: AppProps) {
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
   const drawerWidth = sidebarExpanded ? expandedWidth : collapsedWidth
 
@@ -365,11 +369,27 @@ export default function App({ mode, onToggleMode }: AppProps) {
               Control plane workspace
             </Typography>
           </Box>
-          <Tooltip title={`Use ${mode === 'dark' ? 'light' : 'dark'} mode`}>
-            <IconButton onClick={onToggleMode} aria-label={`Use ${mode === 'dark' ? 'light' : 'dark'} mode`}>
-              {mode === 'dark' ? <Brightness7Rounded /> : <Brightness4Rounded />}
-            </IconButton>
-          </Tooltip>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            <TextField
+              select
+              size="small"
+              label="Auto update"
+              value={refreshSpeed}
+              onChange={(event) => onRefreshSpeedChange(event.target.value as RefreshSpeed)}
+              sx={{ minWidth: 142 }}
+              slotProps={{ select: { inputProps: { 'aria-label': 'Automatic update speed' } } }}
+            >
+              <MenuItem value="pause">⏸️ Paused</MenuItem>
+              <MenuItem value="turtle">🐢 Turtle</MenuItem>
+              <MenuItem value="llama">🦙 Llama</MenuItem>
+              <MenuItem value="cheetah">🐆 Cheetah</MenuItem>
+            </TextField>
+            <Tooltip title={`Use ${mode === 'dark' ? 'light' : 'dark'} mode`}>
+              <IconButton onClick={onToggleMode} aria-label={`Use ${mode === 'dark' ? 'light' : 'dark'} mode`}>
+                {mode === 'dark' ? <Brightness7Rounded /> : <Brightness4Rounded />}
+              </IconButton>
+            </Tooltip>
+          </Stack>
         </Toolbar>
       </AppBar>
       <Box
@@ -386,7 +406,7 @@ export default function App({ mode, onToggleMode }: AppProps) {
           <Routes>
             <Route path="/" element={<Overview />} />
             <Route path="/activity" element={<PlaceholderPage title="Activity" description="Recent control plane events and operations." />} />
-            <Route path="/compute/virtual-machines" element={<VirtualMachinesPage />} />
+            <Route path="/compute/virtual-machines" element={<VirtualMachinesPage refreshInterval={refreshIntervals[refreshSpeed]} />} />
             <Route
               path="/compute/virtual-machines/:id/console"
               element={
@@ -397,7 +417,7 @@ export default function App({ mode, onToggleMode }: AppProps) {
             />
             <Route path="/compute/containers" element={<PlaceholderPage title="Containers" description="Manage Docker, Podman, and system containers." />} />
             <Route path="/configuration/storage" element={<PlaceholderPage title="Storage" description="Configure image and workload storage." />} />
-            <Route path="/configuration/networking" element={<NetworkingPage />} />
+            <Route path="/configuration/networking" element={<NetworkingPage refreshInterval={refreshIntervals[refreshSpeed]} />} />
             <Route path="/configuration/preferences" element={<PlaceholderPage title="Preferences" description="Tune the App Runner experience." />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

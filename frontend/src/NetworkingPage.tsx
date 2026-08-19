@@ -52,7 +52,7 @@ import {
   type PendingNetworkChange,
 } from './api'
 
-export default function NetworkingPage() {
+export default function NetworkingPage({ refreshInterval }: { refreshInterval: number | null }) {
   const [status, setStatus] = useState<NetworkingStatus | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -77,9 +77,10 @@ export default function NetworkingPage() {
 
   useEffect(() => {
     void refresh(true)
-    const timer = window.setInterval(() => void refresh(), 2000)
+    if (refreshInterval === null) return
+    const timer = window.setInterval(() => void refresh(), refreshInterval)
     return () => window.clearInterval(timer)
-  }, [refresh])
+  }, [refresh, refreshInterval])
 
   const apply = async (change: NetworkChangeRequest) => {
     setBusy(true)
