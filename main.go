@@ -23,9 +23,6 @@ func main() {
 
 	capabilities := func() hostCapabilities { return detectHostCapabilities(settings) }
 	hostStatus := capabilities()
-	if !hostStatus.BridgeAvailable {
-		slog.Warn("bridge networking is unavailable", "bridge", settings.BridgeName, "help", hostStatus.BridgeWarning)
-	}
 	if !hostStatus.QEMUAvailable {
 		slog.Warn("QEMU is unavailable", "binary", settings.QEMUBinary)
 	}
@@ -37,9 +34,25 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
+	networkProvider := newLinuxNetworkProvider()
+	manager.bridgeCapability = networkProvider.BridgeCapability
+	networking, err := newNetworkManager(networkProvider, manager, settings.DiskDir)
+	if err != nil {
+		fatal(err)
+	}
+	networkStatus, err := networking.Status()
+	if err != nil {
+		slog.Warn("network diagnostics are unavailable", "error", err)
+	} else {
+		for _, diagnostic := range networkStatus.Diagnostics {
+			if diagnostic.Status == diagnosticFail {
+				slog.Warn("network diagnostic failed", "check", diagnostic.Label, "detail", diagnostic.Detail, "remediation", diagnostic.Remediation)
+			}
+		}
+	}
 	server := &http.Server{
 		Addr:    settings.Listen,
-		Handler: newHTTPHandler(productionFrontend(), appRuntime{manager: manager, capabilities: capabilities}),
+		Handler: newHTTPHandler(productionFrontend(), appRuntime{manager: manager, networking: networking, capabilities: capabilities}),
 	}
 
 	slog.Info("App Runner listening", "address", settings.Listen, "iso_dir", settings.ISODir, "disk_dir", settings.DiskDir)

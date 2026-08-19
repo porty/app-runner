@@ -106,7 +106,7 @@ func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
 	}
 	if vm.NetworkMode == networkModeBridge {
 		arguments = append(arguments,
-			"-netdev", "bridge,id=net0,br="+q.settings.BridgeName,
+			"-netdev", "bridge,id=net0,br="+vm.BridgeName,
 			"-device", "virtio-net-pci,netdev=net0",
 		)
 	} else {

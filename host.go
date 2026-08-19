@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
 func detectHostCapabilities(settings config) hostCapabilities {
@@ -51,23 +50,30 @@ func detectBridgeCapability(bridgeName string) (bool, string) {
 }
 
 func findQEMUBridgeHelper() string {
-	if path, err := exec.LookPath("qemu-bridge-helper"); err == nil {
-		return path
+	path := locateQEMUBridgeHelper()
+	if path == "" {
+		return ""
 	}
-	for _, candidate := range []string{"/usr/lib/qemu/qemu-bridge-helper", "/usr/libexec/qemu-bridge-helper"} {
-		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
-			return candidate
-		}
+	if info, err := os.Stat(path); err == nil && info.Mode()&0o111 != 0 {
+		return path
 	}
 	return ""
 }
 
-func bridgeConfigurationAllows(configuration, bridgeName string) bool {
-	for _, line := range strings.Split(configuration, "\n") {
-		fields := strings.Fields(strings.SplitN(line, "#", 2)[0])
-		if len(fields) == 2 && fields[0] == "allow" && (fields[1] == "all" || fields[1] == bridgeName) {
-			return true
+func locateQEMUBridgeHelper() string {
+	if path, err := exec.LookPath("qemu-bridge-helper"); err == nil {
+		return path
+	}
+	for _, directory := range filepath.SplitList(os.Getenv("PATH")) {
+		candidate := filepath.Join(directory, "qemu-bridge-helper")
+		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
+			return candidate
 		}
 	}
-	return false
+	for _, candidate := range []string{"/usr/lib/qemu/qemu-bridge-helper", "/usr/libexec/qemu-bridge-helper"} {
+		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
+			return candidate
+		}
+	}
+	return ""
 }

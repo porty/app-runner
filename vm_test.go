@@ -79,6 +79,7 @@ func newTestVMManager(t *testing.T) (*vmManager, *fakeHypervisor, config) {
 		t.Fatal(err)
 	}
 	manager.newID = func() (string, error) { return "vm-id", nil }
+	manager.bridgeCapability = func(string) (bool, string) { return true, "" }
 	manager.now = func() time.Time { return time.Date(2026, 8, 19, 1, 2, 3, 0, time.UTC) }
 	return manager, hypervisor, settings
 }
@@ -150,7 +151,7 @@ func TestVMManagerPersistsDefinitions(t *testing.T) {
 	manager.newID = func() (string, error) { return "persistent-id", nil }
 	if _, err := manager.Create(context.Background(), createVMOptions{
 		Name: "Persistent", CPUs: 1, MemoryMiB: 1024, DiskGiB: 10,
-		ISOName: "installer.iso", NetworkMode: networkModeBridge,
+		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br0",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -167,15 +168,10 @@ func TestVMManagerPersistsDefinitions(t *testing.T) {
 
 func TestVMManagerRejectsUnavailableBridgeAtStart(t *testing.T) {
 	manager, _, _ := newTestVMManager(t)
-	manager.capabilities = func() hostCapabilities {
-		return hostCapabilities{
-			QEMUAvailable: true, KVMAvailable: true, BridgeAvailable: false,
-			BridgeWarning: "bridge br0 is unavailable",
-		}
-	}
+	manager.bridgeCapability = func(string) (bool, string) { return false, "bridge br0 is unavailable" }
 	vm, err := manager.Create(context.Background(), createVMOptions{
 		Name: "Bridge VM", CPUs: 1, MemoryMiB: 1024, DiskGiB: 10,
-		ISOName: "installer.iso", NetworkMode: networkModeBridge,
+		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br0",
 	})
 	if err != nil {
 		t.Fatal(err)

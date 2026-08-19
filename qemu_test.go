@@ -86,7 +86,7 @@ func TestQEMUArgumentsSupportBridgeNetworking(t *testing.T) {
 	settings := defaultConfig(t.TempDir())
 	settings.BridgeName = "lab0"
 	qemu := newQEMUHypervisor(settings)
-	arguments := qemu.arguments(virtualMachine{ID: "vm-id", ISOName: "installer.iso", NetworkMode: networkModeBridge})
+	arguments := qemu.arguments(virtualMachine{ID: "vm-id", ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "lab0"})
 
 	if !slices.Contains(arguments, "bridge,id=net0,br=lab0") {
 		t.Fatalf("bridge network arguments are missing: %#v", arguments)

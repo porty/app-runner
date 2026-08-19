@@ -58,6 +58,7 @@ type virtualMachine struct {
 	DiskGiB     uint32      `json:"disk_gib"`
 	ISOName     string      `json:"iso_name"`
 	NetworkMode networkMode `json:"network_mode"`
+	BridgeName  string      `json:"bridge_name,omitempty"`
 	Status      vmStatus    `json:"status"`
 	CreatedAt   time.Time   `json:"created_at"`
 	LastError   string      `json:"last_error,omitempty"`
@@ -71,6 +72,7 @@ type createVMOptions struct {
 	DiskGiB     uint32
 	ISOName     string
 	NetworkMode networkMode
+	BridgeName  string
 }
 
 type isoImage struct {
@@ -100,14 +102,15 @@ type virtualMachineStore interface {
 }
 
 type vmManager struct {
-	mu           sync.Mutex
-	settings     config
-	store        virtualMachineStore
-	hypervisor   hypervisor
-	capabilities func() hostCapabilities
-	now          func() time.Time
-	newID        func() (string, error)
-	vms          []virtualMachine
+	mu               sync.Mutex
+	settings         config
+	store            virtualMachineStore
+	hypervisor       hypervisor
+	capabilities     func() hostCapabilities
+	bridgeCapability func(string) (bool, string)
+	now              func() time.Time
+	newID            func() (string, error)
+	vms              []virtualMachine
 }
 
 func newVMManager(settings config, store virtualMachineStore, hypervisor hypervisor, capabilities func() hostCapabilities) (*vmManager, error) {
@@ -124,8 +127,25 @@ func newVMManager(settings config, store virtualMachineStore, hypervisor hypervi
 		newID:        randomID,
 		vms:          vms,
 	}
+	manager.bridgeCapability = func(name string) (bool, string) {
+		status := capabilities()
+		if name == status.BridgeName {
+			return status.BridgeAvailable, status.BridgeWarning
+		}
+		return detectBridgeCapability(name)
+	}
 	manager.mu.Lock()
+	migratedBridgeNames := false
+	for index := range manager.vms {
+		if manager.vms[index].NetworkMode == networkModeBridge && manager.vms[index].BridgeName == "" {
+			manager.vms[index].BridgeName = settings.BridgeName
+			migratedBridgeNames = true
+		}
+	}
 	err = manager.reconcileLocked()
+	if err == nil && migratedBridgeNames {
+		err = manager.store.Save(manager.vms)
+	}
 	manager.mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -185,6 +205,7 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 		DiskGiB:     options.DiskGiB,
 		ISOName:     options.ISOName,
 		NetworkMode: options.NetworkMode,
+		BridgeName:  options.BridgeName,
 		Status:      vmStatusStopped,
 		CreatedAt:   m.now().UTC(),
 	}
@@ -222,8 +243,11 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 	if !capabilities.KVMAvailable {
 		return virtualMachine{}, fmt.Errorf("%w: KVM is not available to the current user", errHostUnavailable)
 	}
-	if vm.NetworkMode == networkModeBridge && !capabilities.BridgeAvailable {
-		return virtualMachine{}, fmt.Errorf("%w: %s", errBridgeUnavailable, capabilities.BridgeWarning)
+	if vm.NetworkMode == networkModeBridge {
+		available, warning := m.bridgeCapability(vm.BridgeName)
+		if !available {
+			return virtualMachine{}, fmt.Errorf("%w: %s", errBridgeUnavailable, warning)
+		}
 	}
 	if _, err := os.Stat(m.diskPath(vm.ID)); err != nil {
 		return virtualMachine{}, fmt.Errorf("system disk is unavailable: %w", err)
@@ -400,6 +424,11 @@ func (m *vmManager) validateCreateOptions(options createVMOptions) error {
 	}
 	if options.NetworkMode != networkModeNAT && options.NetworkMode != networkModeBridge {
 		return &fieldError{field: "network_mode", message: "must be NAT or bridge"}
+	}
+	if options.NetworkMode == networkModeBridge {
+		if err := validateInterfaceName(options.BridgeName); err != nil {
+			return &fieldError{field: "bridge_name", message: err.Error()}
+		}
 	}
 	if options.ISOName == "" || filepath.Base(options.ISOName) != options.ISOName || !strings.EqualFold(filepath.Ext(options.ISOName), ".iso") {
 		return &fieldError{field: "iso_name", message: "must name an ISO file in the configured ISO directory"}

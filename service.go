@@ -13,12 +13,17 @@ import (
 
 type appRunnerService struct {
 	manager      *vmManager
+	networking   *networkManager
 	capabilities func() hostCapabilities
 	now          func() time.Time
 }
 
-func newAppRunnerService(manager *vmManager, capabilities func() hostCapabilities) *appRunnerService {
-	return &appRunnerService{manager: manager, capabilities: capabilities, now: time.Now}
+func newAppRunnerService(manager *vmManager, capabilities func() hostCapabilities, networking ...*networkManager) *appRunnerService {
+	service := &appRunnerService{manager: manager, capabilities: capabilities, now: time.Now}
+	if len(networking) != 0 {
+		service.networking = networking[0]
+	}
+	return service
 }
 
 func (s *appRunnerService) Ping(context.Context, *apprunnerv1.PingRequest) (*apprunnerv1.PingResponse, error) {
@@ -102,6 +107,7 @@ func (s *appRunnerService) CreateVM(ctx context.Context, request *apprunnerv1.Cr
 	vm, err := s.manager.Create(ctx, createVMOptions{
 		Name: request.GetName(), CPUs: request.GetCpus(), MemoryMiB: request.GetMemoryMib(),
 		DiskGiB: request.GetDiskGib(), ISOName: request.GetIsoName(), NetworkMode: mode,
+		BridgeName: request.GetBridgeName(),
 	})
 	if err != nil {
 		return nil, rpcError(err)
@@ -141,6 +147,72 @@ func (s *appRunnerService) DeleteVM(_ context.Context, request *apprunnerv1.Dele
 	return &apprunnerv1.DeleteVMResponse{Id: request.GetId()}, nil
 }
 
+func (s *appRunnerService) GetNetworkingStatus(context.Context, *apprunnerv1.GetNetworkingStatusRequest) (*apprunnerv1.GetNetworkingStatusResponse, error) {
+	if s.networking == nil {
+		return nil, twirp.InternalError("network manager is not configured")
+	}
+	status, err := s.networking.Status()
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.GetNetworkingStatusResponse{Status: networkingStatusToProto(status)}, nil
+}
+
+func (s *appRunnerService) ApplyNetworkChange(ctx context.Context, request *apprunnerv1.ApplyNetworkChangeRequest) (*apprunnerv1.ApplyNetworkChangeResponse, error) {
+	if s.networking == nil {
+		return nil, twirp.InternalError("network manager is not configured")
+	}
+	if !isLoopbackRequest(ctx) {
+		return nil, twirp.NewError(twirp.PermissionDenied, "network changes are accepted only from a browser connected through loopback")
+	}
+	changeType, err := networkChangeTypeFromProto(request.GetType())
+	if err != nil {
+		return nil, err
+	}
+	pending, err := s.networking.Apply(ctx, networkChange{
+		Type: changeType, BridgeName: request.GetBridgeName(), InterfaceName: request.GetInterfaceName(),
+		MigrateAddresses: request.GetMigrateAddresses(),
+	})
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.ApplyNetworkChangeResponse{PendingChange: pendingNetworkChangeToProto(&pending)}, nil
+}
+
+func (s *appRunnerService) ConfirmNetworkChange(ctx context.Context, request *apprunnerv1.ConfirmNetworkChangeRequest) (*apprunnerv1.ConfirmNetworkChangeResponse, error) {
+	if s.networking == nil {
+		return nil, twirp.InternalError("network manager is not configured")
+	}
+	if !isLoopbackRequest(ctx) {
+		return nil, twirp.NewError(twirp.PermissionDenied, "network changes are accepted only from a browser connected through loopback")
+	}
+	if err := s.networking.Confirm(request.GetId()); err != nil {
+		return nil, rpcError(err)
+	}
+	status, err := s.networking.Status()
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.ConfirmNetworkChangeResponse{Status: networkingStatusToProto(status)}, nil
+}
+
+func (s *appRunnerService) RevertNetworkChange(ctx context.Context, request *apprunnerv1.RevertNetworkChangeRequest) (*apprunnerv1.RevertNetworkChangeResponse, error) {
+	if s.networking == nil {
+		return nil, twirp.InternalError("network manager is not configured")
+	}
+	if !isLoopbackRequest(ctx) {
+		return nil, twirp.NewError(twirp.PermissionDenied, "network changes are accepted only from a browser connected through loopback")
+	}
+	if err := s.networking.Revert(request.GetId()); err != nil {
+		return nil, rpcError(err)
+	}
+	status, err := s.networking.Status()
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.RevertNetworkChangeResponse{Status: networkingStatusToProto(status)}, nil
+}
+
 func (s *appRunnerService) requireManager() error {
 	if s.manager == nil {
 		return twirp.InternalError("virtual machine manager is not configured")
@@ -166,7 +238,7 @@ func virtualMachineToProto(vm virtualMachine) *apprunnerv1.VirtualMachine {
 	}
 	return &apprunnerv1.VirtualMachine{
 		Id: vm.ID, Name: vm.Name, Cpus: vm.CPUs, MemoryMib: vm.MemoryMiB, DiskGib: vm.DiskGiB,
-		IsoName: vm.ISOName, NetworkMode: mode, Status: status,
+		IsoName: vm.ISOName, NetworkMode: mode, Status: status, BridgeName: vm.BridgeName,
 		CreatedAt: vm.CreatedAt.Format(time.RFC3339), LastError: vm.LastError,
 		ConsolePath: "/console/" + vm.ID,
 	}
@@ -197,5 +269,89 @@ func rpcError(err error) error {
 		return twirp.NewError(twirp.FailedPrecondition, err.Error())
 	default:
 		return twirp.InternalError(fmt.Sprintf("virtual machine operation failed: %v", err))
+	}
+}
+
+func networkingStatusToProto(status networkingStatus) *apprunnerv1.NetworkingStatus {
+	response := &apprunnerv1.NetworkingStatus{
+		User: &apprunnerv1.UserIdentity{
+			Username: status.User.Username, Uid: status.User.UID, Groups: status.User.Groups,
+			IsRoot: status.User.IsRoot, HasCapNetAdmin: status.User.HasCAPNetAdmin,
+		},
+		CanManage:     status.CanManage,
+		PendingChange: pendingNetworkChangeToProto(status.Pending),
+	}
+	for _, diagnostic := range status.Diagnostics {
+		response.Diagnostics = append(response.Diagnostics, networkDiagnosticToProto(diagnostic))
+	}
+	for _, networkInterface := range status.Interfaces {
+		response.Interfaces = append(response.Interfaces, &apprunnerv1.NetworkInterface{
+			Name: networkInterface.Name, IsUp: networkInterface.IsUp, Mtu: networkInterface.MTU,
+			HardwareAddress: networkInterface.HardwareAddress, Addresses: networkInterface.Addresses,
+			Master: networkInterface.Master, IsBridge: networkInterface.IsBridge, CanAttach: networkInterface.CanAttach,
+		})
+	}
+	for _, bridge := range status.Bridges {
+		mapped := &apprunnerv1.NetworkBridge{
+			Name: bridge.Name, IsUp: bridge.IsUp, Mtu: bridge.MTU,
+			HardwareAddress: bridge.HardwareAddress, Addresses: bridge.Addresses,
+			MemberInterfaces: bridge.MemberInterfaces, UsableByQemu: bridge.UsableByQEMU,
+		}
+		for _, diagnostic := range bridge.Diagnostics {
+			mapped.Diagnostics = append(mapped.Diagnostics, networkDiagnosticToProto(diagnostic))
+		}
+		for _, workload := range bridge.Workloads {
+			mapped.Workloads = append(mapped.Workloads, &apprunnerv1.WorkloadAttachment{
+				Id: workload.ID, Name: workload.Name, WorkloadType: workload.Type, Running: workload.Running,
+			})
+		}
+		response.Bridges = append(response.Bridges, mapped)
+	}
+	return response
+}
+
+func networkDiagnosticToProto(diagnostic networkDiagnostic) *apprunnerv1.NetworkDiagnostic {
+	status := apprunnerv1.DiagnosticStatus_DIAGNOSTIC_STATUS_UNSPECIFIED
+	switch diagnostic.Status {
+	case diagnosticPass:
+		status = apprunnerv1.DiagnosticStatus_DIAGNOSTIC_STATUS_PASS
+	case diagnosticWarning:
+		status = apprunnerv1.DiagnosticStatus_DIAGNOSTIC_STATUS_WARNING
+	case diagnosticFail:
+		status = apprunnerv1.DiagnosticStatus_DIAGNOSTIC_STATUS_FAIL
+	case diagnosticInfo:
+		status = apprunnerv1.DiagnosticStatus_DIAGNOSTIC_STATUS_INFO
+	}
+	return &apprunnerv1.NetworkDiagnostic{
+		Key: diagnostic.Key, Label: diagnostic.Label, Status: status,
+		Detail: diagnostic.Detail, Remediation: diagnostic.Remediation,
+	}
+}
+
+func pendingNetworkChangeToProto(pending *pendingNetworkChange) *apprunnerv1.PendingNetworkChange {
+	if pending == nil {
+		return nil
+	}
+	return &apprunnerv1.PendingNetworkChange{
+		Id: pending.ID, Description: pending.Description, ExpiresAt: pending.ExpiresAt.UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func networkChangeTypeFromProto(changeType apprunnerv1.NetworkChangeType) (networkChangeType, error) {
+	switch changeType {
+	case apprunnerv1.NetworkChangeType_NETWORK_CHANGE_TYPE_CREATE_BRIDGE:
+		return networkChangeCreateBridge, nil
+	case apprunnerv1.NetworkChangeType_NETWORK_CHANGE_TYPE_DELETE_BRIDGE:
+		return networkChangeDeleteBridge, nil
+	case apprunnerv1.NetworkChangeType_NETWORK_CHANGE_TYPE_SET_BRIDGE_UP:
+		return networkChangeSetBridgeUp, nil
+	case apprunnerv1.NetworkChangeType_NETWORK_CHANGE_TYPE_SET_BRIDGE_DOWN:
+		return networkChangeSetBridgeDown, nil
+	case apprunnerv1.NetworkChangeType_NETWORK_CHANGE_TYPE_ATTACH_INTERFACE:
+		return networkChangeAttachInterface, nil
+	case apprunnerv1.NetworkChangeType_NETWORK_CHANGE_TYPE_DETACH_INTERFACE:
+		return networkChangeDetachInterface, nil
+	default:
+		return "", twirp.InvalidArgumentError("type", "unsupported network change")
 	}
 }

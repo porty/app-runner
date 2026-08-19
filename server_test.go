@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,28 @@ func TestSPAHandlerServesRouteFallback(t *testing.T) {
 	}
 	if response.Body.String() != "<html>app</html>" {
 		t.Fatalf("expected SPA index, got %q", response.Body.String())
+	}
+}
+
+func TestClientAddressContextAllowsOnlyLoopback(t *testing.T) {
+	var loopback bool
+	handler := withClientAddress(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		loopback = isLoopbackRequest(request.Context())
+	}))
+
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	request.RemoteAddr = "127.0.0.1:12345"
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	if !loopback {
+		t.Fatal("loopback request was not identified")
+	}
+
+	loopback = true
+	request = request.WithContext(context.Background())
+	request.RemoteAddr = "192.0.2.10:12345"
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	if loopback {
+		t.Fatal("remote request was identified as loopback")
 	}
 }
 
