@@ -12,7 +12,7 @@ describe('Twirp API client', () => {
       new Response(
         JSON.stringify({
           message: 'App Runner backend is ready',
-          serverTime: '2026-08-19T05:30:00Z',
+          server_time: '2026-08-19T05:30:00Z',
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
@@ -42,4 +42,3 @@ describe('Twirp API client', () => {
     await expect(echo('')).rejects.toThrow('a message is required')
   })
 })
-

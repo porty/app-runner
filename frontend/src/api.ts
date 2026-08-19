@@ -2,7 +2,7 @@ const servicePath = '/twirp/apprunner.v1.AppRunnerService'
 
 export interface PingResponse {
   message: string
-  serverTime: string
+  server_time: string
 }
 
 export interface EchoResponse {
@@ -48,4 +48,3 @@ export function ping(): Promise<PingResponse> {
 export function echo(message: string): Promise<EchoResponse> {
   return callTwirp<EchoResponse>('Echo', { message })
 }
-

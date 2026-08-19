@@ -258,7 +258,7 @@ function Overview() {
                   {pingResult.message}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Server time: {pingResult.serverTime}
+                  Server time: {pingResult.server_time}
                 </Typography>
               </Box>
             )}
