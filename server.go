@@ -11,10 +11,22 @@ import (
 	apprunnerv1 "github.com/roflware/app-runner/internal/gen/apprunner/v1"
 )
 
-func newHTTPHandler(frontend fs.FS) http.Handler {
+type appRuntime struct {
+	manager      *vmManager
+	capabilities func() hostCapabilities
+}
+
+func newHTTPHandler(frontend fs.FS, runtimes ...appRuntime) http.Handler {
+	var runtime appRuntime
+	if len(runtimes) != 0 {
+		runtime = runtimes[0]
+	}
 	mux := http.NewServeMux()
-	rpcServer := apprunnerv1.NewAppRunnerServiceServer(newAppRunnerService())
+	rpcServer := apprunnerv1.NewAppRunnerServiceServer(newAppRunnerService(runtime.manager, runtime.capabilities))
 	mux.Handle(rpcServer.PathPrefix(), rpcServer)
+	if runtime.manager != nil {
+		mux.Handle("/console/", consoleProxyHandler(runtime.manager))
+	}
 
 	if frontend == nil {
 		mux.HandleFunc("/", developmentInfo)

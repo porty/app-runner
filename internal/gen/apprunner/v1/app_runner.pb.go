@@ -21,6 +21,110 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type VMStatus int32
+
+const (
+	VMStatus_VM_STATUS_UNSPECIFIED VMStatus = 0
+	VMStatus_VM_STATUS_STOPPED     VMStatus = 1
+	VMStatus_VM_STATUS_RUNNING     VMStatus = 2
+	VMStatus_VM_STATUS_STOPPING    VMStatus = 3
+	VMStatus_VM_STATUS_ERROR       VMStatus = 4
+)
+
+// Enum value maps for VMStatus.
+var (
+	VMStatus_name = map[int32]string{
+		0: "VM_STATUS_UNSPECIFIED",
+		1: "VM_STATUS_STOPPED",
+		2: "VM_STATUS_RUNNING",
+		3: "VM_STATUS_STOPPING",
+		4: "VM_STATUS_ERROR",
+	}
+	VMStatus_value = map[string]int32{
+		"VM_STATUS_UNSPECIFIED": 0,
+		"VM_STATUS_STOPPED":     1,
+		"VM_STATUS_RUNNING":     2,
+		"VM_STATUS_STOPPING":    3,
+		"VM_STATUS_ERROR":       4,
+	}
+)
+
+func (x VMStatus) Enum() *VMStatus {
+	p := new(VMStatus)
+	*p = x
+	return p
+}
+
+func (x VMStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (VMStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_apprunner_v1_app_runner_proto_enumTypes[0].Descriptor()
+}
+
+func (VMStatus) Type() protoreflect.EnumType {
+	return &file_apprunner_v1_app_runner_proto_enumTypes[0]
+}
+
+func (x VMStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use VMStatus.Descriptor instead.
+func (VMStatus) EnumDescriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{0}
+}
+
+type NetworkMode int32
+
+const (
+	NetworkMode_NETWORK_MODE_UNSPECIFIED NetworkMode = 0
+	NetworkMode_NETWORK_MODE_NAT         NetworkMode = 1
+	NetworkMode_NETWORK_MODE_BRIDGE      NetworkMode = 2
+)
+
+// Enum value maps for NetworkMode.
+var (
+	NetworkMode_name = map[int32]string{
+		0: "NETWORK_MODE_UNSPECIFIED",
+		1: "NETWORK_MODE_NAT",
+		2: "NETWORK_MODE_BRIDGE",
+	}
+	NetworkMode_value = map[string]int32{
+		"NETWORK_MODE_UNSPECIFIED": 0,
+		"NETWORK_MODE_NAT":         1,
+		"NETWORK_MODE_BRIDGE":      2,
+	}
+)
+
+func (x NetworkMode) Enum() *NetworkMode {
+	p := new(NetworkMode)
+	*p = x
+	return p
+}
+
+func (x NetworkMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (NetworkMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_apprunner_v1_app_runner_proto_enumTypes[1].Descriptor()
+}
+
+func (NetworkMode) Type() protoreflect.EnumType {
+	return &file_apprunner_v1_app_runner_proto_enumTypes[1]
+}
+
+func (x NetworkMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use NetworkMode.Descriptor instead.
+func (NetworkMode) EnumDescriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{1}
+}
+
 type PingRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -197,6 +301,986 @@ func (x *EchoResponse) GetMessage() string {
 	return ""
 }
 
+type VirtualMachine struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Cpus          uint32                 `protobuf:"varint,3,opt,name=cpus,proto3" json:"cpus,omitempty"`
+	MemoryMib     uint32                 `protobuf:"varint,4,opt,name=memory_mib,json=memoryMib,proto3" json:"memory_mib,omitempty"`
+	DiskGib       uint32                 `protobuf:"varint,5,opt,name=disk_gib,json=diskGib,proto3" json:"disk_gib,omitempty"`
+	IsoName       string                 `protobuf:"bytes,6,opt,name=iso_name,json=isoName,proto3" json:"iso_name,omitempty"`
+	NetworkMode   NetworkMode            `protobuf:"varint,7,opt,name=network_mode,json=networkMode,proto3,enum=apprunner.v1.NetworkMode" json:"network_mode,omitempty"`
+	Status        VMStatus               `protobuf:"varint,8,opt,name=status,proto3,enum=apprunner.v1.VMStatus" json:"status,omitempty"`
+	CreatedAt     string                 `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	LastError     string                 `protobuf:"bytes,10,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	ConsolePath   string                 `protobuf:"bytes,11,opt,name=console_path,json=consolePath,proto3" json:"console_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VirtualMachine) Reset() {
+	*x = VirtualMachine{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VirtualMachine) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VirtualMachine) ProtoMessage() {}
+
+func (x *VirtualMachine) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VirtualMachine.ProtoReflect.Descriptor instead.
+func (*VirtualMachine) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *VirtualMachine) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *VirtualMachine) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *VirtualMachine) GetCpus() uint32 {
+	if x != nil {
+		return x.Cpus
+	}
+	return 0
+}
+
+func (x *VirtualMachine) GetMemoryMib() uint32 {
+	if x != nil {
+		return x.MemoryMib
+	}
+	return 0
+}
+
+func (x *VirtualMachine) GetDiskGib() uint32 {
+	if x != nil {
+		return x.DiskGib
+	}
+	return 0
+}
+
+func (x *VirtualMachine) GetIsoName() string {
+	if x != nil {
+		return x.IsoName
+	}
+	return ""
+}
+
+func (x *VirtualMachine) GetNetworkMode() NetworkMode {
+	if x != nil {
+		return x.NetworkMode
+	}
+	return NetworkMode_NETWORK_MODE_UNSPECIFIED
+}
+
+func (x *VirtualMachine) GetStatus() VMStatus {
+	if x != nil {
+		return x.Status
+	}
+	return VMStatus_VM_STATUS_UNSPECIFIED
+}
+
+func (x *VirtualMachine) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+func (x *VirtualMachine) GetLastError() string {
+	if x != nil {
+		return x.LastError
+	}
+	return ""
+}
+
+func (x *VirtualMachine) GetConsolePath() string {
+	if x != nil {
+		return x.ConsolePath
+	}
+	return ""
+}
+
+type HostStatus struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	QemuAvailable   bool                   `protobuf:"varint,1,opt,name=qemu_available,json=qemuAvailable,proto3" json:"qemu_available,omitempty"`
+	KvmAvailable    bool                   `protobuf:"varint,2,opt,name=kvm_available,json=kvmAvailable,proto3" json:"kvm_available,omitempty"`
+	BridgeAvailable bool                   `protobuf:"varint,3,opt,name=bridge_available,json=bridgeAvailable,proto3" json:"bridge_available,omitempty"`
+	BridgeName      string                 `protobuf:"bytes,4,opt,name=bridge_name,json=bridgeName,proto3" json:"bridge_name,omitempty"`
+	BridgeWarning   string                 `protobuf:"bytes,5,opt,name=bridge_warning,json=bridgeWarning,proto3" json:"bridge_warning,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *HostStatus) Reset() {
+	*x = HostStatus{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostStatus) ProtoMessage() {}
+
+func (x *HostStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostStatus.ProtoReflect.Descriptor instead.
+func (*HostStatus) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *HostStatus) GetQemuAvailable() bool {
+	if x != nil {
+		return x.QemuAvailable
+	}
+	return false
+}
+
+func (x *HostStatus) GetKvmAvailable() bool {
+	if x != nil {
+		return x.KvmAvailable
+	}
+	return false
+}
+
+func (x *HostStatus) GetBridgeAvailable() bool {
+	if x != nil {
+		return x.BridgeAvailable
+	}
+	return false
+}
+
+func (x *HostStatus) GetBridgeName() string {
+	if x != nil {
+		return x.BridgeName
+	}
+	return ""
+}
+
+func (x *HostStatus) GetBridgeWarning() string {
+	if x != nil {
+		return x.BridgeWarning
+	}
+	return ""
+}
+
+type ISOImage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	SizeBytes     uint64                 `protobuf:"varint,2,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ISOImage) Reset() {
+	*x = ISOImage{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ISOImage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ISOImage) ProtoMessage() {}
+
+func (x *ISOImage) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ISOImage.ProtoReflect.Descriptor instead.
+func (*ISOImage) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ISOImage) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ISOImage) GetSizeBytes() uint64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+type GetHostStatusRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetHostStatusRequest) Reset() {
+	*x = GetHostStatusRequest{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetHostStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetHostStatusRequest) ProtoMessage() {}
+
+func (x *GetHostStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetHostStatusRequest.ProtoReflect.Descriptor instead.
+func (*GetHostStatusRequest) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{7}
+}
+
+type GetHostStatusResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        *HostStatus            `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetHostStatusResponse) Reset() {
+	*x = GetHostStatusResponse{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetHostStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetHostStatusResponse) ProtoMessage() {}
+
+func (x *GetHostStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetHostStatusResponse.ProtoReflect.Descriptor instead.
+func (*GetHostStatusResponse) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *GetHostStatusResponse) GetStatus() *HostStatus {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
+type ListISOsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListISOsRequest) Reset() {
+	*x = ListISOsRequest{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListISOsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListISOsRequest) ProtoMessage() {}
+
+func (x *ListISOsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListISOsRequest.ProtoReflect.Descriptor instead.
+func (*ListISOsRequest) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{9}
+}
+
+type ListISOsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Images        []*ISOImage            `protobuf:"bytes,1,rep,name=images,proto3" json:"images,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListISOsResponse) Reset() {
+	*x = ListISOsResponse{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListISOsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListISOsResponse) ProtoMessage() {}
+
+func (x *ListISOsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListISOsResponse.ProtoReflect.Descriptor instead.
+func (*ListISOsResponse) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListISOsResponse) GetImages() []*ISOImage {
+	if x != nil {
+		return x.Images
+	}
+	return nil
+}
+
+type ListVMsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListVMsRequest) Reset() {
+	*x = ListVMsRequest{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListVMsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListVMsRequest) ProtoMessage() {}
+
+func (x *ListVMsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListVMsRequest.ProtoReflect.Descriptor instead.
+func (*ListVMsRequest) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{11}
+}
+
+type ListVMsResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	VirtualMachines []*VirtualMachine      `protobuf:"bytes,1,rep,name=virtual_machines,json=virtualMachines,proto3" json:"virtual_machines,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ListVMsResponse) Reset() {
+	*x = ListVMsResponse{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListVMsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListVMsResponse) ProtoMessage() {}
+
+func (x *ListVMsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListVMsResponse.ProtoReflect.Descriptor instead.
+func (*ListVMsResponse) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ListVMsResponse) GetVirtualMachines() []*VirtualMachine {
+	if x != nil {
+		return x.VirtualMachines
+	}
+	return nil
+}
+
+type GetVMRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetVMRequest) Reset() {
+	*x = GetVMRequest{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetVMRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetVMRequest) ProtoMessage() {}
+
+func (x *GetVMRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetVMRequest.ProtoReflect.Descriptor instead.
+func (*GetVMRequest) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *GetVMRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type GetVMResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	VirtualMachine *VirtualMachine        `protobuf:"bytes,1,opt,name=virtual_machine,json=virtualMachine,proto3" json:"virtual_machine,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *GetVMResponse) Reset() {
+	*x = GetVMResponse{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetVMResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetVMResponse) ProtoMessage() {}
+
+func (x *GetVMResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetVMResponse.ProtoReflect.Descriptor instead.
+func (*GetVMResponse) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *GetVMResponse) GetVirtualMachine() *VirtualMachine {
+	if x != nil {
+		return x.VirtualMachine
+	}
+	return nil
+}
+
+type CreateVMRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Cpus          uint32                 `protobuf:"varint,2,opt,name=cpus,proto3" json:"cpus,omitempty"`
+	MemoryMib     uint32                 `protobuf:"varint,3,opt,name=memory_mib,json=memoryMib,proto3" json:"memory_mib,omitempty"`
+	DiskGib       uint32                 `protobuf:"varint,4,opt,name=disk_gib,json=diskGib,proto3" json:"disk_gib,omitempty"`
+	IsoName       string                 `protobuf:"bytes,5,opt,name=iso_name,json=isoName,proto3" json:"iso_name,omitempty"`
+	NetworkMode   NetworkMode            `protobuf:"varint,6,opt,name=network_mode,json=networkMode,proto3,enum=apprunner.v1.NetworkMode" json:"network_mode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateVMRequest) Reset() {
+	*x = CreateVMRequest{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateVMRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateVMRequest) ProtoMessage() {}
+
+func (x *CreateVMRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateVMRequest.ProtoReflect.Descriptor instead.
+func (*CreateVMRequest) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *CreateVMRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CreateVMRequest) GetCpus() uint32 {
+	if x != nil {
+		return x.Cpus
+	}
+	return 0
+}
+
+func (x *CreateVMRequest) GetMemoryMib() uint32 {
+	if x != nil {
+		return x.MemoryMib
+	}
+	return 0
+}
+
+func (x *CreateVMRequest) GetDiskGib() uint32 {
+	if x != nil {
+		return x.DiskGib
+	}
+	return 0
+}
+
+func (x *CreateVMRequest) GetIsoName() string {
+	if x != nil {
+		return x.IsoName
+	}
+	return ""
+}
+
+func (x *CreateVMRequest) GetNetworkMode() NetworkMode {
+	if x != nil {
+		return x.NetworkMode
+	}
+	return NetworkMode_NETWORK_MODE_UNSPECIFIED
+}
+
+type CreateVMResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	VirtualMachine *VirtualMachine        `protobuf:"bytes,1,opt,name=virtual_machine,json=virtualMachine,proto3" json:"virtual_machine,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CreateVMResponse) Reset() {
+	*x = CreateVMResponse{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateVMResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateVMResponse) ProtoMessage() {}
+
+func (x *CreateVMResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateVMResponse.ProtoReflect.Descriptor instead.
+func (*CreateVMResponse) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *CreateVMResponse) GetVirtualMachine() *VirtualMachine {
+	if x != nil {
+		return x.VirtualMachine
+	}
+	return nil
+}
+
+type StartVMRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartVMRequest) Reset() {
+	*x = StartVMRequest{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartVMRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartVMRequest) ProtoMessage() {}
+
+func (x *StartVMRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartVMRequest.ProtoReflect.Descriptor instead.
+func (*StartVMRequest) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *StartVMRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type StartVMResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	VirtualMachine *VirtualMachine        `protobuf:"bytes,1,opt,name=virtual_machine,json=virtualMachine,proto3" json:"virtual_machine,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *StartVMResponse) Reset() {
+	*x = StartVMResponse{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartVMResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartVMResponse) ProtoMessage() {}
+
+func (x *StartVMResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartVMResponse.ProtoReflect.Descriptor instead.
+func (*StartVMResponse) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *StartVMResponse) GetVirtualMachine() *VirtualMachine {
+	if x != nil {
+		return x.VirtualMachine
+	}
+	return nil
+}
+
+type StopVMRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Force         bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StopVMRequest) Reset() {
+	*x = StopVMRequest{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StopVMRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StopVMRequest) ProtoMessage() {}
+
+func (x *StopVMRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StopVMRequest.ProtoReflect.Descriptor instead.
+func (*StopVMRequest) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *StopVMRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *StopVMRequest) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
+}
+
+type StopVMResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	VirtualMachine *VirtualMachine        `protobuf:"bytes,1,opt,name=virtual_machine,json=virtualMachine,proto3" json:"virtual_machine,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *StopVMResponse) Reset() {
+	*x = StopVMResponse{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StopVMResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StopVMResponse) ProtoMessage() {}
+
+func (x *StopVMResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StopVMResponse.ProtoReflect.Descriptor instead.
+func (*StopVMResponse) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *StopVMResponse) GetVirtualMachine() *VirtualMachine {
+	if x != nil {
+		return x.VirtualMachine
+	}
+	return nil
+}
+
+type DeleteVMRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteVMRequest) Reset() {
+	*x = DeleteVMRequest{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteVMRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteVMRequest) ProtoMessage() {}
+
+func (x *DeleteVMRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteVMRequest.ProtoReflect.Descriptor instead.
+func (*DeleteVMRequest) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *DeleteVMRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type DeleteVMResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteVMResponse) Reset() {
+	*x = DeleteVMResponse{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteVMResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteVMResponse) ProtoMessage() {}
+
+func (x *DeleteVMResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteVMResponse.ProtoReflect.Descriptor instead.
+func (*DeleteVMResponse) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *DeleteVMResponse) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
 var File_apprunner_v1_app_runner_proto protoreflect.FileDescriptor
 
 const file_apprunner_v1_app_runner_proto_rawDesc = "" +
@@ -210,10 +1294,92 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\vEchoRequest\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"(\n" +
 	"\fEchoResponse\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage2\x90\x01\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\"\xec\x02\n" +
+	"\x0eVirtualMachine\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
+	"\x04cpus\x18\x03 \x01(\rR\x04cpus\x12\x1d\n" +
+	"\n" +
+	"memory_mib\x18\x04 \x01(\rR\tmemoryMib\x12\x19\n" +
+	"\bdisk_gib\x18\x05 \x01(\rR\adiskGib\x12\x19\n" +
+	"\biso_name\x18\x06 \x01(\tR\aisoName\x12<\n" +
+	"\fnetwork_mode\x18\a \x01(\x0e2\x19.apprunner.v1.NetworkModeR\vnetworkMode\x12.\n" +
+	"\x06status\x18\b \x01(\x0e2\x16.apprunner.v1.VMStatusR\x06status\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\t \x01(\tR\tcreatedAt\x12\x1d\n" +
+	"\n" +
+	"last_error\x18\n" +
+	" \x01(\tR\tlastError\x12!\n" +
+	"\fconsole_path\x18\v \x01(\tR\vconsolePath\"\xcb\x01\n" +
+	"\n" +
+	"HostStatus\x12%\n" +
+	"\x0eqemu_available\x18\x01 \x01(\bR\rqemuAvailable\x12#\n" +
+	"\rkvm_available\x18\x02 \x01(\bR\fkvmAvailable\x12)\n" +
+	"\x10bridge_available\x18\x03 \x01(\bR\x0fbridgeAvailable\x12\x1f\n" +
+	"\vbridge_name\x18\x04 \x01(\tR\n" +
+	"bridgeName\x12%\n" +
+	"\x0ebridge_warning\x18\x05 \x01(\tR\rbridgeWarning\"=\n" +
+	"\bISOImage\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x02 \x01(\x04R\tsizeBytes\"\x16\n" +
+	"\x14GetHostStatusRequest\"I\n" +
+	"\x15GetHostStatusResponse\x120\n" +
+	"\x06status\x18\x01 \x01(\v2\x18.apprunner.v1.HostStatusR\x06status\"\x11\n" +
+	"\x0fListISOsRequest\"B\n" +
+	"\x10ListISOsResponse\x12.\n" +
+	"\x06images\x18\x01 \x03(\v2\x16.apprunner.v1.ISOImageR\x06images\"\x10\n" +
+	"\x0eListVMsRequest\"Z\n" +
+	"\x0fListVMsResponse\x12G\n" +
+	"\x10virtual_machines\x18\x01 \x03(\v2\x1c.apprunner.v1.VirtualMachineR\x0fvirtualMachines\"\x1e\n" +
+	"\fGetVMRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"V\n" +
+	"\rGetVMResponse\x12E\n" +
+	"\x0fvirtual_machine\x18\x01 \x01(\v2\x1c.apprunner.v1.VirtualMachineR\x0evirtualMachine\"\xcc\x01\n" +
+	"\x0fCreateVMRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04cpus\x18\x02 \x01(\rR\x04cpus\x12\x1d\n" +
+	"\n" +
+	"memory_mib\x18\x03 \x01(\rR\tmemoryMib\x12\x19\n" +
+	"\bdisk_gib\x18\x04 \x01(\rR\adiskGib\x12\x19\n" +
+	"\biso_name\x18\x05 \x01(\tR\aisoName\x12<\n" +
+	"\fnetwork_mode\x18\x06 \x01(\x0e2\x19.apprunner.v1.NetworkModeR\vnetworkMode\"Y\n" +
+	"\x10CreateVMResponse\x12E\n" +
+	"\x0fvirtual_machine\x18\x01 \x01(\v2\x1c.apprunner.v1.VirtualMachineR\x0evirtualMachine\" \n" +
+	"\x0eStartVMRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"X\n" +
+	"\x0fStartVMResponse\x12E\n" +
+	"\x0fvirtual_machine\x18\x01 \x01(\v2\x1c.apprunner.v1.VirtualMachineR\x0evirtualMachine\"5\n" +
+	"\rStopVMRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
+	"\x05force\x18\x02 \x01(\bR\x05force\"W\n" +
+	"\x0eStopVMResponse\x12E\n" +
+	"\x0fvirtual_machine\x18\x01 \x01(\v2\x1c.apprunner.v1.VirtualMachineR\x0evirtualMachine\"!\n" +
+	"\x0fDeleteVMRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\"\n" +
+	"\x10DeleteVMResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id*\x80\x01\n" +
+	"\bVMStatus\x12\x19\n" +
+	"\x15VM_STATUS_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11VM_STATUS_STOPPED\x10\x01\x12\x15\n" +
+	"\x11VM_STATUS_RUNNING\x10\x02\x12\x16\n" +
+	"\x12VM_STATUS_STOPPING\x10\x03\x12\x13\n" +
+	"\x0fVM_STATUS_ERROR\x10\x04*Z\n" +
+	"\vNetworkMode\x12\x1c\n" +
+	"\x18NETWORK_MODE_UNSPECIFIED\x10\x00\x12\x14\n" +
+	"\x10NETWORK_MODE_NAT\x10\x01\x12\x17\n" +
+	"\x13NETWORK_MODE_BRIDGE\x10\x022\xe2\x05\n" +
 	"\x10AppRunnerService\x12=\n" +
 	"\x04Ping\x12\x19.apprunner.v1.PingRequest\x1a\x1a.apprunner.v1.PingResponse\x12=\n" +
-	"\x04Echo\x12\x19.apprunner.v1.EchoRequest\x1a\x1a.apprunner.v1.EchoResponseBFZDgithub.com/roflware/app-runner/internal/gen/apprunner/v1;apprunnerv1b\x06proto3"
+	"\x04Echo\x12\x19.apprunner.v1.EchoRequest\x1a\x1a.apprunner.v1.EchoResponse\x12X\n" +
+	"\rGetHostStatus\x12\".apprunner.v1.GetHostStatusRequest\x1a#.apprunner.v1.GetHostStatusResponse\x12I\n" +
+	"\bListISOs\x12\x1d.apprunner.v1.ListISOsRequest\x1a\x1e.apprunner.v1.ListISOsResponse\x12F\n" +
+	"\aListVMs\x12\x1c.apprunner.v1.ListVMsRequest\x1a\x1d.apprunner.v1.ListVMsResponse\x12@\n" +
+	"\x05GetVM\x12\x1a.apprunner.v1.GetVMRequest\x1a\x1b.apprunner.v1.GetVMResponse\x12I\n" +
+	"\bCreateVM\x12\x1d.apprunner.v1.CreateVMRequest\x1a\x1e.apprunner.v1.CreateVMResponse\x12F\n" +
+	"\aStartVM\x12\x1c.apprunner.v1.StartVMRequest\x1a\x1d.apprunner.v1.StartVMResponse\x12C\n" +
+	"\x06StopVM\x12\x1b.apprunner.v1.StopVMRequest\x1a\x1c.apprunner.v1.StopVMResponse\x12I\n" +
+	"\bDeleteVM\x12\x1d.apprunner.v1.DeleteVMRequest\x1a\x1e.apprunner.v1.DeleteVMResponseBFZDgithub.com/roflware/app-runner/internal/gen/apprunner/v1;apprunnerv1b\x06proto3"
 
 var (
 	file_apprunner_v1_app_runner_proto_rawDescOnce sync.Once
@@ -227,23 +1393,71 @@ func file_apprunner_v1_app_runner_proto_rawDescGZIP() []byte {
 	return file_apprunner_v1_app_runner_proto_rawDescData
 }
 
-var file_apprunner_v1_app_runner_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_apprunner_v1_app_runner_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_apprunner_v1_app_runner_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_apprunner_v1_app_runner_proto_goTypes = []any{
-	(*PingRequest)(nil),  // 0: apprunner.v1.PingRequest
-	(*PingResponse)(nil), // 1: apprunner.v1.PingResponse
-	(*EchoRequest)(nil),  // 2: apprunner.v1.EchoRequest
-	(*EchoResponse)(nil), // 3: apprunner.v1.EchoResponse
+	(VMStatus)(0),                 // 0: apprunner.v1.VMStatus
+	(NetworkMode)(0),              // 1: apprunner.v1.NetworkMode
+	(*PingRequest)(nil),           // 2: apprunner.v1.PingRequest
+	(*PingResponse)(nil),          // 3: apprunner.v1.PingResponse
+	(*EchoRequest)(nil),           // 4: apprunner.v1.EchoRequest
+	(*EchoResponse)(nil),          // 5: apprunner.v1.EchoResponse
+	(*VirtualMachine)(nil),        // 6: apprunner.v1.VirtualMachine
+	(*HostStatus)(nil),            // 7: apprunner.v1.HostStatus
+	(*ISOImage)(nil),              // 8: apprunner.v1.ISOImage
+	(*GetHostStatusRequest)(nil),  // 9: apprunner.v1.GetHostStatusRequest
+	(*GetHostStatusResponse)(nil), // 10: apprunner.v1.GetHostStatusResponse
+	(*ListISOsRequest)(nil),       // 11: apprunner.v1.ListISOsRequest
+	(*ListISOsResponse)(nil),      // 12: apprunner.v1.ListISOsResponse
+	(*ListVMsRequest)(nil),        // 13: apprunner.v1.ListVMsRequest
+	(*ListVMsResponse)(nil),       // 14: apprunner.v1.ListVMsResponse
+	(*GetVMRequest)(nil),          // 15: apprunner.v1.GetVMRequest
+	(*GetVMResponse)(nil),         // 16: apprunner.v1.GetVMResponse
+	(*CreateVMRequest)(nil),       // 17: apprunner.v1.CreateVMRequest
+	(*CreateVMResponse)(nil),      // 18: apprunner.v1.CreateVMResponse
+	(*StartVMRequest)(nil),        // 19: apprunner.v1.StartVMRequest
+	(*StartVMResponse)(nil),       // 20: apprunner.v1.StartVMResponse
+	(*StopVMRequest)(nil),         // 21: apprunner.v1.StopVMRequest
+	(*StopVMResponse)(nil),        // 22: apprunner.v1.StopVMResponse
+	(*DeleteVMRequest)(nil),       // 23: apprunner.v1.DeleteVMRequest
+	(*DeleteVMResponse)(nil),      // 24: apprunner.v1.DeleteVMResponse
 }
 var file_apprunner_v1_app_runner_proto_depIdxs = []int32{
-	0, // 0: apprunner.v1.AppRunnerService.Ping:input_type -> apprunner.v1.PingRequest
-	2, // 1: apprunner.v1.AppRunnerService.Echo:input_type -> apprunner.v1.EchoRequest
-	1, // 2: apprunner.v1.AppRunnerService.Ping:output_type -> apprunner.v1.PingResponse
-	3, // 3: apprunner.v1.AppRunnerService.Echo:output_type -> apprunner.v1.EchoResponse
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	1,  // 0: apprunner.v1.VirtualMachine.network_mode:type_name -> apprunner.v1.NetworkMode
+	0,  // 1: apprunner.v1.VirtualMachine.status:type_name -> apprunner.v1.VMStatus
+	7,  // 2: apprunner.v1.GetHostStatusResponse.status:type_name -> apprunner.v1.HostStatus
+	8,  // 3: apprunner.v1.ListISOsResponse.images:type_name -> apprunner.v1.ISOImage
+	6,  // 4: apprunner.v1.ListVMsResponse.virtual_machines:type_name -> apprunner.v1.VirtualMachine
+	6,  // 5: apprunner.v1.GetVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	1,  // 6: apprunner.v1.CreateVMRequest.network_mode:type_name -> apprunner.v1.NetworkMode
+	6,  // 7: apprunner.v1.CreateVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	6,  // 8: apprunner.v1.StartVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	6,  // 9: apprunner.v1.StopVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	2,  // 10: apprunner.v1.AppRunnerService.Ping:input_type -> apprunner.v1.PingRequest
+	4,  // 11: apprunner.v1.AppRunnerService.Echo:input_type -> apprunner.v1.EchoRequest
+	9,  // 12: apprunner.v1.AppRunnerService.GetHostStatus:input_type -> apprunner.v1.GetHostStatusRequest
+	11, // 13: apprunner.v1.AppRunnerService.ListISOs:input_type -> apprunner.v1.ListISOsRequest
+	13, // 14: apprunner.v1.AppRunnerService.ListVMs:input_type -> apprunner.v1.ListVMsRequest
+	15, // 15: apprunner.v1.AppRunnerService.GetVM:input_type -> apprunner.v1.GetVMRequest
+	17, // 16: apprunner.v1.AppRunnerService.CreateVM:input_type -> apprunner.v1.CreateVMRequest
+	19, // 17: apprunner.v1.AppRunnerService.StartVM:input_type -> apprunner.v1.StartVMRequest
+	21, // 18: apprunner.v1.AppRunnerService.StopVM:input_type -> apprunner.v1.StopVMRequest
+	23, // 19: apprunner.v1.AppRunnerService.DeleteVM:input_type -> apprunner.v1.DeleteVMRequest
+	3,  // 20: apprunner.v1.AppRunnerService.Ping:output_type -> apprunner.v1.PingResponse
+	5,  // 21: apprunner.v1.AppRunnerService.Echo:output_type -> apprunner.v1.EchoResponse
+	10, // 22: apprunner.v1.AppRunnerService.GetHostStatus:output_type -> apprunner.v1.GetHostStatusResponse
+	12, // 23: apprunner.v1.AppRunnerService.ListISOs:output_type -> apprunner.v1.ListISOsResponse
+	14, // 24: apprunner.v1.AppRunnerService.ListVMs:output_type -> apprunner.v1.ListVMsResponse
+	16, // 25: apprunner.v1.AppRunnerService.GetVM:output_type -> apprunner.v1.GetVMResponse
+	18, // 26: apprunner.v1.AppRunnerService.CreateVM:output_type -> apprunner.v1.CreateVMResponse
+	20, // 27: apprunner.v1.AppRunnerService.StartVM:output_type -> apprunner.v1.StartVMResponse
+	22, // 28: apprunner.v1.AppRunnerService.StopVM:output_type -> apprunner.v1.StopVMResponse
+	24, // 29: apprunner.v1.AppRunnerService.DeleteVM:output_type -> apprunner.v1.DeleteVMResponse
+	20, // [20:30] is the sub-list for method output_type
+	10, // [10:20] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_apprunner_v1_app_runner_proto_init() }
@@ -256,13 +1470,14 @@ func file_apprunner_v1_app_runner_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_apprunner_v1_app_runner_proto_rawDesc), len(file_apprunner_v1_app_runner_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   4,
+			NumEnums:      2,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_apprunner_v1_app_runner_proto_goTypes,
 		DependencyIndexes: file_apprunner_v1_app_runner_proto_depIdxs,
+		EnumInfos:         file_apprunner_v1_app_runner_proto_enumTypes,
 		MessageInfos:      file_apprunner_v1_app_runner_proto_msgTypes,
 	}.Build()
 	File_apprunner_v1_app_runner_proto = out.File

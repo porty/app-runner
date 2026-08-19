@@ -7,6 +7,14 @@ option go_package = "github.com/roflware/app-runner/internal/gen/apprunner/v1;ap
 service AppRunnerService {
   rpc Ping(PingRequest) returns (PingResponse);
   rpc Echo(EchoRequest) returns (EchoResponse);
+  rpc GetHostStatus(GetHostStatusRequest) returns (GetHostStatusResponse);
+  rpc ListISOs(ListISOsRequest) returns (ListISOsResponse);
+  rpc ListVMs(ListVMsRequest) returns (ListVMsResponse);
+  rpc GetVM(GetVMRequest) returns (GetVMResponse);
+  rpc CreateVM(CreateVMRequest) returns (CreateVMResponse);
+  rpc StartVM(StartVMRequest) returns (StartVMResponse);
+  rpc StopVM(StopVMRequest) returns (StopVMResponse);
+  rpc DeleteVM(DeleteVMRequest) returns (DeleteVMResponse);
 }
 
 message PingRequest {}
@@ -22,4 +30,109 @@ message EchoRequest {
 
 message EchoResponse {
   string message = 1;
+}
+
+enum VMStatus {
+  VM_STATUS_UNSPECIFIED = 0;
+  VM_STATUS_STOPPED = 1;
+  VM_STATUS_RUNNING = 2;
+  VM_STATUS_STOPPING = 3;
+  VM_STATUS_ERROR = 4;
+}
+
+enum NetworkMode {
+  NETWORK_MODE_UNSPECIFIED = 0;
+  NETWORK_MODE_NAT = 1;
+  NETWORK_MODE_BRIDGE = 2;
+}
+
+message VirtualMachine {
+  string id = 1;
+  string name = 2;
+  uint32 cpus = 3;
+  uint32 memory_mib = 4;
+  uint32 disk_gib = 5;
+  string iso_name = 6;
+  NetworkMode network_mode = 7;
+  VMStatus status = 8;
+  string created_at = 9;
+  string last_error = 10;
+  string console_path = 11;
+}
+
+message HostStatus {
+  bool qemu_available = 1;
+  bool kvm_available = 2;
+  bool bridge_available = 3;
+  string bridge_name = 4;
+  string bridge_warning = 5;
+}
+
+message ISOImage {
+  string name = 1;
+  uint64 size_bytes = 2;
+}
+
+message GetHostStatusRequest {}
+
+message GetHostStatusResponse {
+  HostStatus status = 1;
+}
+
+message ListISOsRequest {}
+
+message ListISOsResponse {
+  repeated ISOImage images = 1;
+}
+
+message ListVMsRequest {}
+
+message ListVMsResponse {
+  repeated VirtualMachine virtual_machines = 1;
+}
+
+message GetVMRequest {
+  string id = 1;
+}
+
+message GetVMResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message CreateVMRequest {
+  string name = 1;
+  uint32 cpus = 2;
+  uint32 memory_mib = 3;
+  uint32 disk_gib = 4;
+  string iso_name = 5;
+  NetworkMode network_mode = 6;
+}
+
+message CreateVMResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message StartVMRequest {
+  string id = 1;
+}
+
+message StartVMResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message StopVMRequest {
+  string id = 1;
+  bool force = 2;
+}
+
+message StopVMResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message DeleteVMRequest {
+  string id = 1;
+}
+
+message DeleteVMResponse {
+  string id = 1;
 }

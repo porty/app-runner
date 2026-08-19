@@ -5,6 +5,7 @@ go 1.25.0
 tool github.com/twitchtv/twirp/protoc-gen-twirp
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/twitchtv/twirp v8.1.3+incompatible
 	google.golang.org/protobuf v1.36.12
 )

@@ -11,7 +11,7 @@ import (
 )
 
 func TestPing(t *testing.T) {
-	service := newAppRunnerService()
+	service := newAppRunnerService(nil, nil)
 	service.now = func() time.Time {
 		return time.Date(2026, time.August, 19, 5, 30, 0, 0, time.UTC)
 	}
@@ -29,7 +29,7 @@ func TestPing(t *testing.T) {
 }
 
 func TestEchoRejectsEmptyMessages(t *testing.T) {
-	service := newAppRunnerService()
+	service := newAppRunnerService(nil, nil)
 
 	_, err := service.Echo(context.Background(), &apprunnerv1.EchoRequest{Message: "  "})
 	var twirpError twirp.Error
