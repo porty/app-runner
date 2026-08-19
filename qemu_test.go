@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"net"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -29,6 +32,53 @@ func TestQEMUArgumentsUseRequiredVirtualisationProfile(t *testing.T) {
 		if !slices.Contains(arguments, expected) {
 			t.Errorf("QEMU arguments do not contain %q: %#v", expected, arguments)
 		}
+	}
+}
+
+func TestExecuteQMPNegotiatesAndSendsCommand(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "qmp.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	serverResult := make(chan error, 1)
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			serverResult <- acceptErr
+			return
+		}
+		defer connection.Close()
+		decoder := json.NewDecoder(connection)
+		encoder := json.NewEncoder(connection)
+		if encodeErr := encoder.Encode(map[string]any{"QMP": map[string]any{"version": map[string]any{}}}); encodeErr != nil {
+			serverResult <- encodeErr
+			return
+		}
+		for _, expected := range []string{"qmp_capabilities", "system_powerdown"} {
+			var request map[string]string
+			if decodeErr := decoder.Decode(&request); decodeErr != nil {
+				serverResult <- decodeErr
+				return
+			}
+			if request["execute"] != expected {
+				serverResult <- fmt.Errorf("expected %s, got %s", expected, request["execute"])
+				return
+			}
+			if encodeErr := encoder.Encode(map[string]any{"return": map[string]any{}}); encodeErr != nil {
+				serverResult <- encodeErr
+				return
+			}
+		}
+		serverResult <- nil
+	}()
+
+	if err := executeQMP(socketPath, "system_powerdown"); err != nil {
+		t.Fatalf("executeQMP returned an error: %v", err)
+	}
+	if err := <-serverResult; err != nil {
+		t.Fatal(err)
 	}
 }
 
