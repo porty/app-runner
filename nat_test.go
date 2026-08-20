@@ -171,3 +171,23 @@ func TestNATRuleExpressionsConstrainBridgeSubnetAndMasquerade(t *testing.T) {
 		t.Fatalf("postrouting rule does not exclude the source bridge: %#v", masquerade)
 	}
 }
+
+func TestFirewallServiceRulesConstrainBridgeProtocolAndPort(t *testing.T) {
+	network := natNetwork{Bridge: "br0", Prefix: netip.MustParsePrefix("192.168.100.0/24")}
+	for _, test := range []struct {
+		protocol byte
+		port     uint16
+	}{
+		{protocol: 17, port: 67},
+		{protocol: 17, port: 53},
+		{protocol: 6, port: 53},
+	} {
+		expressions := serviceInputExpressions(network, test.protocol, test.port)
+		if len(expressions) != 7 {
+			t.Fatalf("unexpected service rule expression count: %d", len(expressions))
+		}
+		if verdict, ok := expressions[len(expressions)-1].(*expr.Verdict); !ok || verdict.Kind != expr.VerdictAccept {
+			t.Fatalf("service rule does not end in accept: %#v", expressions)
+		}
+	}
+}

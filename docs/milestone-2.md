@@ -50,7 +50,7 @@ Launch and manage QEMU/KVM virtual machines from the web interface.
 - starts a bridge's DHCP server before its first VM starts and stops it after the last VM on that bridge exits
 - persists DHCP leases and stable VM MAC addresses across backend restarts
 - reports DHCP socket capability diagnostics; DHCP requires UDP port 67 and bind-to-interface access in addition to bridge-management permission
-- optionally enables runtime-only NAT for a managed DHCP bridge, advertising the bridge address as the router and managing IPv4 forwarding plus isolated nftables forwarding/masquerade rules with the same first-VM/last-VM lifecycle
+- optionally enables runtime-only NAT for a managed DHCP bridge, advertising the bridge address as the router and managing IPv4 forwarding, isolated nftables forwarding/masquerade rules, and tagged iptables-nft/UFW filter allowances with the same first-VM/last-VM lifecycle
 - restores the host's prior forwarding setting and removes its dedicated nftables table after the last applicable VM stops or during abandoned-state recovery; it does not persist these settings through a host network manager
 - optionally runs an in-process forwarding DNS server on a DHCP bridge over UDP and TCP, advertises the bridge address as DNS, and follows the same first-VM/last-VM lifecycle
 - optionally publishes authoritative A records from active VM DHCP leases under a configurable Auto DNS suffix, while validating new VM names as DNS hostname labels in both the backend and frontend

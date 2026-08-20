@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,9 +15,12 @@ import (
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
+	"golang.org/x/sys/unix"
 )
 
 const appRunnerNATTable = "app_runner_nat"
+
+var appRunnerFirewallRuleTag = []byte("app-runner-managed")
 
 type natNetwork struct {
 	Bridge string
@@ -274,6 +278,9 @@ func (linuxNATBackend) ReplaceRules(networks []natNetwork) error {
 			connection.DelTable(table)
 		}
 	}
+	if err := replaceHostFilterRules(connection, tables, networks); err != nil {
+		return err
+	}
 	if len(networks) == 0 {
 		return connection.Flush()
 	}
@@ -293,6 +300,67 @@ func (linuxNATBackend) ReplaceRules(networks []natNetwork) error {
 		connection.AddRule(&nftables.Rule{Table: table, Chain: postrouting, Exprs: masqueradeExpressions(network)})
 	}
 	return connection.Flush()
+}
+
+// replaceHostFilterRules inserts narrowly scoped accepts into an existing
+// iptables-nft/UFW filter table. Accepting traffic in App Runner's own base
+// chain is insufficient because a later base chain can still drop the packet.
+// Tagged rules let us remove only our own entries without altering firewall-
+// owned rules or chains.
+func replaceHostFilterRules(connection *nftables.Conn, tables []*nftables.Table, networks []natNetwork) error {
+	for _, table := range tables {
+		if table.Name != "filter" {
+			continue
+		}
+		chains, err := connection.ListChainsOfTableFamily(table.Family)
+		if err != nil {
+			return fmt.Errorf("list host firewall chains: %w", err)
+		}
+		for _, chain := range chains {
+			if chain.Table == nil || chain.Table.Name != table.Name || (chain.Name != "INPUT" && chain.Name != "FORWARD") {
+				continue
+			}
+			rules, err := connection.GetRules(table, chain)
+			if err != nil {
+				return fmt.Errorf("list host firewall rules in %s: %w", chain.Name, err)
+			}
+			for _, rule := range rules {
+				if bytes.Equal(rule.UserData, appRunnerFirewallRuleTag) {
+					connection.DelRule(rule)
+				}
+			}
+			// InsertRule places every rule at the head. Reverse iteration keeps
+			// the resulting order stable and easy to inspect.
+			for index := len(networks) - 1; index >= 0; index-- {
+				network := networks[index]
+				if chain.Name == "INPUT" {
+					for _, expressions := range [][]expr.Any{
+						serviceInputExpressions(network, unix.IPPROTO_UDP, 67),
+						serviceInputExpressions(network, unix.IPPROTO_UDP, 53),
+						serviceInputExpressions(network, unix.IPPROTO_TCP, 53),
+					} {
+						connection.InsertRule(&nftables.Rule{Table: table, Chain: chain, Exprs: expressions, UserData: appRunnerFirewallRuleTag})
+					}
+				} else {
+					connection.InsertRule(&nftables.Rule{Table: table, Chain: chain, Exprs: returnForwardExpressions(network), UserData: appRunnerFirewallRuleTag})
+					connection.InsertRule(&nftables.Rule{Table: table, Chain: chain, Exprs: outboundForwardExpressions(network), UserData: appRunnerFirewallRuleTag})
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func serviceInputExpressions(network natNetwork, protocol byte, destinationPort uint16) []expr.Any {
+	expressions := interfaceExpressions(expr.MetaKeyIIFNAME, expr.CmpOpEq, network.Bridge)
+	expressions = append(expressions,
+		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{protocol}},
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(destinationPort)},
+		&expr.Verdict{Kind: expr.VerdictAccept},
+	)
+	return expressions
 }
 
 func outboundForwardExpressions(network natNetwork) []expr.Any {
