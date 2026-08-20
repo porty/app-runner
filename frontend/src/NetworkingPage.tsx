@@ -66,6 +66,7 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
   const [dhcpBridge, setDHCPBridge] = useState<NetworkBridge | null>(null)
   const [dhcpEnabled, setDHCPEnabled] = useState(false)
   const [dhcpCIDR, setDHCPCIDR] = useState('192.168.100.0/24')
+  const [natEnabled, setNATEnabled] = useState(false)
 
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true)
@@ -129,7 +130,7 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
     setBusy(true)
     setError('')
     try {
-      setStatus(await configureBridgeDHCP(dhcpBridge.name, dhcpEnabled, dhcpCIDR.trim()))
+      setStatus(await configureBridgeDHCP(dhcpBridge.name, dhcpEnabled, dhcpCIDR.trim(), dhcpEnabled && natEnabled))
       setDHCPBridge(null)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to configure bridge DHCP')
@@ -196,6 +197,7 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
               setDHCPBridge(bridge)
               setDHCPEnabled(Boolean(bridge.dhcp?.enabled))
               setDHCPCIDR(bridge.dhcp?.cidr || '192.168.100.0/24')
+              setNATEnabled(Boolean(bridge.dhcp?.nat_enabled))
             }}
           />
         ))}
@@ -271,13 +273,16 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
         <DialogTitle>DHCP settings for {dhcpBridge?.name}</DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mt: 1, mb: 2 }}>
-            Only enable this server when another DHCP server is not already serving the bridge. App Runner assigns the first usable address to the bridge, leases addresses beginning at host offset 50, and does not provide NAT or Internet routing.
+            Only enable this server when another DHCP server is not already serving the bridge. App Runner assigns the first usable address to the bridge and leases addresses beginning at host offset 50.
           </Alert>
           {(dhcpBridge?.workloads ?? []).some((workload) => workload.running) && (
             <Alert severity="info" sx={{ mb: 2 }}>Stop all running workloads on this bridge before changing its DHCP configuration.</Alert>
           )}
           <FormControlLabel
-            control={<Checkbox checked={dhcpEnabled} onChange={(event) => setDHCPEnabled(event.target.checked)} />}
+            control={<Checkbox checked={dhcpEnabled} onChange={(event) => {
+              setDHCPEnabled(event.target.checked)
+              if (!event.target.checked) setNATEnabled(false)
+            }} />}
             label="Enable App Runner DHCP for this bridge"
           />
           <TextField
@@ -289,6 +294,16 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
             helperText="Example: 192.168.100.0/24 reserves .1 for the bridge and leases .50–.254"
             sx={{ mt: 2 }}
           />
+          <FormControlLabel
+            sx={{ mt: 1.5 }}
+            control={<Checkbox checked={natEnabled} disabled={!dhcpEnabled} onChange={(event) => setNATEnabled(event.target.checked)} />}
+            label="Enable NAT and outbound routing for this range"
+          />
+          {dhcpEnabled && natEnabled && (
+            <Alert severity="info" sx={{ mt: 1 }}>
+              While this bridge has running workloads, App Runner advertises the bridge address as the DHCP router, enables IPv4 forwarding, and manages masquerade and forwarding rules in its own nftables table. It does not advertise a DNS server. The prior forwarding setting and App Runner rules are restored when the last workload stops.
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDHCPBridge(null)}>Cancel</Button>
@@ -355,6 +370,13 @@ function BridgeCard({ bridge, disabled, configurationDisabled, canAttach, onAppl
                 color={dhcp?.running ? 'success' : dhcp?.enabled ? 'primary' : 'default'}
                 label={dhcp?.running ? 'DHCP running' : dhcp?.enabled ? 'DHCP enabled' : 'DHCP off'}
               />
+              {dhcp?.nat_enabled && (
+                <Chip
+                  size="small"
+                  color={dhcp.nat_running ? 'success' : 'primary'}
+                  label={dhcp.nat_running ? 'NAT running' : 'NAT enabled'}
+                />
+              )}
             </Stack>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               MTU {bridge.mtu} · {bridge.hardware_address || 'no hardware address'} · {(bridge.addresses ?? []).join(', ') || 'no addresses'}
@@ -396,6 +418,9 @@ function BridgeCard({ bridge, disabled, configurationDisabled, canAttach, onAppl
                 <Typography variant="body2">Bridge address: <Box component="code" sx={{ fontFamily: 'monospace' }}>{dhcp.server_address}</Box></Typography>
                 <Typography variant="body2">Lease pool: <Box component="code" sx={{ fontFamily: 'monospace' }}>{dhcp.pool_start}–{dhcp.pool_end}</Box></Typography>
                 <Typography variant="body2" color="text.secondary">{dhcp.active_leases} active lease{dhcp.active_leases === 1 ? '' : 's'}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Routing: {dhcp.nat_enabled ? (dhcp.nat_running ? 'NAT active' : 'NAT starts with the first workload') : 'local bridge only'}
+                </Typography>
                 {dhcp.last_error && <Alert severity="error" sx={{ mt: 1 }}>{dhcp.last_error}</Alert>}
               </Stack>
             )}

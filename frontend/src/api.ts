@@ -129,6 +129,8 @@ export interface BridgeDHCPStatus {
   running: boolean
   active_leases: number
   last_error?: string
+  nat_enabled: boolean
+  nat_running: boolean
 }
 
 export interface PendingNetworkChange {
@@ -252,11 +254,12 @@ export async function revertNetworkChange(id: string): Promise<NetworkingStatus>
   return response.status
 }
 
-export async function configureBridgeDHCP(bridgeName: string, enabled: boolean, cidr: string): Promise<NetworkingStatus> {
+export async function configureBridgeDHCP(bridgeName: string, enabled: boolean, cidr: string, natEnabled: boolean): Promise<NetworkingStatus> {
   const response = await callTwirp<{ status: NetworkingStatus }>('ConfigureBridgeDHCP', {
     bridge_name: bridgeName,
     enabled,
     cidr,
+    nat_enabled: natEnabled,
   })
   return response.status
 }

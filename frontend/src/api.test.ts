@@ -175,11 +175,11 @@ describe('Twirp API client', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(configureBridgeDHCP('br0', true, '192.168.100.0/24')).resolves.toEqual(status)
+    await expect(configureBridgeDHCP('br0', true, '192.168.100.0/24', true)).resolves.toEqual(status)
     expect(fetchMock).toHaveBeenCalledWith(
       '/twirp/apprunner.v1.AppRunnerService/ConfigureBridgeDHCP',
       expect.objectContaining({
-        body: JSON.stringify({ bridge_name: 'br0', enabled: true, cidr: '192.168.100.0/24' }),
+        body: JSON.stringify({ bridge_name: 'br0', enabled: true, cidr: '192.168.100.0/24', nat_enabled: true }),
       }),
     )
   })
