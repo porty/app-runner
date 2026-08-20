@@ -53,6 +53,13 @@ import {
   type PendingNetworkChange,
 } from './api'
 
+const dnsLabelPattern = /^(?=.{1,63}$)[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/
+
+function validDNSSuffix(value: string): boolean {
+  const suffix = value.trim().replace(/\.$/, '')
+  return suffix.length > 0 && suffix.length <= 253 && suffix.split('.').every((label) => dnsLabelPattern.test(label))
+}
+
 export default function NetworkingPage({ refreshInterval }: { refreshInterval: number | null }) {
   const [status, setStatus] = useState<NetworkingStatus | null>(null)
   const [error, setError] = useState('')
@@ -67,6 +74,11 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
   const [dhcpEnabled, setDHCPEnabled] = useState(false)
   const [dhcpCIDR, setDHCPCIDR] = useState('192.168.100.0/24')
   const [natEnabled, setNATEnabled] = useState(false)
+  const [dnsEnabled, setDNSEnabled] = useState(false)
+  const [dnsForwarders, setDNSForwarders] = useState('')
+  const [autoDNS, setAutoDNS] = useState(false)
+  const [dnsSuffix, setDNSSuffix] = useState('')
+  const dnsSuffixValid = validDNSSuffix(dnsSuffix)
 
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true)
@@ -130,10 +142,19 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
     setBusy(true)
     setError('')
     try {
-      setStatus(await configureBridgeDHCP(dhcpBridge.name, dhcpEnabled, dhcpCIDR.trim(), dhcpEnabled && natEnabled))
+      setStatus(await configureBridgeDHCP({
+        bridge_name: dhcpBridge.name,
+        enabled: dhcpEnabled,
+        cidr: dhcpCIDR.trim(),
+        nat_enabled: dhcpEnabled && natEnabled,
+        dns_enabled: dhcpEnabled && dnsEnabled,
+        dns_forwarders: dnsEnabled ? dnsForwarders.split(/[\s,]+/).filter(Boolean) : [],
+        auto_dns: dhcpEnabled && dnsEnabled && autoDNS,
+        dns_suffix: autoDNS ? dnsSuffix.trim() : '',
+      }))
       setDHCPBridge(null)
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to configure bridge DHCP')
+      setError(requestError instanceof Error ? requestError.message : 'Unable to configure managed network services')
     } finally {
       setBusy(false)
     }
@@ -198,6 +219,10 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
               setDHCPEnabled(Boolean(bridge.dhcp?.enabled))
               setDHCPCIDR(bridge.dhcp?.cidr || '192.168.100.0/24')
               setNATEnabled(Boolean(bridge.dhcp?.nat_enabled))
+              setDNSEnabled(Boolean(bridge.dhcp?.dns_enabled))
+              setDNSForwarders((bridge.dhcp?.dns_forwarders ?? []).join('\n'))
+              setAutoDNS(Boolean(bridge.dhcp?.auto_dns))
+              setDNSSuffix(bridge.dhcp?.dns_suffix || `${bridge.name.toLowerCase()}.internal`)
             }}
           />
         ))}
@@ -270,7 +295,7 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
       </Dialog>
 
       <Dialog open={Boolean(dhcpBridge)} onClose={() => setDHCPBridge(null)} fullWidth maxWidth="sm">
-        <DialogTitle>DHCP settings for {dhcpBridge?.name}</DialogTitle>
+        <DialogTitle>Managed network services for {dhcpBridge?.name}</DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mt: 1, mb: 2 }}>
             Only enable this server when another DHCP server is not already serving the bridge. App Runner assigns the first usable address to the bridge and leases addresses beginning at host offset 50.
@@ -281,7 +306,11 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
           <FormControlLabel
             control={<Checkbox checked={dhcpEnabled} onChange={(event) => {
               setDHCPEnabled(event.target.checked)
-              if (!event.target.checked) setNATEnabled(false)
+              if (!event.target.checked) {
+                setNATEnabled(false)
+                setDNSEnabled(false)
+                setAutoDNS(false)
+              }
             }} />}
             label="Enable App Runner DHCP for this bridge"
           />
@@ -301,7 +330,46 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
           />
           {dhcpEnabled && natEnabled && (
             <Alert severity="info" sx={{ mt: 1 }}>
-              While this bridge has running workloads, App Runner advertises the bridge address as the DHCP router, enables IPv4 forwarding, and manages masquerade and forwarding rules in its own nftables table. It does not advertise a DNS server. The prior forwarding setting and App Runner rules are restored when the last workload stops.
+              While this bridge has running workloads, App Runner advertises the bridge address as the DHCP router, enables IPv4 forwarding, and manages masquerade and forwarding rules in its own nftables table. NAT itself does not select a DNS server. The prior forwarding setting and App Runner rules are restored when the last workload stops.
+            </Alert>
+          )}
+          <Divider sx={{ my: 2 }} />
+          <FormControlLabel
+            control={<Checkbox checked={dnsEnabled} disabled={!dhcpEnabled} onChange={(event) => {
+              setDNSEnabled(event.target.checked)
+              if (!event.target.checked) setAutoDNS(false)
+            }} />}
+            label="Enable managed DNS for this bridge"
+          />
+          <TextField
+            fullWidth
+            multiline
+            minRows={2}
+            label="Forwarding DNS servers"
+            value={dnsForwarders}
+            onChange={(event) => setDNSForwarders(event.target.value)}
+            disabled={!dhcpEnabled || !dnsEnabled}
+            helperText="One IP address per line, or separate addresses with commas. An optional port is supported."
+            sx={{ mt: 1.5 }}
+          />
+          <FormControlLabel
+            sx={{ mt: 1 }}
+            control={<Checkbox checked={autoDNS} disabled={!dhcpEnabled || !dnsEnabled} onChange={(event) => setAutoDNS(event.target.checked)} />}
+            label="Auto DNS for virtual machines on this bridge"
+          />
+          <TextField
+            fullWidth
+            label="Auto DNS suffix"
+            value={dnsSuffix}
+            onChange={(event) => setDNSSuffix(event.target.value)}
+            disabled={!dhcpEnabled || !dnsEnabled || !autoDNS}
+            error={dhcpEnabled && dnsEnabled && autoDNS && !dnsSuffixValid}
+            helperText={dnsSuffixValid ? `VMs are published as VM-NAME.${dnsSuffix}` : 'Use one or more DNS labels separated by dots'}
+            sx={{ mt: 1.5 }}
+          />
+          {dhcpEnabled && dnsEnabled && (
+            <Alert severity="info" sx={{ mt: 1.5 }}>
+              App Runner listens on the bridge address over UDP and TCP port 53 and advertises it through DHCP. Auto DNS authoritatively publishes active VM leases under this suffix; all other queries use the forwarding servers.
             </Alert>
           )}
         </DialogContent>
@@ -309,10 +377,15 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
           <Button onClick={() => setDHCPBridge(null)}>Cancel</Button>
           <Button
             variant="contained"
-            disabled={busy || (dhcpEnabled && !dhcpCIDR.trim()) || (dhcpBridge?.workloads ?? []).some((workload) => workload.running)}
+            disabled={
+              busy || (dhcpEnabled && !dhcpCIDR.trim()) ||
+              (dhcpEnabled && dnsEnabled && !dnsForwarders.trim()) ||
+              (dhcpEnabled && dnsEnabled && autoDNS && !dnsSuffixValid) ||
+              (dhcpBridge?.workloads ?? []).some((workload) => workload.running)
+            }
             onClick={() => void configureDHCP()}
           >
-            Save DHCP settings
+            Save network services
           </Button>
         </DialogActions>
       </Dialog>
@@ -377,6 +450,13 @@ function BridgeCard({ bridge, disabled, configurationDisabled, canAttach, onAppl
                   label={dhcp.nat_running ? 'NAT running' : 'NAT enabled'}
                 />
               )}
+              {dhcp?.dns_enabled && (
+                <Chip
+                  size="small"
+                  color={dhcp.dns_running ? 'success' : 'primary'}
+                  label={dhcp.dns_running ? 'DNS running' : 'DNS enabled'}
+                />
+              )}
             </Stack>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               MTU {bridge.mtu} · {bridge.hardware_address || 'no hardware address'} · {(bridge.addresses ?? []).join(', ') || 'no addresses'}
@@ -387,7 +467,7 @@ function BridgeCard({ bridge, disabled, configurationDisabled, canAttach, onAppl
               Bring {bridge.is_up ? 'down' : 'up'}
             </Button>
             <Button size="small" startIcon={<CableRounded />} disabled={disabled || !canAttach} onClick={onAttach}>Attach interface</Button>
-            <Button size="small" disabled={configurationDisabled} onClick={onConfigureDHCP}>DHCP settings</Button>
+            <Button size="small" disabled={configurationDisabled} onClick={onConfigureDHCP}>Network services</Button>
             <Button size="small" color="error" startIcon={<DeleteOutlineRounded />} disabled={disabled || members.length > 0 || workloads.length > 0 || dhcp?.enabled} onClick={deleteBridge}>Delete</Button>
           </Stack>
         </Stack>
@@ -410,7 +490,7 @@ function BridgeCard({ bridge, disabled, configurationDisabled, canAttach, onAppl
             </Stack>
           </Box>
           <Box sx={{ flex: 1 }}>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>Managed DHCP</Typography>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>Managed network services</Typography>
             {!dhcp?.enabled && <Typography variant="body2" color="text.secondary">Disabled for this bridge.</Typography>}
             {dhcp?.enabled && (
               <Stack spacing={0.5}>
@@ -421,6 +501,15 @@ function BridgeCard({ bridge, disabled, configurationDisabled, canAttach, onAppl
                 <Typography variant="body2" color="text.secondary">
                   Routing: {dhcp.nat_enabled ? (dhcp.nat_running ? 'NAT active' : 'NAT starts with the first workload') : 'local bridge only'}
                 </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  DNS: {dhcp.dns_enabled ? (dhcp.dns_running ? 'active' : 'starts with the first workload') : 'not advertised'}
+                </Typography>
+                {dhcp.dns_enabled && (
+                  <Typography variant="body2">Forwarders: {(dhcp.dns_forwarders ?? []).map((forwarder) => (
+                    <Box key={forwarder} component="code" sx={{ fontFamily: 'monospace', mr: 1 }}>{forwarder}</Box>
+                  ))}</Typography>
+                )}
+                {dhcp.auto_dns && <Typography variant="body2">Auto DNS zone: <Box component="code" sx={{ fontFamily: 'monospace' }}>{dhcp.dns_suffix}</Box></Typography>}
                 {dhcp.last_error && <Alert severity="error" sx={{ mt: 1 }}>{dhcp.last_error}</Alert>}
               </Stack>
             )}

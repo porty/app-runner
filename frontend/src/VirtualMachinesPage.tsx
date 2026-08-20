@@ -54,6 +54,8 @@ const defaultCreateRequest: CreateVMRequest = {
   bridge_name: '',
 }
 
+const dnsLabelPattern = /^(?=.{1,63}$)[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/
+
 const statusDetails: Record<VMStatus, { label: string; color: 'default' | 'success' | 'warning' | 'error' }> = {
   VM_STATUS_UNSPECIFIED: { label: 'Unknown', color: 'default' },
   VM_STATUS_STOPPED: { label: 'Stopped', color: 'default' },
@@ -71,6 +73,8 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
   const [error, setError] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [createRequest, setCreateRequest] = useState<CreateVMRequest>(defaultCreateRequest)
+  const createName = createRequest.name.trim()
+  const createNameValid = dnsLabelPattern.test(createName)
 
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true)
@@ -246,7 +250,14 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
         <DialogTitle>Create virtual machine</DialogTitle>
         <DialogContent>
           <Stack spacing={2.25} sx={{ mt: 1 }}>
-            <TextField label="Name" autoFocus value={createRequest.name} onChange={(event) => setCreateRequest({ ...createRequest, name: event.target.value })} />
+            <TextField
+              label="Name"
+              autoFocus
+              value={createRequest.name}
+              onChange={(event) => setCreateRequest({ ...createRequest, name: event.target.value })}
+              error={createName.length > 0 && !createNameValid}
+              helperText="1–63 letters, numbers, or interior hyphens; this name is also used by Auto DNS"
+            />
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <TextField fullWidth type="number" label="vCPUs" slotProps={{ htmlInput: { min: 1, max: 64 } }} value={createRequest.cpus} onChange={(event) => setCreateRequest({ ...createRequest, cpus: Number(event.target.value) })} />
               <TextField fullWidth type="number" label="Memory (MiB)" slotProps={{ htmlInput: { min: 256, step: 256 } }} value={createRequest.memory_mib} onChange={(event) => setCreateRequest({ ...createRequest, memory_mib: Number(event.target.value) })} />
@@ -292,7 +303,7 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
           <Button
             variant="contained"
             onClick={() => void submitCreate()}
-            disabled={busyID === 'create' || !createRequest.name.trim() || !createRequest.iso_name || (createRequest.network_mode === 'NETWORK_MODE_BRIDGE' && !createRequest.bridge_name)}
+            disabled={busyID === 'create' || !createNameValid || !createRequest.iso_name || (createRequest.network_mode === 'NETWORK_MODE_BRIDGE' && !createRequest.bridge_name)}
           >
             {busyID === 'create' ? 'Creating…' : 'Create'}
           </Button>

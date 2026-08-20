@@ -85,7 +85,28 @@ Each bridge can optionally run App Runner's embedded DHCPv4 server. Configuratio
 
 The DHCP server starts before the first VM using that bridge and stops after the last VM has exited. Leases and stable per-VM MAC addresses are persisted, so clients retain their allocations across App Runner restarts. Without NAT, managed DHCP supplies an address, subnet mask, and broadcast address for a local-only bridge. Do not enable it on a bridge already served by another DHCP server.
 
-NAT can optionally be enabled with managed DHCP. While at least one VM uses the bridge, DHCP advertises the bridge's first usable address (for example `192.168.100.1`) as the router, IPv4 forwarding is enabled, and App Runner installs forwarding and masquerade rules in its dedicated IPv4 nftables table, `app_runner_nat`. The rules are rebuilt for all active managed ranges and removed when the last applicable VM stops. App Runner restores the host's previous forwarding setting and keeps `disk/nat-runtime.json` only as crash-recovery ownership state; it does not persist NAT through NetworkManager or another host network manager. App Runner does not advertise a DNS server, and existing host firewall policies can still restrict forwarded traffic.
+NAT can optionally be enabled with managed DHCP. While at least one VM uses the bridge, DHCP advertises the bridge's first usable address (for example `192.168.100.1`) as the router, IPv4 forwarding is enabled, and App Runner installs forwarding and masquerade rules in its dedicated IPv4 nftables table, `app_runner_nat`. The rules are rebuilt for all active managed ranges and removed when the last applicable VM stops. App Runner restores the host's previous forwarding setting and keeps `disk/nat-runtime.json` only as crash-recovery ownership state; it does not persist NAT through NetworkManager or another host network manager. NAT alone does not select a DNS server, and existing host firewall policies can still restrict forwarded traffic.
+
+Managed DNS can also be enabled per DHCP bridge. App Runner binds its in-process DNS server to the bridge address on UDP and TCP port 53, advertises that address to DHCP clients, and forwards non-authoritative queries to the configured upstream IP addresses. It starts with the first VM on the bridge and stops with the last. DNS can be used with or without NAT; existing firewall policies must allow clients to reach the bridge address on port 53.
+
+Auto DNS adds an authoritative zone whose suffix defaults to `<bridge>.internal`, advertises that suffix through DHCP, and publishes an A record for each running VM after it acquires a managed DHCP lease. For example, `web-1` on `br0` becomes `web-1.br0.internal`. New VM names must therefore be a single 1–63 character DNS label containing letters, numbers, or interior hyphens. Existing definitions with incompatible names continue to load, but must be recreated with a valid name before Auto DNS can be enabled on their bridge.
+
+The host can use a managed zone in several ways:
+
+- Query the bridge resolver directly without changing host configuration:
+
+  ```sh
+  dig @192.168.100.1 web-1.br0.internal
+  ```
+
+- On a systemd-resolved host, route only that suffix to the bridge resolver for the current link lifetime:
+
+  ```sh
+  sudo resolvectl dns br0 192.168.100.1
+  sudo resolvectl domain br0 '~br0.internal'
+  ```
+
+- For persistent host integration, configure the host's existing Unbound, dnsmasq, or CoreDNS instance with a conditional/stub zone pointing at the bridge address. A future App Runner enhancement could instead register and remove per-link routes through systemd-resolved's D-Bus API, or expose one loopback listener that aggregates every active bridge zone.
 
 A typical Linux setup requires:
 
@@ -99,7 +120,7 @@ App Runner can make runtime-only bridge changes through Linux netlink: create or
 
 Every mutation is snapshotted before it is applied. The frontend must confirm connectivity within 15 seconds or the backend restores the affected link state, bridge membership, addresses and routes. Only one transaction can be pending, rollback state is stored under `disk/`, and an unconfirmed change is restored immediately after an App Runner restart.
 
-Network mutations and managed nftables NAT require root or `CAP_NET_ADMIN`, never invoke `sudo`, and are accepted only from loopback clients. Managed DHCP additionally needs permission to bind UDP port 67 and bind its socket to a bridge. To grant the capabilities used by bridge, DHCP, and NAT management to a production build:
+Network mutations and managed nftables NAT require root or `CAP_NET_ADMIN`, never invoke `sudo`, and are accepted only from loopback clients. Managed DHCP and DNS additionally need permission to bind privileged UDP/TCP ports 67 and 53 and bind DHCP's socket to a bridge. To grant the capabilities used by bridge, DHCP, DNS, and NAT management to a production build:
 
 ```sh
 sudo setcap cap_net_admin,cap_net_bind_service,cap_net_raw=+ep ./bin/app-runner
