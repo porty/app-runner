@@ -1875,6 +1875,8 @@ type BridgeDHCPStatus struct {
 	Running       bool                   `protobuf:"varint,6,opt,name=running,proto3" json:"running,omitempty"`
 	ActiveLeases  uint32                 `protobuf:"varint,7,opt,name=active_leases,json=activeLeases,proto3" json:"active_leases,omitempty"`
 	LastError     string                 `protobuf:"bytes,8,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	NatEnabled    bool                   `protobuf:"varint,9,opt,name=nat_enabled,json=natEnabled,proto3" json:"nat_enabled,omitempty"`
+	NatRunning    bool                   `protobuf:"varint,10,opt,name=nat_running,json=natRunning,proto3" json:"nat_running,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1963,6 +1965,20 @@ func (x *BridgeDHCPStatus) GetLastError() string {
 		return x.LastError
 	}
 	return ""
+}
+
+func (x *BridgeDHCPStatus) GetNatEnabled() bool {
+	if x != nil {
+		return x.NatEnabled
+	}
+	return false
+}
+
+func (x *BridgeDHCPStatus) GetNatRunning() bool {
+	if x != nil {
+		return x.NatRunning
+	}
+	return false
 }
 
 type PendingNetworkChange struct {
@@ -2482,6 +2498,7 @@ type ConfigureBridgeDHCPRequest struct {
 	BridgeName    string                 `protobuf:"bytes,1,opt,name=bridge_name,json=bridgeName,proto3" json:"bridge_name,omitempty"`
 	Enabled       bool                   `protobuf:"varint,2,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	Cidr          string                 `protobuf:"bytes,3,opt,name=cidr,proto3" json:"cidr,omitempty"`
+	NatEnabled    bool                   `protobuf:"varint,4,opt,name=nat_enabled,json=natEnabled,proto3" json:"nat_enabled,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2535,6 +2552,13 @@ func (x *ConfigureBridgeDHCPRequest) GetCidr() string {
 		return x.Cidr
 	}
 	return ""
+}
+
+func (x *ConfigureBridgeDHCPRequest) GetNatEnabled() bool {
+	if x != nil {
+		return x.NatEnabled
+	}
+	return false
 }
 
 type ConfigureBridgeDHCPResponse struct {
@@ -2703,7 +2727,7 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\vdiagnostics\x18\b \x03(\v2\x1f.apprunner.v1.NetworkDiagnosticR\vdiagnostics\x12$\n" +
 	"\x0eusable_by_qemu\x18\t \x01(\bR\fusableByQemu\x122\n" +
 	"\x04dhcp\x18\n" +
-	" \x01(\v2\x1e.apprunner.v1.BridgeDHCPStatusR\x04dhcp\"\xff\x01\n" +
+	" \x01(\v2\x1e.apprunner.v1.BridgeDHCPStatusR\x04dhcp\"\xc1\x02\n" +
 	"\x10BridgeDHCPStatus\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x12\n" +
 	"\x04cidr\x18\x02 \x01(\tR\x04cidr\x12%\n" +
@@ -2714,7 +2738,12 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\arunning\x18\x06 \x01(\bR\arunning\x12#\n" +
 	"\ractive_leases\x18\a \x01(\rR\factiveLeases\x12\x1d\n" +
 	"\n" +
-	"last_error\x18\b \x01(\tR\tlastError\"g\n" +
+	"last_error\x18\b \x01(\tR\tlastError\x12\x1f\n" +
+	"\vnat_enabled\x18\t \x01(\bR\n" +
+	"natEnabled\x12\x1f\n" +
+	"\vnat_running\x18\n" +
+	" \x01(\bR\n" +
+	"natRunning\"g\n" +
 	"\x14PendingNetworkChange\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1d\n" +
@@ -2748,12 +2777,14 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\x1aRevertNetworkChangeRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"U\n" +
 	"\x1bRevertNetworkChangeResponse\x126\n" +
-	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\"k\n" +
+	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\"\x8c\x01\n" +
 	"\x1aConfigureBridgeDHCPRequest\x12\x1f\n" +
 	"\vbridge_name\x18\x01 \x01(\tR\n" +
 	"bridgeName\x12\x18\n" +
 	"\aenabled\x18\x02 \x01(\bR\aenabled\x12\x12\n" +
-	"\x04cidr\x18\x03 \x01(\tR\x04cidr\"U\n" +
+	"\x04cidr\x18\x03 \x01(\tR\x04cidr\x12\x1f\n" +
+	"\vnat_enabled\x18\x04 \x01(\bR\n" +
+	"natEnabled\"U\n" +
 	"\x1bConfigureBridgeDHCPResponse\x126\n" +
 	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status*\x80\x01\n" +
 	"\bVMStatus\x12\x19\n" +

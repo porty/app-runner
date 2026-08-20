@@ -36,7 +36,11 @@ func main() {
 	}
 	networkProvider := newLinuxNetworkProvider()
 	manager.bridgeCapability = networkProvider.BridgeCapability
-	dhcp, err := newDHCPManager(settings.DiskDir, networkProvider)
+	nat, err := newNATManager(settings.DiskDir)
+	if err != nil {
+		fatal(err)
+	}
+	dhcp, err := newDHCPManager(settings.DiskDir, networkProvider, nat)
 	if err != nil {
 		fatal(err)
 	}

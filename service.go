@@ -224,7 +224,7 @@ func (s *appRunnerService) ConfigureBridgeDHCP(ctx context.Context, request *app
 	if !isLoopbackRequest(ctx) {
 		return nil, twirp.NewError(twirp.PermissionDenied, "DHCP configuration changes are accepted only from a browser connected through loopback")
 	}
-	if err := s.networking.ConfigureBridgeDHCP(request.GetBridgeName(), request.GetEnabled(), request.GetCidr()); err != nil {
+	if err := s.networking.ConfigureBridgeDHCP(request.GetBridgeName(), request.GetEnabled(), request.GetCidr(), request.GetNatEnabled()); err != nil {
 		return nil, twirp.NewError(twirp.FailedPrecondition, err.Error())
 	}
 	status, err := s.networking.Status()
@@ -322,6 +322,7 @@ func networkingStatusToProto(status networkingStatus) *apprunnerv1.NetworkingSta
 				Enabled: bridge.DHCP.Enabled, Cidr: bridge.DHCP.CIDR, ServerAddress: bridge.DHCP.ServerAddress,
 				PoolStart: bridge.DHCP.PoolStart, PoolEnd: bridge.DHCP.PoolEnd, Running: bridge.DHCP.Running,
 				ActiveLeases: bridge.DHCP.ActiveLeases, LastError: bridge.DHCP.LastError,
+				NatEnabled: bridge.DHCP.NATEnabled, NatRunning: bridge.DHCP.NATRunning,
 			},
 		}
 		for _, diagnostic := range bridge.Diagnostics {

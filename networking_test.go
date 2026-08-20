@@ -149,11 +149,11 @@ func TestNetworkingStatusMapsManagedVMsToTheirBridges(t *testing.T) {
 func TestNetworkingStatusIncludesBridgeDHCPConfiguration(t *testing.T) {
 	vms, _, settings := newTestVMManager(t)
 	bridgeProvider := &fakeDHCPBridgeProvider{}
-	dhcp, err := newDHCPManager(settings.DiskDir, bridgeProvider)
+	dhcp, err := newDHCPManager(settings.DiskDir, bridgeProvider, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dhcp.Configure("br-lab", true, defaultBridgeDHCPCIDR); err != nil {
+	if err := dhcp.Configure("br-lab", true, defaultBridgeDHCPCIDR, false); err != nil {
 		t.Fatal(err)
 	}
 	provider := &fakeNetworkProvider{status: networkingStatus{Bridges: []networkBridgeInfo{{Name: "br-lab", IsUp: true}}}}

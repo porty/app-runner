@@ -220,6 +220,8 @@ message BridgeDHCPStatus {
   bool running = 6;
   uint32 active_leases = 7;
   string last_error = 8;
+  bool nat_enabled = 9;
+  bool nat_running = 10;
 }
 
 message PendingNetworkChange {
@@ -274,6 +276,7 @@ message ConfigureBridgeDHCPRequest {
   string bridge_name = 1;
   bool enabled = 2;
   string cidr = 3;
+  bool nat_enabled = 4;
 }
 
 message ConfigureBridgeDHCPResponse {

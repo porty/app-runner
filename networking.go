@@ -227,11 +227,11 @@ func (m *networkManager) Status() (networkingStatus, error) {
 	return status, nil
 }
 
-func (m *networkManager) ConfigureBridgeDHCP(bridge string, enabled bool, cidr string) error {
+func (m *networkManager) ConfigureBridgeDHCP(bridge string, enabled bool, cidr string, natEnabled bool) error {
 	if m.dhcp == nil {
 		return errors.New("DHCP manager is not configured")
 	}
-	return m.dhcp.Configure(bridge, enabled, cidr)
+	return m.dhcp.Configure(bridge, enabled, cidr, natEnabled)
 }
 
 func (m *networkManager) Apply(_ context.Context, change networkChange) (pendingNetworkChange, error) {

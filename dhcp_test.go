@@ -33,6 +33,34 @@ type fakeManagedDHCPServer struct {
 	once   sync.Once
 }
 
+type fakeBridgeNATController struct {
+	started map[string]netip.Prefix
+	stopped []string
+}
+
+func newFakeBridgeNATController() *fakeBridgeNATController {
+	return &fakeBridgeNATController{started: make(map[string]netip.Prefix)}
+}
+
+func (c *fakeBridgeNATController) Start(bridge string, prefix netip.Prefix) error {
+	c.started[bridge] = prefix
+	return nil
+}
+
+func (c *fakeBridgeNATController) Stop(bridge string) error {
+	delete(c.started, bridge)
+	c.stopped = append(c.stopped, bridge)
+	return nil
+}
+
+func (c *fakeBridgeNATController) Running(bridge string) bool {
+	_, found := c.started[bridge]
+	return found
+}
+
+func (c *fakeBridgeNATController) FinishRecovery() error { return nil }
+func (c *fakeBridgeNATController) Close() error          { return nil }
+
 func newFakeManagedDHCPServer() *fakeManagedDHCPServer {
 	return &fakeManagedDHCPServer{closed: make(chan struct{})}
 }
@@ -83,12 +111,12 @@ func TestParseDHCPRangeReservesStaticAddressesBeforeFifty(t *testing.T) {
 func TestDHCPManagerPersistsLeasesAndHonoursRequestedAddresses(t *testing.T) {
 	directory := t.TempDir()
 	provider := &fakeDHCPBridgeProvider{}
-	manager, err := newDHCPManager(directory, provider)
+	manager, err := newDHCPManager(directory, provider, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	manager.now = func() time.Time { return time.Date(2026, 8, 20, 1, 0, 0, 0, time.UTC) }
-	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR); err != nil {
+	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR, false); err != nil {
 		t.Fatal(err)
 	}
 	network, _ := parseDHCPRange(defaultBridgeDHCPCIDR)
@@ -102,7 +130,7 @@ func TestDHCPManagerPersistsLeasesAndHonoursRequestedAddresses(t *testing.T) {
 		t.Fatalf("requested address was not leased: %s, %v", second, err)
 	}
 
-	reloaded, err := newDHCPManager(directory, provider)
+	reloaded, err := newDHCPManager(directory, provider, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +143,7 @@ func TestDHCPManagerPersistsLeasesAndHonoursRequestedAddresses(t *testing.T) {
 
 func TestDHCPManagerStartsOnceAndStopsAfterLastVM(t *testing.T) {
 	provider := &fakeDHCPBridgeProvider{}
-	manager, err := newDHCPManager(t.TempDir(), provider)
+	manager, err := newDHCPManager(t.TempDir(), provider, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +153,7 @@ func TestDHCPManagerStartsOnceAndStopsAfterLastVM(t *testing.T) {
 		servers = append(servers, server)
 		return server, nil
 	}
-	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR); err != nil {
+	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR, false); err != nil {
 		t.Fatal(err)
 	}
 	first := virtualMachine{ID: "one", NetworkMode: networkModeBridge, BridgeName: "br0"}
@@ -139,7 +167,7 @@ func TestDHCPManagerStartsOnceAndStopsAfterLastVM(t *testing.T) {
 	if len(servers) != 1 || len(provider.ensured) != 1 || !manager.Status("br0").Running {
 		t.Fatalf("expected one running server: servers=%d ensured=%d status=%#v", len(servers), len(provider.ensured), manager.Status("br0"))
 	}
-	if err := manager.Configure("br0", false, ""); err == nil {
+	if err := manager.Configure("br0", false, "", false); err == nil {
 		t.Fatal("DHCP configuration changed while VMs were active")
 	}
 	manager.Release(first)
@@ -159,7 +187,7 @@ func TestDHCPManagerStartsOnceAndStopsAfterLastVM(t *testing.T) {
 
 func TestDHCPHandlerOffersFirstPoolAddress(t *testing.T) {
 	provider := &fakeDHCPBridgeProvider{}
-	manager, err := newDHCPManager(t.TempDir(), provider)
+	manager, err := newDHCPManager(t.TempDir(), provider, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +197,7 @@ func TestDHCPHandlerOffersFirstPoolAddress(t *testing.T) {
 		handler = supplied
 		return newFakeManagedDHCPServer(), nil
 	}
-	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR); err != nil {
+	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR, false); err != nil {
 		t.Fatal(err)
 	}
 	vm := virtualMachine{ID: "one", NetworkMode: networkModeBridge, BridgeName: "br0"}
@@ -197,6 +225,9 @@ func TestDHCPHandlerOffersFirstPoolAddress(t *testing.T) {
 	if !offer.ServerIdentifier().Equal(net.ParseIP("192.168.100.1")) {
 		t.Fatalf("unexpected server identifier: %s", offer.ServerIdentifier())
 	}
+	if routers := offer.Router(); len(routers) != 0 {
+		t.Fatalf("non-NAT DHCP offer unexpectedly supplied routers: %v", routers)
+	}
 
 	conflictingRequest, err := dhcpv4.New(
 		dhcpv4.WithMessageType(dhcpv4.MessageTypeRequest),
@@ -218,14 +249,73 @@ func TestDHCPHandlerOffersFirstPoolAddress(t *testing.T) {
 	}
 }
 
+func TestDHCPNATStartsOnceAndSuppliesBridgeAsRouter(t *testing.T) {
+	provider := &fakeDHCPBridgeProvider{}
+	nat := newFakeBridgeNATController()
+	manager, err := newDHCPManager(t.TempDir(), provider, nat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var handler server4.Handler
+	manager.newServer = func(_ string, supplied server4.Handler) (managedDHCPServer, error) {
+		handler = supplied
+		return newFakeManagedDHCPServer(), nil
+	}
+	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR, true); err != nil {
+		t.Fatal(err)
+	}
+	first := virtualMachine{ID: "one", NetworkMode: networkModeBridge, BridgeName: "br0"}
+	second := virtualMachine{ID: "two", NetworkMode: networkModeBridge, BridgeName: "br0"}
+	if err := manager.Prepare(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Prepare(second); err != nil {
+		t.Fatal(err)
+	}
+	if len(nat.started) != 1 || !manager.Status("br0").NATRunning {
+		t.Fatalf("NAT did not share the DHCP lifecycle: %#v", manager.Status("br0"))
+	}
+	discover, err := dhcpv4.NewDiscovery(net.HardwareAddr{0x52, 0x54, 0x00, 0, 0, 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection := &recordingPacketConn{}
+	handler(connection, &net.UDPAddr{IP: net.IPv4bcast, Port: dhcpv4.ClientPort}, discover)
+	offer, err := dhcpv4.FromBytes(connection.packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if routers := offer.Router(); len(routers) != 1 || !routers[0].Equal(net.ParseIP("192.168.100.1")) {
+		t.Fatalf("NAT offer did not advertise the bridge address as router: %v", routers)
+	}
+	manager.Release(first)
+	if !nat.Running("br0") {
+		t.Fatal("NAT stopped while a VM still used the bridge")
+	}
+	manager.Release(second)
+	if nat.Running("br0") || len(nat.stopped) != 1 {
+		t.Fatalf("NAT was not stopped with the last VM: running=%v stopped=%v", nat.Running("br0"), nat.stopped)
+	}
+}
+
+func TestDHCPRejectsNATWithoutDHCP(t *testing.T) {
+	manager, err := newDHCPManager(t.TempDir(), &fakeDHCPBridgeProvider{}, newFakeBridgeNATController())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Configure("br0", false, "", true); err == nil {
+		t.Fatal("NAT without managed DHCP was accepted")
+	}
+}
+
 func TestDHCPManagerReportsBridgePreparationFailure(t *testing.T) {
 	provider := &fakeDHCPBridgeProvider{err: errors.New("conflicting address")}
-	manager, err := newDHCPManager(t.TempDir(), provider)
+	manager, err := newDHCPManager(t.TempDir(), provider, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	provider.err = nil
-	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR); err != nil {
+	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR, false); err != nil {
 		t.Fatal(err)
 	}
 	provider.err = errors.New("conflicting address")
@@ -237,17 +327,17 @@ func TestDHCPManagerReportsBridgePreparationFailure(t *testing.T) {
 
 func TestDHCPManagerSuggestsAndEnforcesDistinctBridgeRanges(t *testing.T) {
 	provider := &fakeDHCPBridgeProvider{}
-	manager, err := newDHCPManager(t.TempDir(), provider)
+	manager, err := newDHCPManager(t.TempDir(), provider, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Configure("br0", true, "192.168.100.0/24"); err != nil {
+	if err := manager.Configure("br0", true, "192.168.100.0/24", false); err != nil {
 		t.Fatal(err)
 	}
 	if suggestion := manager.Status("br1").CIDR; suggestion != "192.168.101.0/24" {
 		t.Fatalf("unexpected range suggestion for second bridge: %s", suggestion)
 	}
-	if err := manager.Configure("br1", true, "192.168.100.0/24"); err == nil {
+	if err := manager.Configure("br1", true, "192.168.100.0/24", false); err == nil {
 		t.Fatal("overlapping bridge DHCP ranges were accepted")
 	}
 }

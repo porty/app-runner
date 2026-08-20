@@ -28,6 +28,7 @@ const (
 type bridgeDHCPConfig struct {
 	Enabled bool   `json:"enabled"`
 	CIDR    string `json:"cidr"`
+	NAT     bool   `json:"nat,omitempty"`
 }
 
 type dhcpLease struct {
@@ -51,6 +52,8 @@ type bridgeDHCPStatus struct {
 	Running       bool
 	ActiveLeases  uint32
 	LastError     string
+	NATEnabled    bool
+	NATRunning    bool
 }
 
 type dhcpRange struct {
@@ -77,6 +80,7 @@ type dhcpRuntime struct {
 	server  managedDHCPServer
 	users   map[string]struct{}
 	running bool
+	nat     bool
 }
 
 type dhcpManager struct {
@@ -84,19 +88,21 @@ type dhcpManager struct {
 	path      string
 	provider  dhcpBridgeProvider
 	newServer dhcpServerFactory
+	nat       bridgeNATController
 	now       func() time.Time
 	state     dhcpPersistedState
 	runtimes  map[string]*dhcpRuntime
 	errors    map[string]string
 }
 
-func newDHCPManager(diskDirectory string, provider dhcpBridgeProvider) (*dhcpManager, error) {
+func newDHCPManager(diskDirectory string, provider dhcpBridgeProvider, nat bridgeNATController) (*dhcpManager, error) {
 	manager := &dhcpManager{
 		path: filepath.Join(diskDirectory, "dhcp.json"), provider: provider,
 		newServer: newInProcessDHCPServer, now: time.Now,
 		state:    dhcpPersistedState{Bridges: make(map[string]bridgeDHCPConfig), Leases: make(map[string]map[string]dhcpLease)},
 		runtimes: make(map[string]*dhcpRuntime), errors: make(map[string]string),
 	}
+	manager.nat = nat
 	if err := manager.load(); err != nil {
 		return nil, err
 	}
@@ -107,11 +113,14 @@ func newInProcessDHCPServer(bridge string, handler server4.Handler) (managedDHCP
 	return server4.NewServer(bridge, &net.UDPAddr{IP: net.IPv4zero, Port: dhcpv4.ServerPort}, handler)
 }
 
-func (m *dhcpManager) Configure(bridge string, enabled bool, cidr string) error {
+func (m *dhcpManager) Configure(bridge string, enabled bool, cidr string, natEnabled bool) error {
 	if err := validateInterfaceName(bridge); err != nil {
 		return fmt.Errorf("bridge name %w", err)
 	}
 	parsed := dhcpRange{}
+	if natEnabled && !enabled {
+		return errors.New("NAT requires managed DHCP to be enabled")
+	}
 	if enabled {
 		if strings.TrimSpace(cidr) == "" {
 			cidr = defaultBridgeDHCPCIDR
@@ -145,7 +154,7 @@ func (m *dhcpManager) Configure(bridge string, enabled bool, cidr string) error 
 	previous, found := m.state.Bridges[bridge]
 	previousLeases := m.state.Leases[bridge]
 	if enabled {
-		m.state.Bridges[bridge] = bridgeDHCPConfig{Enabled: true, CIDR: parsed.Prefix.String()}
+		m.state.Bridges[bridge] = bridgeDHCPConfig{Enabled: true, CIDR: parsed.Prefix.String(), NAT: natEnabled}
 	} else {
 		delete(m.state.Bridges, bridge)
 	}
@@ -182,6 +191,7 @@ func (m *dhcpManager) Status(bridge string) bridgeDHCPStatus {
 		return status
 	}
 	status.Enabled = true
+	status.NATEnabled = config.NAT
 	status.CIDR = config.CIDR
 	parsed, err := parseDHCPRange(config.CIDR)
 	if err != nil {
@@ -192,6 +202,7 @@ func (m *dhcpManager) Status(bridge string) bridgeDHCPStatus {
 	status.PoolStart = parsed.PoolStart.String()
 	status.PoolEnd = parsed.PoolEnd.String()
 	status.Running = m.runtimes[bridge] != nil && m.runtimes[bridge].running
+	status.NATRunning = m.nat != nil && m.nat.Running(bridge)
 	now := m.now()
 	for _, lease := range m.state.Leases[bridge] {
 		if lease.ExpiresAt.After(now) {
@@ -252,11 +263,27 @@ func (m *dhcpManager) Prepare(vm virtualMachine) error {
 		m.errors[vm.BridgeName] = err.Error()
 		return fmt.Errorf("prepare bridge DHCP address: %w", err)
 	}
+	natStarted := false
+	if config.NAT {
+		if m.nat == nil {
+			err := errors.New("NAT manager is not configured")
+			m.errors[vm.BridgeName] = err.Error()
+			return err
+		}
+		if err := m.nat.Start(vm.BridgeName, parsed.Prefix); err != nil {
+			m.errors[vm.BridgeName] = err.Error()
+			return fmt.Errorf("start NAT for %s: %w", vm.BridgeName, err)
+		}
+		natStarted = true
+	}
 	handler := func(connection net.PacketConn, peer net.Addr, request *dhcpv4.DHCPv4) {
-		m.handlePacket(vm.BridgeName, parsed, connection, peer, request)
+		m.handlePacket(vm.BridgeName, parsed, config.NAT, connection, peer, request)
 	}
 	server, err := m.newServer(vm.BridgeName, handler)
 	if err != nil {
+		if natStarted {
+			err = errors.Join(err, m.nat.Stop(vm.BridgeName))
+		}
 		m.errors[vm.BridgeName] = err.Error()
 		return fmt.Errorf("start DHCP listener on %s: %w", vm.BridgeName, err)
 	}
@@ -266,6 +293,7 @@ func (m *dhcpManager) Prepare(vm virtualMachine) error {
 	}
 	runtime.server = server
 	runtime.running = true
+	runtime.nat = config.NAT
 	delete(m.errors, vm.BridgeName)
 	go m.serve(vm.BridgeName, runtime)
 	slog.Info("bridge DHCP server started", "bridge", vm.BridgeName, "cidr", parsed.Prefix.String(), "pool_start", parsed.PoolStart, "pool_end", parsed.PoolEnd)
@@ -294,6 +322,14 @@ func (m *dhcpManager) Release(vm virtualMachine) {
 			slog.Warn("close bridge DHCP server", "bridge", vm.BridgeName, "error", err)
 		}
 	}
+	if runtime.nat && m.nat != nil {
+		if err := m.nat.Stop(vm.BridgeName); err != nil {
+			m.mu.Lock()
+			m.errors[vm.BridgeName] = err.Error()
+			m.mu.Unlock()
+			slog.Warn("stop bridge NAT", "bridge", vm.BridgeName, "error", err)
+		}
+	}
 	slog.Info("bridge DHCP server stopped", "bridge", vm.BridgeName)
 }
 
@@ -306,6 +342,9 @@ func (m *dhcpManager) Reconcile(vms []virtualMachine) error {
 		if err := m.Prepare(vm); err != nil {
 			result = errors.Join(result, fmt.Errorf("restore DHCP for VM %s: %w", vm.Name, err))
 		}
+	}
+	if m.nat != nil {
+		result = errors.Join(result, m.nat.FinishRecovery())
 	}
 	return result
 }
@@ -323,6 +362,9 @@ func (m *dhcpManager) Close() error {
 		if err := runtime.server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			result = errors.Join(result, err)
 		}
+	}
+	if m.nat != nil {
+		result = errors.Join(result, m.nat.Close())
 	}
 	return result
 }
@@ -342,7 +384,7 @@ func (m *dhcpManager) serve(bridge string, runtime *dhcpRuntime) {
 	}
 }
 
-func (m *dhcpManager) handlePacket(bridge string, network dhcpRange, connection net.PacketConn, peer net.Addr, request *dhcpv4.DHCPv4) {
+func (m *dhcpManager) handlePacket(bridge string, network dhcpRange, natEnabled bool, connection net.PacketConn, peer net.Addr, request *dhcpv4.DHCPv4) {
 	if request == nil || request.OpCode != dhcpv4.OpcodeBootRequest {
 		return
 	}
@@ -398,6 +440,9 @@ func (m *dhcpManager) handlePacket(bridge string, network dhcpRange, connection 
 		prefixBits := network.Prefix.Bits()
 		reply.UpdateOption(dhcpv4.OptSubnetMask(net.CIDRMask(prefixBits, 32)))
 		reply.UpdateOption(dhcpv4.OptBroadcastAddress(net.IP(network.Broadcast.AsSlice())))
+		if natEnabled {
+			reply.UpdateOption(dhcpv4.OptRouter(net.IP(network.Server.AsSlice())))
+		}
 		if messageType != dhcpv4.MessageTypeInform {
 			reply.UpdateOption(dhcpv4.OptIPAddressLeaseTime(dhcpLeaseDuration))
 		}
