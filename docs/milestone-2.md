@@ -44,6 +44,13 @@ Launch and manage QEMU/KVM virtual machines from the web interface.
 - persists pending rollback data and restores it immediately if App Runner restarts before confirmation
 - accepts network mutation RPCs only from loopback clients and requires root or CAP_NET_ADMIN
 - does not invoke `sudo` and does not write persistent NetworkManager, systemd-networkd, Netplan, or distribution network configuration
+- optionally configures an embedded, in-process DHCPv4 server for each bridge using a persisted IPv4 CIDR
+- assigns the first usable address to a DHCP-enabled bridge and begins dynamic leases at host offset 50, leaving lower addresses available for static assignments
+- suggests distinct private `/24` ranges for multiple bridges and rejects overlapping managed or host-interface subnets
+- starts a bridge's DHCP server before its first VM starts and stops it after the last VM on that bridge exits
+- persists DHCP leases and stable VM MAC addresses across backend restarts
+- reports DHCP socket capability diagnostics; DHCP requires UDP port 67 and bind-to-interface access in addition to bridge-management permission
+- does not imply NAT, forwarding, DNS, or Internet routing when managed DHCP is enabled
 
 ## Console
 
@@ -59,5 +66,6 @@ Launch and manage QEMU/KVM virtual machines from the web interface.
 - both NAT and bridge configurations generate the expected QEMU device arguments
 - networking inventory and diagnostics identify bridge usability and managed workload assignments
 - unconfirmed network mutations are reverted after 15 seconds and after a backend restart
+- DHCP configuration, `.50` pool allocation, lease persistence, packet responses, and per-bridge VM lifecycle are covered by automated tests
 - direct navigation to the VM list and console routes works in the production executable
 - configuration precedence, persistence, lifecycle behavior, QEMU argument construction, and relevant frontend API behavior have automated tests

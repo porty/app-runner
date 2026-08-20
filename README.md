@@ -81,6 +81,10 @@ User-mode NAT works without host network setup. Bridge mode stores a specific br
 
 Configuration → Networking provides a live inventory of bridges, member interfaces, addresses, link state, and managed workloads. It also reports the backend's effective username and groups, CAP_NET_ADMIN state, actual `/dev/net/tun` read/write result, and `qemu-bridge-helper` path, ownership, mode, setuid state, file capabilities and per-bridge allow-list result.
 
+Each bridge can optionally run App Runner's embedded DHCPv4 server. Configuration is stored in `disk/dhcp.json`; the default range is `192.168.100.0/24`, with the first usable address assigned to the bridge and dynamic leases beginning at host offset 50 (`192.168.100.50` for the default range). App Runner suggests a different `/24` for each additional bridge and rejects ranges that overlap another managed DHCP range or an existing host-interface subnet.
+
+The DHCP server starts before the first VM using that bridge and stops after the last VM has exited. Leases and stable per-VM MAC addresses are persisted, so clients retain their allocations across App Runner restarts. Managed DHCP supplies an address, subnet mask, and broadcast address only; it does not enable IP forwarding, NAT, DNS, or Internet routing. Do not enable it on a bridge already served by another DHCP server.
+
 A typical Linux setup requires:
 
 - an active bridge such as `br0`;
@@ -93,10 +97,10 @@ App Runner can make runtime-only bridge changes through Linux netlink: create or
 
 Every mutation is snapshotted before it is applied. The frontend must confirm connectivity within 15 seconds or the backend restores the affected link state, bridge membership, addresses and routes. Only one transaction can be pending, rollback state is stored under `disk/`, and an unconfirmed change is restored immediately after an App Runner restart.
 
-Network mutations require root or `CAP_NET_ADMIN`, never invoke `sudo`, and are accepted only from loopback clients. To grant only the bridge-management capability to a production build:
+Network mutations require root or `CAP_NET_ADMIN`, never invoke `sudo`, and are accepted only from loopback clients. Managed DHCP additionally needs permission to bind UDP port 67 and bind its socket to a bridge. To grant the capabilities used by bridge and DHCP management to a production build:
 
 ```sh
-sudo setcap cap_net_admin=+ep ./bin/app-runner
+sudo setcap cap_net_admin,cap_net_bind_service,cap_net_raw=+ep ./bin/app-runner
 ```
 
 Reapply the capability after replacing or rebuilding the executable. QEMU bridge operation separately requires a correctly permissioned `qemu-bridge-helper` and an `allow BRIDGE_NAME` entry in `/etc/qemu/bridge.conf`; the Networking page reports the exact state it observes.
