@@ -298,7 +298,7 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
         <DialogTitle>Managed network services for {dhcpBridge?.name}</DialogTitle>
         <DialogContent>
           {(dhcpBridge?.workloads ?? []).some((workload) => workload.running) && (
-            <Alert severity="info" sx={{ mt: 1, mb: 2 }}>Stop all running workloads on this bridge before changing its DHCP configuration.</Alert>
+            <Alert severity="warning" sx={{ mt: 1, mb: 2 }}>There are currently running workloads on this bridge</Alert>
           )}
           <FormControlLabel
             control={<Checkbox checked={dhcpEnabled} onChange={(event) => {
