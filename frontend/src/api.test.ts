@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { applyNetworkChange, createVM, echo, getNetworkingStatus, listVMs, ping } from './api'
+import { applyNetworkChange, configureBridgeDHCP, createVM, echo, getNetworkingStatus, listVMs, ping } from './api'
 
 describe('Twirp API client', () => {
   afterEach(() => {
@@ -101,7 +101,10 @@ describe('Twirp API client', () => {
 
   it('loads structured network diagnostics', async () => {
     const status = {
-      user: { username: 'app-runner', uid: 1000, is_root: false, has_cap_net_admin: false },
+      user: {
+        username: 'app-runner', uid: 1000, is_root: false, has_cap_net_admin: false,
+        has_cap_net_bind_service: false, has_cap_net_raw: false,
+      },
       diagnostics: [],
       bridges: [],
       interfaces: [],
@@ -151,6 +154,32 @@ describe('Twirp API client', () => {
           interface_name: 'eth0',
           migrate_addresses: true,
         }),
+      }),
+    )
+  })
+
+  it('configures DHCP for a specific bridge', async () => {
+    const status = {
+      user: {
+        username: 'app-runner', uid: 1000, is_root: false, has_cap_net_admin: true,
+        has_cap_net_bind_service: true, has_cap_net_raw: true,
+      },
+      bridges: [],
+      can_manage: true,
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(configureBridgeDHCP('br0', true, '192.168.100.0/24')).resolves.toEqual(status)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/twirp/apprunner.v1.AppRunnerService/ConfigureBridgeDHCP',
+      expect.objectContaining({
+        body: JSON.stringify({ bridge_name: 'br0', enabled: true, cidr: '192.168.100.0/24' }),
       }),
     )
   })

@@ -43,6 +43,7 @@ import { Link } from 'react-router-dom'
 import {
   applyNetworkChange,
   confirmNetworkChange,
+  configureBridgeDHCP,
   getNetworkingStatus,
   revertNetworkChange,
   type NetworkBridge,
@@ -62,6 +63,9 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
   const [attachBridge, setAttachBridge] = useState('')
   const [attachInterface, setAttachInterface] = useState('')
   const [migrateAddresses, setMigrateAddresses] = useState(true)
+  const [dhcpBridge, setDHCPBridge] = useState<NetworkBridge | null>(null)
+  const [dhcpEnabled, setDHCPEnabled] = useState(false)
+  const [dhcpCIDR, setDHCPCIDR] = useState('192.168.100.0/24')
 
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true)
@@ -120,6 +124,20 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
     }
   }
 
+  const configureDHCP = async () => {
+    if (!dhcpBridge) return
+    setBusy(true)
+    setError('')
+    try {
+      setStatus(await configureBridgeDHCP(dhcpBridge.name, dhcpEnabled, dhcpCIDR.trim()))
+      setDHCPBridge(null)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to configure bridge DHCP')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const bridges = status?.bridges ?? []
   const interfaces = status?.interfaces ?? []
   const attachableInterfaces = interfaces.filter((networkInterface) => networkInterface.can_attach)
@@ -167,11 +185,17 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
             key={bridge.name}
             bridge={bridge}
             disabled={mutationsDisabled}
+            configurationDisabled={busy || Boolean(status?.pending_change)}
             canAttach={attachableInterfaces.length > 0}
             onApply={apply}
             onAttach={() => {
               setAttachBridge(bridge.name)
               setAttachInterface(attachableInterfaces[0]?.name ?? '')
+            }}
+            onConfigureDHCP={() => {
+              setDHCPBridge(bridge)
+              setDHCPEnabled(Boolean(bridge.dhcp?.enabled))
+              setDHCPCIDR(bridge.dhcp?.cidr || '192.168.100.0/24')
             }}
           />
         ))}
@@ -242,6 +266,41 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Dialog open={Boolean(dhcpBridge)} onClose={() => setDHCPBridge(null)} fullWidth maxWidth="sm">
+        <DialogTitle>DHCP settings for {dhcpBridge?.name}</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mt: 1, mb: 2 }}>
+            Only enable this server when another DHCP server is not already serving the bridge. App Runner assigns the first usable address to the bridge, leases addresses beginning at host offset 50, and does not provide NAT or Internet routing.
+          </Alert>
+          {(dhcpBridge?.workloads ?? []).some((workload) => workload.running) && (
+            <Alert severity="info" sx={{ mb: 2 }}>Stop all running workloads on this bridge before changing its DHCP configuration.</Alert>
+          )}
+          <FormControlLabel
+            control={<Checkbox checked={dhcpEnabled} onChange={(event) => setDHCPEnabled(event.target.checked)} />}
+            label="Enable App Runner DHCP for this bridge"
+          />
+          <TextField
+            fullWidth
+            label="IPv4 range (CIDR)"
+            value={dhcpCIDR}
+            onChange={(event) => setDHCPCIDR(event.target.value)}
+            disabled={!dhcpEnabled}
+            helperText="Example: 192.168.100.0/24 reserves .1 for the bridge and leases .50–.254"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDHCPBridge(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={busy || (dhcpEnabled && !dhcpCIDR.trim()) || (dhcpBridge?.workloads ?? []).some((workload) => workload.running)}
+            onClick={() => void configureDHCP()}
+          >
+            Save DHCP settings
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }
@@ -264,15 +323,18 @@ function IdentitySummary({ status }: { status: NetworkingStatus }) {
   )
 }
 
-function BridgeCard({ bridge, disabled, canAttach, onApply, onAttach }: {
+function BridgeCard({ bridge, disabled, configurationDisabled, canAttach, onApply, onAttach, onConfigureDHCP }: {
   bridge: NetworkBridge
   disabled: boolean
+  configurationDisabled: boolean
   canAttach: boolean
   onApply: (change: NetworkChangeRequest) => Promise<void>
   onAttach: () => void
+  onConfigureDHCP: () => void
 }) {
   const members = bridge.member_interfaces ?? []
   const workloads = bridge.workloads ?? []
+  const dhcp = bridge.dhcp
   const deleteBridge = () => {
     if (!window.confirm(`Delete bridge ${bridge.name}? The change will still require confirmation.`)) return
     void onApply({ type: 'NETWORK_CHANGE_TYPE_DELETE_BRIDGE', bridge_name: bridge.name })
@@ -288,6 +350,11 @@ function BridgeCard({ bridge, disabled, canAttach, onApply, onAttach }: {
               <Typography variant="h6">{bridge.name}</Typography>
               <Chip size="small" color={bridge.is_up ? 'success' : 'default'} label={bridge.is_up ? 'Up' : 'Down'} />
               <Chip size="small" color={bridge.usable_by_qemu ? 'success' : 'warning'} label={bridge.usable_by_qemu ? 'QEMU ready' : 'Diagnostics required'} />
+              <Chip
+                size="small"
+                color={dhcp?.running ? 'success' : dhcp?.enabled ? 'primary' : 'default'}
+                label={dhcp?.running ? 'DHCP running' : dhcp?.enabled ? 'DHCP enabled' : 'DHCP off'}
+              />
             </Stack>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               MTU {bridge.mtu} · {bridge.hardware_address || 'no hardware address'} · {(bridge.addresses ?? []).join(', ') || 'no addresses'}
@@ -298,7 +365,8 @@ function BridgeCard({ bridge, disabled, canAttach, onApply, onAttach }: {
               Bring {bridge.is_up ? 'down' : 'up'}
             </Button>
             <Button size="small" startIcon={<CableRounded />} disabled={disabled || !canAttach} onClick={onAttach}>Attach interface</Button>
-            <Button size="small" color="error" startIcon={<DeleteOutlineRounded />} disabled={disabled || members.length > 0 || workloads.length > 0} onClick={deleteBridge}>Delete</Button>
+            <Button size="small" disabled={configurationDisabled} onClick={onConfigureDHCP}>DHCP settings</Button>
+            <Button size="small" color="error" startIcon={<DeleteOutlineRounded />} disabled={disabled || members.length > 0 || workloads.length > 0 || dhcp?.enabled} onClick={deleteBridge}>Delete</Button>
           </Stack>
         </Stack>
 
@@ -318,6 +386,19 @@ function BridgeCard({ bridge, disabled, canAttach, onApply, onAttach }: {
                 </Stack>
               ))}
             </Stack>
+          </Box>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>Managed DHCP</Typography>
+            {!dhcp?.enabled && <Typography variant="body2" color="text.secondary">Disabled for this bridge.</Typography>}
+            {dhcp?.enabled && (
+              <Stack spacing={0.5}>
+                <Typography variant="body2">Range: <Box component="code" sx={{ fontFamily: 'monospace' }}>{dhcp.cidr}</Box></Typography>
+                <Typography variant="body2">Bridge address: <Box component="code" sx={{ fontFamily: 'monospace' }}>{dhcp.server_address}</Box></Typography>
+                <Typography variant="body2">Lease pool: <Box component="code" sx={{ fontFamily: 'monospace' }}>{dhcp.pool_start}–{dhcp.pool_end}</Box></Typography>
+                <Typography variant="body2" color="text.secondary">{dhcp.active_leases} active lease{dhcp.active_leases === 1 ? '' : 's'}</Typography>
+                {dhcp.last_error && <Alert severity="error" sx={{ mt: 1 }}>{dhcp.last_error}</Alert>}
+              </Stack>
+            )}
           </Box>
           <Box sx={{ flex: 1 }}>
             <Typography variant="subtitle2" sx={{ mb: 1 }}>Managed workloads</Typography>
@@ -465,7 +546,7 @@ function splitDiagnosticText(text: string): Array<{ text: string; terminal: bool
 
 function formatInlineCode(text: string) {
   const normalized = text.replace(/'((?:allow|deny)\s+[^']+)'/g, '`$1`')
-  const codePattern = /(`[^`]+`|(?:\.{0,2}\/|\/)(?:[\w.-]+\/)*[\w.-]+|\bCAP_NET_ADMIN\b|\b(?:executable|setuid|file-capabilities)=(?:true|false)\b|\b[\w.-]+:[\w.-]+\b|\b0?[0-7]{3,4}\b)/g
+  const codePattern = /(`[^`]+`|(?:\.{0,2}\/|\/)(?:[\w.-]+\/)*[\w.-]+|\bCAP_NET_(?:ADMIN|BIND_SERVICE|RAW)\b|\b(?:executable|setuid|file-capabilities)=(?:true|false)\b|\b[\w.-]+:[\w.-]+\b|\b0?[0-7]{3,4}\b)/g
   return normalized.split(codePattern).filter(Boolean).map((part, index) => {
     const explicitlyMarked = part.startsWith('`') && part.endsWith('`')
     if (explicitlyMarked || codePattern.test(part)) {

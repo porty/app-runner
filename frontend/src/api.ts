@@ -85,6 +85,8 @@ export interface UserIdentity {
   groups?: string[]
   is_root: boolean
   has_cap_net_admin: boolean
+  has_cap_net_bind_service: boolean
+  has_cap_net_raw: boolean
 }
 
 export interface NetworkInterface {
@@ -115,6 +117,18 @@ export interface NetworkBridge {
   workloads?: WorkloadAttachment[]
   diagnostics?: NetworkDiagnostic[]
   usable_by_qemu: boolean
+  dhcp?: BridgeDHCPStatus
+}
+
+export interface BridgeDHCPStatus {
+  enabled: boolean
+  cidr: string
+  server_address?: string
+  pool_start?: string
+  pool_end?: string
+  running: boolean
+  active_leases: number
+  last_error?: string
 }
 
 export interface PendingNetworkChange {
@@ -235,5 +249,14 @@ export async function confirmNetworkChange(id: string): Promise<NetworkingStatus
 
 export async function revertNetworkChange(id: string): Promise<NetworkingStatus> {
   const response = await callTwirp<{ status: NetworkingStatus }>('RevertNetworkChange', { id })
+  return response.status
+}
+
+export async function configureBridgeDHCP(bridgeName: string, enabled: boolean, cidr: string): Promise<NetworkingStatus> {
+  const response = await callTwirp<{ status: NetworkingStatus }>('ConfigureBridgeDHCP', {
+    bridge_name: bridgeName,
+    enabled,
+    cidr,
+  })
   return response.status
 }
