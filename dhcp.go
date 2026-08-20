@@ -365,9 +365,14 @@ func (m *dhcpManager) handlePacket(bridge string, network dhcpRange, connection 
 	if messageType == dhcpv4.MessageTypeInform {
 		replyType = dhcpv4.MessageTypeAck
 	} else {
-		requested := requestedAddress(request)
+		requested := netip.Addr{}
+		strictRequested := false
+		if messageType == dhcpv4.MessageTypeRequest {
+			requested = requestedAddress(request)
+			strictRequested = requested.IsValid()
+		}
 		var err error
-		leaseAddress, err = m.acquireLease(bridge, network, clientKey(request), request.ClientHWAddr.String(), requested)
+		leaseAddress, err = m.acquireLease(bridge, network, clientKey(request), request.ClientHWAddr.String(), requested, strictRequested)
 		if err != nil {
 			if messageType != dhcpv4.MessageTypeRequest {
 				slog.Warn("DHCP address allocation failed", "bridge", bridge, "client", request.ClientHWAddr, "error", err)
@@ -393,14 +398,16 @@ func (m *dhcpManager) handlePacket(bridge string, network dhcpRange, connection 
 		prefixBits := network.Prefix.Bits()
 		reply.UpdateOption(dhcpv4.OptSubnetMask(net.CIDRMask(prefixBits, 32)))
 		reply.UpdateOption(dhcpv4.OptBroadcastAddress(net.IP(network.Broadcast.AsSlice())))
-		reply.UpdateOption(dhcpv4.OptIPAddressLeaseTime(dhcpLeaseDuration))
+		if messageType != dhcpv4.MessageTypeInform {
+			reply.UpdateOption(dhcpv4.OptIPAddressLeaseTime(dhcpLeaseDuration))
+		}
 	}
 	if _, err := connection.WriteTo(reply.ToBytes(), peer); err != nil {
 		slog.Warn("send DHCP response", "bridge", bridge, "client", request.ClientHWAddr, "error", err)
 	}
 }
 
-func (m *dhcpManager) acquireLease(bridge string, network dhcpRange, key, hardwareAddress string, requested netip.Addr) (netip.Addr, error) {
+func (m *dhcpManager) acquireLease(bridge string, network dhcpRange, key, hardwareAddress string, requested netip.Addr, strictRequested bool) (netip.Addr, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := m.now()
@@ -417,7 +424,7 @@ func (m *dhcpManager) acquireLease(bridge string, network dhcpRange, key, hardwa
 	}
 	if existing, found := leases[key]; found {
 		address, _ := netip.ParseAddr(existing.Address)
-		if requested.IsValid() && requested != address {
+		if strictRequested && requested.IsValid() && requested != address {
 			return netip.Addr{}, fmt.Errorf("requested address %s does not match the existing lease %s", requested, address)
 		}
 		existing.ExpiresAt = now.Add(dhcpLeaseDuration)
@@ -438,7 +445,11 @@ func (m *dhcpManager) acquireLease(bridge string, network dhcpRange, key, hardwa
 	if requested.IsValid() && addressInDHCPPool(network, requested) {
 		if _, exists := used[requested]; !exists {
 			address = requested
+		} else if strictRequested {
+			return netip.Addr{}, fmt.Errorf("requested address %s is already leased", requested)
 		}
+	} else if strictRequested {
+		return netip.Addr{}, fmt.Errorf("requested address %s is outside the DHCP pool", requested)
 	}
 	if !address.IsValid() {
 		for candidate := network.PoolStart; compareIPv4(candidate, network.PoolEnd) <= 0; candidate = candidate.Next() {

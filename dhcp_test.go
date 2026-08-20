@@ -92,12 +92,12 @@ func TestDHCPManagerPersistsLeasesAndHonoursRequestedAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	network, _ := parseDHCPRange(defaultBridgeDHCPCIDR)
-	first, err := manager.acquireLease("br0", network, "mac:one", "52:54:00:00:00:01", netip.Addr{})
+	first, err := manager.acquireLease("br0", network, "mac:one", "52:54:00:00:00:01", netip.Addr{}, false)
 	if err != nil || first.String() != "192.168.100.50" {
 		t.Fatalf("unexpected first lease: %s, %v", first, err)
 	}
 	requested := netip.MustParseAddr("192.168.100.75")
-	second, err := manager.acquireLease("br0", network, "mac:two", "52:54:00:00:00:02", requested)
+	second, err := manager.acquireLease("br0", network, "mac:two", "52:54:00:00:00:02", requested, false)
 	if err != nil || second != requested {
 		t.Fatalf("requested address was not leased: %s, %v", second, err)
 	}
@@ -107,7 +107,7 @@ func TestDHCPManagerPersistsLeasesAndHonoursRequestedAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	reloaded.now = manager.now
-	lease, err := reloaded.acquireLease("br0", network, "mac:one", "52:54:00:00:00:01", first)
+	lease, err := reloaded.acquireLease("br0", network, "mac:one", "52:54:00:00:00:01", first, true)
 	if err != nil || lease != first || reloaded.Status("br0").ActiveLeases != 2 {
 		t.Fatalf("leases were not restored: %s, %v, %#v", lease, err, reloaded.Status("br0"))
 	}
@@ -196,6 +196,25 @@ func TestDHCPHandlerOffersFirstPoolAddress(t *testing.T) {
 	}
 	if !offer.ServerIdentifier().Equal(net.ParseIP("192.168.100.1")) {
 		t.Fatalf("unexpected server identifier: %s", offer.ServerIdentifier())
+	}
+
+	conflictingRequest, err := dhcpv4.New(
+		dhcpv4.WithMessageType(dhcpv4.MessageTypeRequest),
+		dhcpv4.WithHwAddr(net.HardwareAddr{0x52, 0x54, 0x00, 0, 0, 2}),
+		dhcpv4.WithOption(dhcpv4.OptRequestedIPAddress(net.ParseIP("192.168.100.50"))),
+		dhcpv4.WithOption(dhcpv4.OptServerIdentifier(net.ParseIP("192.168.100.1"))),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection.packet = nil
+	handler(connection, peer, conflictingRequest)
+	nak, err := dhcpv4.FromBytes(connection.packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nak.MessageType() != dhcpv4.MessageTypeNak {
+		t.Fatalf("conflicting request was not rejected: %s", nak.Summary())
 	}
 }
 
