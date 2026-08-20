@@ -1877,6 +1877,11 @@ type BridgeDHCPStatus struct {
 	LastError     string                 `protobuf:"bytes,8,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
 	NatEnabled    bool                   `protobuf:"varint,9,opt,name=nat_enabled,json=natEnabled,proto3" json:"nat_enabled,omitempty"`
 	NatRunning    bool                   `protobuf:"varint,10,opt,name=nat_running,json=natRunning,proto3" json:"nat_running,omitempty"`
+	DnsEnabled    bool                   `protobuf:"varint,11,opt,name=dns_enabled,json=dnsEnabled,proto3" json:"dns_enabled,omitempty"`
+	DnsForwarders []string               `protobuf:"bytes,12,rep,name=dns_forwarders,json=dnsForwarders,proto3" json:"dns_forwarders,omitempty"`
+	AutoDns       bool                   `protobuf:"varint,13,opt,name=auto_dns,json=autoDns,proto3" json:"auto_dns,omitempty"`
+	DnsSuffix     string                 `protobuf:"bytes,14,opt,name=dns_suffix,json=dnsSuffix,proto3" json:"dns_suffix,omitempty"`
+	DnsRunning    bool                   `protobuf:"varint,15,opt,name=dns_running,json=dnsRunning,proto3" json:"dns_running,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1977,6 +1982,41 @@ func (x *BridgeDHCPStatus) GetNatEnabled() bool {
 func (x *BridgeDHCPStatus) GetNatRunning() bool {
 	if x != nil {
 		return x.NatRunning
+	}
+	return false
+}
+
+func (x *BridgeDHCPStatus) GetDnsEnabled() bool {
+	if x != nil {
+		return x.DnsEnabled
+	}
+	return false
+}
+
+func (x *BridgeDHCPStatus) GetDnsForwarders() []string {
+	if x != nil {
+		return x.DnsForwarders
+	}
+	return nil
+}
+
+func (x *BridgeDHCPStatus) GetAutoDns() bool {
+	if x != nil {
+		return x.AutoDns
+	}
+	return false
+}
+
+func (x *BridgeDHCPStatus) GetDnsSuffix() string {
+	if x != nil {
+		return x.DnsSuffix
+	}
+	return ""
+}
+
+func (x *BridgeDHCPStatus) GetDnsRunning() bool {
+	if x != nil {
+		return x.DnsRunning
 	}
 	return false
 }
@@ -2499,6 +2539,10 @@ type ConfigureBridgeDHCPRequest struct {
 	Enabled       bool                   `protobuf:"varint,2,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	Cidr          string                 `protobuf:"bytes,3,opt,name=cidr,proto3" json:"cidr,omitempty"`
 	NatEnabled    bool                   `protobuf:"varint,4,opt,name=nat_enabled,json=natEnabled,proto3" json:"nat_enabled,omitempty"`
+	DnsEnabled    bool                   `protobuf:"varint,5,opt,name=dns_enabled,json=dnsEnabled,proto3" json:"dns_enabled,omitempty"`
+	DnsForwarders []string               `protobuf:"bytes,6,rep,name=dns_forwarders,json=dnsForwarders,proto3" json:"dns_forwarders,omitempty"`
+	AutoDns       bool                   `protobuf:"varint,7,opt,name=auto_dns,json=autoDns,proto3" json:"auto_dns,omitempty"`
+	DnsSuffix     string                 `protobuf:"bytes,8,opt,name=dns_suffix,json=dnsSuffix,proto3" json:"dns_suffix,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2559,6 +2603,34 @@ func (x *ConfigureBridgeDHCPRequest) GetNatEnabled() bool {
 		return x.NatEnabled
 	}
 	return false
+}
+
+func (x *ConfigureBridgeDHCPRequest) GetDnsEnabled() bool {
+	if x != nil {
+		return x.DnsEnabled
+	}
+	return false
+}
+
+func (x *ConfigureBridgeDHCPRequest) GetDnsForwarders() []string {
+	if x != nil {
+		return x.DnsForwarders
+	}
+	return nil
+}
+
+func (x *ConfigureBridgeDHCPRequest) GetAutoDns() bool {
+	if x != nil {
+		return x.AutoDns
+	}
+	return false
+}
+
+func (x *ConfigureBridgeDHCPRequest) GetDnsSuffix() string {
+	if x != nil {
+		return x.DnsSuffix
+	}
+	return ""
 }
 
 type ConfigureBridgeDHCPResponse struct {
@@ -2727,7 +2799,7 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\vdiagnostics\x18\b \x03(\v2\x1f.apprunner.v1.NetworkDiagnosticR\vdiagnostics\x12$\n" +
 	"\x0eusable_by_qemu\x18\t \x01(\bR\fusableByQemu\x122\n" +
 	"\x04dhcp\x18\n" +
-	" \x01(\v2\x1e.apprunner.v1.BridgeDHCPStatusR\x04dhcp\"\xc1\x02\n" +
+	" \x01(\v2\x1e.apprunner.v1.BridgeDHCPStatusR\x04dhcp\"\xe4\x03\n" +
 	"\x10BridgeDHCPStatus\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x12\n" +
 	"\x04cidr\x18\x02 \x01(\tR\x04cidr\x12%\n" +
@@ -2743,7 +2815,15 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"natEnabled\x12\x1f\n" +
 	"\vnat_running\x18\n" +
 	" \x01(\bR\n" +
-	"natRunning\"g\n" +
+	"natRunning\x12\x1f\n" +
+	"\vdns_enabled\x18\v \x01(\bR\n" +
+	"dnsEnabled\x12%\n" +
+	"\x0edns_forwarders\x18\f \x03(\tR\rdnsForwarders\x12\x19\n" +
+	"\bauto_dns\x18\r \x01(\bR\aautoDns\x12\x1d\n" +
+	"\n" +
+	"dns_suffix\x18\x0e \x01(\tR\tdnsSuffix\x12\x1f\n" +
+	"\vdns_running\x18\x0f \x01(\bR\n" +
+	"dnsRunning\"g\n" +
 	"\x14PendingNetworkChange\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1d\n" +
@@ -2777,14 +2857,20 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\x1aRevertNetworkChangeRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"U\n" +
 	"\x1bRevertNetworkChangeResponse\x126\n" +
-	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\"\x8c\x01\n" +
+	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\"\x8e\x02\n" +
 	"\x1aConfigureBridgeDHCPRequest\x12\x1f\n" +
 	"\vbridge_name\x18\x01 \x01(\tR\n" +
 	"bridgeName\x12\x18\n" +
 	"\aenabled\x18\x02 \x01(\bR\aenabled\x12\x12\n" +
 	"\x04cidr\x18\x03 \x01(\tR\x04cidr\x12\x1f\n" +
 	"\vnat_enabled\x18\x04 \x01(\bR\n" +
-	"natEnabled\"U\n" +
+	"natEnabled\x12\x1f\n" +
+	"\vdns_enabled\x18\x05 \x01(\bR\n" +
+	"dnsEnabled\x12%\n" +
+	"\x0edns_forwarders\x18\x06 \x03(\tR\rdnsForwarders\x12\x19\n" +
+	"\bauto_dns\x18\a \x01(\bR\aautoDns\x12\x1d\n" +
+	"\n" +
+	"dns_suffix\x18\b \x01(\tR\tdnsSuffix\"U\n" +
 	"\x1bConfigureBridgeDHCPResponse\x126\n" +
 	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status*\x80\x01\n" +
 	"\bVMStatus\x12\x19\n" +

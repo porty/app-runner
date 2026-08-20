@@ -227,11 +227,25 @@ func (m *networkManager) Status() (networkingStatus, error) {
 	return status, nil
 }
 
-func (m *networkManager) ConfigureBridgeDHCP(bridge string, enabled bool, cidr string, natEnabled bool) error {
+func (m *networkManager) ConfigureBridgeDHCP(bridge string, enabled bool, cidr string, natEnabled bool, dnsConfig bridgeDNSConfig) error {
 	if m.dhcp == nil {
 		return errors.New("DHCP manager is not configured")
 	}
-	return m.dhcp.Configure(bridge, enabled, cidr, natEnabled)
+	if dnsConfig.Auto {
+		vms, err := m.vms.List()
+		if err != nil {
+			return err
+		}
+		for _, vm := range vms {
+			if vm.NetworkMode != networkModeBridge || vm.BridgeName != bridge {
+				continue
+			}
+			if err := validateDNSLabel(vm.Name); err != nil {
+				return fmt.Errorf("VM %q cannot be published by Auto DNS: %w", vm.Name, err)
+			}
+		}
+	}
+	return m.dhcp.Configure(bridge, enabled, cidr, natEnabled, dnsConfig)
 }
 
 func (m *networkManager) Apply(_ context.Context, change networkChange) (pendingNetworkChange, error) {

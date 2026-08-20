@@ -222,6 +222,11 @@ message BridgeDHCPStatus {
   string last_error = 8;
   bool nat_enabled = 9;
   bool nat_running = 10;
+  bool dns_enabled = 11;
+  repeated string dns_forwarders = 12;
+  bool auto_dns = 13;
+  string dns_suffix = 14;
+  bool dns_running = 15;
 }
 
 message PendingNetworkChange {
@@ -277,6 +282,10 @@ message ConfigureBridgeDHCPRequest {
   bool enabled = 2;
   string cidr = 3;
   bool nat_enabled = 4;
+  bool dns_enabled = 5;
+  repeated string dns_forwarders = 6;
+  bool auto_dns = 7;
+  string dns_suffix = 8;
 }
 
 message ConfigureBridgeDHCPResponse {

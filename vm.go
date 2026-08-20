@@ -450,6 +450,9 @@ func (m *vmManager) validateCreateOptions(options createVMOptions) error {
 	if len(options.Name) > 80 {
 		return &fieldError{field: "name", message: "must not exceed 80 characters"}
 	}
+	if err := validateDNSLabel(options.Name); err != nil {
+		return &fieldError{field: "name", message: "must be a valid DNS hostname label: " + err.Error()}
+	}
 	if options.CPUs < 1 || options.CPUs > 64 {
 		return &fieldError{field: "cpus", message: "must be between 1 and 64"}
 	}

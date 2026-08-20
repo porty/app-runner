@@ -222,9 +222,15 @@ func (s *appRunnerService) ConfigureBridgeDHCP(ctx context.Context, request *app
 		return nil, twirp.InternalError("network manager is not configured")
 	}
 	if !isLoopbackRequest(ctx) {
-		return nil, twirp.NewError(twirp.PermissionDenied, "DHCP configuration changes are accepted only from a browser connected through loopback")
+		return nil, twirp.NewError(twirp.PermissionDenied, "managed network service changes are accepted only from a browser connected through loopback")
 	}
-	if err := s.networking.ConfigureBridgeDHCP(request.GetBridgeName(), request.GetEnabled(), request.GetCidr(), request.GetNatEnabled()); err != nil {
+	if err := s.networking.ConfigureBridgeDHCP(
+		request.GetBridgeName(), request.GetEnabled(), request.GetCidr(), request.GetNatEnabled(),
+		bridgeDNSConfig{
+			Enabled: request.GetDnsEnabled(), Forwarders: request.GetDnsForwarders(),
+			Auto: request.GetAutoDns(), Suffix: request.GetDnsSuffix(),
+		},
+	); err != nil {
 		return nil, twirp.NewError(twirp.FailedPrecondition, err.Error())
 	}
 	status, err := s.networking.Status()
@@ -323,6 +329,8 @@ func networkingStatusToProto(status networkingStatus) *apprunnerv1.NetworkingSta
 				PoolStart: bridge.DHCP.PoolStart, PoolEnd: bridge.DHCP.PoolEnd, Running: bridge.DHCP.Running,
 				ActiveLeases: bridge.DHCP.ActiveLeases, LastError: bridge.DHCP.LastError,
 				NatEnabled: bridge.DHCP.NATEnabled, NatRunning: bridge.DHCP.NATRunning,
+				DnsEnabled: bridge.DHCP.DNSEnabled, DnsForwarders: bridge.DHCP.DNSForwarders,
+				AutoDns: bridge.DHCP.AutoDNS, DnsSuffix: bridge.DHCP.DNSSuffix, DnsRunning: bridge.DHCP.DNSRunning,
 			},
 		}
 		for _, diagnostic := range bridge.Diagnostics {

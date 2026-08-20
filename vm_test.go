@@ -210,7 +210,7 @@ func TestVMManagerRejectsUnavailableBridgeAtStart(t *testing.T) {
 	manager, _, _ := newTestVMManager(t)
 	manager.bridgeCapability = func(string) (bool, string) { return false, "bridge br0 is unavailable" }
 	vm, err := manager.Create(context.Background(), createVMOptions{
-		Name: "Bridge VM", CPUs: 1, MemoryMiB: 1024, DiskGiB: 10,
+		Name: "bridge-vm", CPUs: 1, MemoryMiB: 1024, DiskGiB: 10,
 		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br0",
 	})
 	if err != nil {
@@ -226,7 +226,7 @@ func TestVMManagerCoordinatesBridgeNetworkLifecycle(t *testing.T) {
 	lifecycle := &fakeVMNetworkLifecycle{}
 	manager.networkLifecycle = lifecycle
 	vm, err := manager.Create(context.Background(), createVMOptions{
-		Name: "DHCP VM", CPUs: 1, MemoryMiB: 1024, DiskGiB: 10,
+		Name: "dhcp-vm", CPUs: 1, MemoryMiB: 1024, DiskGiB: 10,
 		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br0",
 	})
 	if err != nil {
@@ -264,5 +264,19 @@ func TestVMManagerListsOnlyISOFiles(t *testing.T) {
 	}
 	if len(images) != 2 || images[0].Name != "installer.iso" || images[1].Name != "SECOND.ISO" {
 		t.Fatalf("unexpected ISO list: %#v", images)
+	}
+}
+
+func TestVMManagerRejectsNamesThatCannotBeDNSLabels(t *testing.T) {
+	manager, _, _ := newTestVMManager(t)
+	for _, name := range []string{"has spaces", "-leading", "trailing-", "under_score"} {
+		_, err := manager.Create(context.Background(), createVMOptions{
+			Name: name, CPUs: 1, MemoryMiB: 512, DiskGiB: 1,
+			ISOName: "installer.iso", NetworkMode: networkModeNAT,
+		})
+		var fieldErr *fieldError
+		if !errors.As(err, &fieldErr) || fieldErr.field != "name" {
+			t.Fatalf("invalid DNS name %q was not rejected as a name field error: %v", name, err)
+		}
 	}
 }

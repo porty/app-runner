@@ -396,16 +396,17 @@ func inspectNetworkAccess() networkAccessDiagnostics {
 	}
 	result.diagnostics = append(result.diagnostics, manageDiagnostic)
 
-	dhcpSocketDiagnostic := networkDiagnostic{Key: "dhcp_socket_permissions", Label: "DHCP socket permissions"}
-	privilegedPortAllowed := identity.IsRoot || identity.HasCAPNetBindService || unprivilegedPortStart() <= 67
+	dhcpSocketDiagnostic := networkDiagnostic{Key: "dhcp_socket_permissions", Label: "DHCP and DNS socket permissions"}
+	dhcpPortAllowed := identity.IsRoot || identity.HasCAPNetBindService || unprivilegedPortStart() <= 67
+	dnsPortAllowed := identity.IsRoot || identity.HasCAPNetBindService || unprivilegedPortStart() <= 53
 	interfaceBindingAllowed := identity.IsRoot || identity.HasCAPNetRaw
-	if privilegedPortAllowed && interfaceBindingAllowed {
+	if dhcpPortAllowed && dnsPortAllowed && interfaceBindingAllowed {
 		dhcpSocketDiagnostic.Status = diagnosticPass
-		dhcpSocketDiagnostic.Detail = "The backend can bind the DHCP server port and bind sockets to a bridge interface."
+		dhcpSocketDiagnostic.Detail = "The backend can bind DHCP UDP port 67, DNS UDP/TCP port 53, and bind DHCP sockets to a bridge interface."
 	} else {
 		dhcpSocketDiagnostic.Status = diagnosticFail
-		dhcpSocketDiagnostic.Detail = fmt.Sprintf("DHCP port binding allowed=%t, bind-to-interface allowed=%t.", privilegedPortAllowed, interfaceBindingAllowed)
-		dhcpSocketDiagnostic.Remediation = "Grant the production executable the networking capabilities used for bridge and DHCP management:\n$ sudo setcap cap_net_admin,cap_net_bind_service,cap_net_raw=+ep ./bin/app-runner"
+		dhcpSocketDiagnostic.Detail = fmt.Sprintf("DHCP port 67 allowed=%t, DNS port 53 allowed=%t, bind-to-interface allowed=%t.", dhcpPortAllowed, dnsPortAllowed, interfaceBindingAllowed)
+		dhcpSocketDiagnostic.Remediation = "Grant the production executable the networking capabilities used for bridge, DHCP, and DNS management:\n$ sudo setcap cap_net_admin,cap_net_bind_service,cap_net_raw=+ep ./bin/app-runner"
 	}
 	result.diagnostics = append(result.diagnostics, dhcpSocketDiagnostic)
 

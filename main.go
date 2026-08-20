@@ -40,7 +40,8 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	dhcp, err := newDHCPManager(settings.DiskDir, networkProvider, nat)
+	dns := newDNSManager()
+	dhcp, err := newDHCPManager(settings.DiskDir, networkProvider, nat, dns)
 	if err != nil {
 		fatal(err)
 	}
@@ -51,7 +52,7 @@ func main() {
 		fatal(err)
 	}
 	if err := dhcp.Reconcile(vms); err != nil {
-		slog.Warn("restore bridge DHCP services", "error", err)
+		slog.Warn("restore managed bridge network services", "error", err)
 	}
 	networking, err := newNetworkManager(networkProvider, manager, settings.DiskDir, dhcp)
 	if err != nil {

@@ -26,9 +26,10 @@ const (
 )
 
 type bridgeDHCPConfig struct {
-	Enabled bool   `json:"enabled"`
-	CIDR    string `json:"cidr"`
-	NAT     bool   `json:"nat,omitempty"`
+	Enabled bool            `json:"enabled"`
+	CIDR    string          `json:"cidr"`
+	NAT     bool            `json:"nat,omitempty"`
+	DNS     bridgeDNSConfig `json:"dns,omitempty"`
 }
 
 type dhcpLease struct {
@@ -54,6 +55,11 @@ type bridgeDHCPStatus struct {
 	LastError     string
 	NATEnabled    bool
 	NATRunning    bool
+	DNSEnabled    bool
+	DNSForwarders []string
+	AutoDNS       bool
+	DNSSuffix     string
+	DNSRunning    bool
 }
 
 type dhcpRange struct {
@@ -81,28 +87,34 @@ type dhcpRuntime struct {
 	users   map[string]struct{}
 	running bool
 	nat     bool
+	dns     bool
+	vms     map[string]virtualMachine
 }
 
 type dhcpManager struct {
-	mu        sync.Mutex
-	path      string
-	provider  dhcpBridgeProvider
-	newServer dhcpServerFactory
-	nat       bridgeNATController
-	now       func() time.Time
-	state     dhcpPersistedState
-	runtimes  map[string]*dhcpRuntime
-	errors    map[string]string
+	mu                   sync.Mutex
+	path                 string
+	provider             dhcpBridgeProvider
+	newServer            dhcpServerFactory
+	nat                  bridgeNATController
+	dns                  bridgeDNSController
+	now                  func() time.Time
+	state                dhcpPersistedState
+	runtimes             map[string]*dhcpRuntime
+	errors               map[string]string
+	defaultDNSForwarders []string
 }
 
-func newDHCPManager(diskDirectory string, provider dhcpBridgeProvider, nat bridgeNATController) (*dhcpManager, error) {
+func newDHCPManager(diskDirectory string, provider dhcpBridgeProvider, nat bridgeNATController, dns bridgeDNSController) (*dhcpManager, error) {
 	manager := &dhcpManager{
 		path: filepath.Join(diskDirectory, "dhcp.json"), provider: provider,
 		newServer: newInProcessDHCPServer, now: time.Now,
 		state:    dhcpPersistedState{Bridges: make(map[string]bridgeDHCPConfig), Leases: make(map[string]map[string]dhcpLease)},
 		runtimes: make(map[string]*dhcpRuntime), errors: make(map[string]string),
+		defaultDNSForwarders: defaultDNSForwarders(),
 	}
 	manager.nat = nat
+	manager.dns = dns
 	if err := manager.load(); err != nil {
 		return nil, err
 	}
@@ -113,13 +125,19 @@ func newInProcessDHCPServer(bridge string, handler server4.Handler) (managedDHCP
 	return server4.NewServer(bridge, &net.UDPAddr{IP: net.IPv4zero, Port: dhcpv4.ServerPort}, handler)
 }
 
-func (m *dhcpManager) Configure(bridge string, enabled bool, cidr string, natEnabled bool) error {
+func (m *dhcpManager) Configure(bridge string, enabled bool, cidr string, natEnabled bool, dnsConfig bridgeDNSConfig) error {
 	if err := validateInterfaceName(bridge); err != nil {
 		return fmt.Errorf("bridge name %w", err)
 	}
 	parsed := dhcpRange{}
 	if natEnabled && !enabled {
 		return errors.New("NAT requires managed DHCP to be enabled")
+	}
+	if dnsConfig.Enabled && !enabled {
+		return errors.New("DNS requires managed DHCP to be enabled")
+	}
+	if dnsConfig.Auto && !dnsConfig.Enabled {
+		return errors.New("Auto DNS requires managed DNS to be enabled")
 	}
 	if enabled {
 		if strings.TrimSpace(cidr) == "" {
@@ -132,6 +150,26 @@ func (m *dhcpManager) Configure(bridge string, enabled bool, cidr string, natEna
 		}
 		if err := m.provider.ValidateBridgeDHCP(bridge, parsed); err != nil {
 			return err
+		}
+		if dnsConfig.Enabled {
+			forwarders, err := normalizeDNSForwarders(dnsConfig.Forwarders, parsed.Server)
+			if err != nil {
+				return err
+			}
+			dnsConfig.Forwarders = forwarders
+			if dnsConfig.Auto {
+				if strings.TrimSpace(dnsConfig.Suffix) == "" {
+					dnsConfig.Suffix = defaultDNSSuffix(bridge)
+				}
+				dnsConfig.Suffix, err = normalizeDNSSuffix(dnsConfig.Suffix)
+				if err != nil {
+					return err
+				}
+			} else {
+				dnsConfig.Suffix = ""
+			}
+		} else {
+			dnsConfig = bridgeDNSConfig{}
 		}
 	}
 
@@ -154,7 +192,7 @@ func (m *dhcpManager) Configure(bridge string, enabled bool, cidr string, natEna
 	previous, found := m.state.Bridges[bridge]
 	previousLeases := m.state.Leases[bridge]
 	if enabled {
-		m.state.Bridges[bridge] = bridgeDHCPConfig{Enabled: true, CIDR: parsed.Prefix.String(), NAT: natEnabled}
+		m.state.Bridges[bridge] = bridgeDHCPConfig{Enabled: true, CIDR: parsed.Prefix.String(), NAT: natEnabled, DNS: dnsConfig}
 	} else {
 		delete(m.state.Bridges, bridge)
 	}
@@ -186,12 +224,23 @@ func (m *dhcpManager) Status(bridge string) bridgeDHCPStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	config, found := m.state.Bridges[bridge]
-	status := bridgeDHCPStatus{CIDR: m.suggestCIDRLocked(bridge), LastError: m.errors[bridge]}
+	status := bridgeDHCPStatus{
+		CIDR: m.suggestCIDRLocked(bridge), LastError: m.errors[bridge],
+		DNSForwarders: append([]string(nil), m.defaultDNSForwarders...), DNSSuffix: defaultDNSSuffix(bridge),
+	}
 	if !found || !config.Enabled {
 		return status
 	}
 	status.Enabled = true
 	status.NATEnabled = config.NAT
+	status.DNSEnabled = config.DNS.Enabled
+	status.AutoDNS = config.DNS.Auto
+	if config.DNS.Enabled {
+		status.DNSForwarders = append([]string(nil), config.DNS.Forwarders...)
+	}
+	if config.DNS.Auto {
+		status.DNSSuffix = config.DNS.Suffix
+	}
 	status.CIDR = config.CIDR
 	parsed, err := parseDHCPRange(config.CIDR)
 	if err != nil {
@@ -203,6 +252,12 @@ func (m *dhcpManager) Status(bridge string) bridgeDHCPStatus {
 	status.PoolEnd = parsed.PoolEnd.String()
 	status.Running = m.runtimes[bridge] != nil && m.runtimes[bridge].running
 	status.NATRunning = m.nat != nil && m.nat.Running(bridge)
+	if m.dns != nil {
+		status.DNSRunning, status.LastError = m.dns.Status(bridge)
+		if status.LastError == "" {
+			status.LastError = m.errors[bridge]
+		}
+	}
 	now := m.now()
 	for _, lease := range m.state.Leases[bridge] {
 		if lease.ExpiresAt.After(now) {
@@ -248,16 +303,38 @@ func (m *dhcpManager) Prepare(vm virtualMachine) error {
 	if !config.Enabled {
 		return nil
 	}
-	runtime := m.runtimes[vm.BridgeName]
-	if runtime != nil {
-		runtime.users[vm.ID] = struct{}{}
-		if runtime.running {
-			return nil
-		}
-	}
 	parsed, err := parseDHCPRange(config.CIDR)
 	if err != nil {
 		return err
+	}
+	if config.DNS.Auto {
+		if err := validateDNSLabel(vm.Name); err != nil {
+			return fmt.Errorf("VM name %q cannot be published by Auto DNS: %w", vm.Name, err)
+		}
+	}
+	runtime := m.runtimes[vm.BridgeName]
+	if runtime != nil && runtime.running {
+		if config.DNS.Enabled {
+			if m.dns == nil {
+				return errors.New("DNS manager is not configured")
+			}
+			dnsRunning, _ := m.dns.Status(vm.BridgeName)
+			if !dnsRunning {
+				if err := m.dns.Start(vm.BridgeName, parsed.Server, config.DNS, func() map[string]netip.Addr {
+					return m.autoDNSRecords(vm.BridgeName)
+				}); err != nil {
+					m.errors[vm.BridgeName] = err.Error()
+					return fmt.Errorf("restart DNS for %s: %w", vm.BridgeName, err)
+				}
+			}
+		}
+		runtime.users[vm.ID] = struct{}{}
+		runtime.vms[vm.ID] = vm
+		delete(m.errors, vm.BridgeName)
+		return nil
+	}
+	if runtime == nil {
+		runtime = &dhcpRuntime{users: make(map[string]struct{}), vms: make(map[string]virtualMachine)}
 	}
 	if err := m.provider.EnsureBridgeDHCPAddress(vm.BridgeName, parsed); err != nil {
 		m.errors[vm.BridgeName] = err.Error()
@@ -270,30 +347,56 @@ func (m *dhcpManager) Prepare(vm virtualMachine) error {
 			m.errors[vm.BridgeName] = err.Error()
 			return err
 		}
+		wasRunning := m.nat.Running(vm.BridgeName)
 		if err := m.nat.Start(vm.BridgeName, parsed.Prefix); err != nil {
 			m.errors[vm.BridgeName] = err.Error()
 			return fmt.Errorf("start NAT for %s: %w", vm.BridgeName, err)
 		}
-		natStarted = true
+		natStarted = !wasRunning
+	}
+	dnsStarted := false
+	if config.DNS.Enabled {
+		if m.dns == nil {
+			err := errors.New("DNS manager is not configured")
+			if natStarted {
+				err = errors.Join(err, m.nat.Stop(vm.BridgeName))
+			}
+			m.errors[vm.BridgeName] = err.Error()
+			return err
+		}
+		wasRunning, _ := m.dns.Status(vm.BridgeName)
+		if err := m.dns.Start(vm.BridgeName, parsed.Server, config.DNS, func() map[string]netip.Addr {
+			return m.autoDNSRecords(vm.BridgeName)
+		}); err != nil {
+			if natStarted {
+				err = errors.Join(err, m.nat.Stop(vm.BridgeName))
+			}
+			m.errors[vm.BridgeName] = err.Error()
+			return fmt.Errorf("start DNS for %s: %w", vm.BridgeName, err)
+		}
+		dnsStarted = !wasRunning
 	}
 	handler := func(connection net.PacketConn, peer net.Addr, request *dhcpv4.DHCPv4) {
-		m.handlePacket(vm.BridgeName, parsed, config.NAT, connection, peer, request)
+		m.handlePacket(vm.BridgeName, parsed, config, connection, peer, request)
 	}
 	server, err := m.newServer(vm.BridgeName, handler)
 	if err != nil {
+		if dnsStarted {
+			err = errors.Join(err, m.dns.Stop(vm.BridgeName))
+		}
 		if natStarted {
 			err = errors.Join(err, m.nat.Stop(vm.BridgeName))
 		}
 		m.errors[vm.BridgeName] = err.Error()
 		return fmt.Errorf("start DHCP listener on %s: %w", vm.BridgeName, err)
 	}
-	if runtime == nil {
-		runtime = &dhcpRuntime{users: map[string]struct{}{vm.ID: {}}}
-		m.runtimes[vm.BridgeName] = runtime
-	}
+	runtime.users[vm.ID] = struct{}{}
+	runtime.vms[vm.ID] = vm
+	m.runtimes[vm.BridgeName] = runtime
 	runtime.server = server
 	runtime.running = true
 	runtime.nat = config.NAT
+	runtime.dns = config.DNS.Enabled
 	delete(m.errors, vm.BridgeName)
 	go m.serve(vm.BridgeName, runtime)
 	slog.Info("bridge DHCP server started", "bridge", vm.BridgeName, "cidr", parsed.Prefix.String(), "pool_start", parsed.PoolStart, "pool_end", parsed.PoolEnd)
@@ -311,6 +414,7 @@ func (m *dhcpManager) Release(vm virtualMachine) {
 		return
 	}
 	delete(runtime.users, vm.ID)
+	delete(runtime.vms, vm.ID)
 	if len(runtime.users) != 0 {
 		m.mu.Unlock()
 		return
@@ -320,6 +424,14 @@ func (m *dhcpManager) Release(vm virtualMachine) {
 	if runtime.server != nil {
 		if err := runtime.server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			slog.Warn("close bridge DHCP server", "bridge", vm.BridgeName, "error", err)
+		}
+	}
+	if runtime.dns && m.dns != nil {
+		if err := m.dns.Stop(vm.BridgeName); err != nil {
+			m.mu.Lock()
+			m.errors[vm.BridgeName] = err.Error()
+			m.mu.Unlock()
+			slog.Warn("stop bridge DNS", "bridge", vm.BridgeName, "error", err)
 		}
 	}
 	if runtime.nat && m.nat != nil {
@@ -366,6 +478,9 @@ func (m *dhcpManager) Close() error {
 	if m.nat != nil {
 		result = errors.Join(result, m.nat.Close())
 	}
+	if m.dns != nil {
+		result = errors.Join(result, m.dns.Close())
+	}
 	return result
 }
 
@@ -384,7 +499,34 @@ func (m *dhcpManager) serve(bridge string, runtime *dhcpRuntime) {
 	}
 }
 
-func (m *dhcpManager) handlePacket(bridge string, network dhcpRange, natEnabled bool, connection net.PacketConn, peer net.Addr, request *dhcpv4.DHCPv4) {
+func (m *dhcpManager) autoDNSRecords(bridge string) map[string]netip.Addr {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make(map[string]netip.Addr)
+	runtime := m.runtimes[bridge]
+	if runtime == nil {
+		return result
+	}
+	now := m.now()
+	addressesByMAC := make(map[string]netip.Addr)
+	for _, lease := range m.state.Leases[bridge] {
+		if !lease.ExpiresAt.After(now) {
+			continue
+		}
+		address, err := netip.ParseAddr(lease.Address)
+		if err == nil {
+			addressesByMAC[strings.ToLower(lease.HardwareAddress)] = address
+		}
+	}
+	for _, vm := range runtime.vms {
+		if address, found := addressesByMAC[strings.ToLower(vm.MACAddress)]; found {
+			result[strings.ToLower(vm.Name)] = address
+		}
+	}
+	return result
+}
+
+func (m *dhcpManager) handlePacket(bridge string, network dhcpRange, config bridgeDHCPConfig, connection net.PacketConn, peer net.Addr, request *dhcpv4.DHCPv4) {
 	if request == nil || request.OpCode != dhcpv4.OpcodeBootRequest {
 		return
 	}
@@ -440,8 +582,14 @@ func (m *dhcpManager) handlePacket(bridge string, network dhcpRange, natEnabled 
 		prefixBits := network.Prefix.Bits()
 		reply.UpdateOption(dhcpv4.OptSubnetMask(net.CIDRMask(prefixBits, 32)))
 		reply.UpdateOption(dhcpv4.OptBroadcastAddress(net.IP(network.Broadcast.AsSlice())))
-		if natEnabled {
+		if config.NAT {
 			reply.UpdateOption(dhcpv4.OptRouter(net.IP(network.Server.AsSlice())))
+		}
+		if config.DNS.Enabled {
+			reply.UpdateOption(dhcpv4.OptDNS(net.IP(network.Server.AsSlice())))
+			if config.DNS.Auto {
+				reply.UpdateOption(dhcpv4.OptDomainName(config.DNS.Suffix))
+			}
 		}
 		if messageType != dhcpv4.MessageTypeInform {
 			reply.UpdateOption(dhcpv4.OptIPAddressLeaseTime(dhcpLeaseDuration))

@@ -125,7 +125,7 @@ func TestValidateNetworkChangeRejectsUnsafeNames(t *testing.T) {
 func TestNetworkingStatusMapsManagedVMsToTheirBridges(t *testing.T) {
 	vms, _, settings := newTestVMManager(t)
 	if _, err := vms.Create(t.Context(), createVMOptions{
-		Name: "Bridge workload", CPUs: 1, MemoryMiB: 512, DiskGiB: 1,
+		Name: "bridge-workload", CPUs: 1, MemoryMiB: 512, DiskGiB: 1,
 		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br-lab",
 	}); err != nil {
 		t.Fatal(err)
@@ -141,7 +141,7 @@ func TestNetworkingStatusMapsManagedVMsToTheirBridges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(status.Bridges) != 1 || len(status.Bridges[0].Workloads) != 1 || status.Bridges[0].Workloads[0].Name != "Bridge workload" {
+	if len(status.Bridges) != 1 || len(status.Bridges[0].Workloads) != 1 || status.Bridges[0].Workloads[0].Name != "bridge-workload" {
 		t.Fatalf("managed workload was not mapped to its bridge: %#v", status.Bridges)
 	}
 }
@@ -149,11 +149,11 @@ func TestNetworkingStatusMapsManagedVMsToTheirBridges(t *testing.T) {
 func TestNetworkingStatusIncludesBridgeDHCPConfiguration(t *testing.T) {
 	vms, _, settings := newTestVMManager(t)
 	bridgeProvider := &fakeDHCPBridgeProvider{}
-	dhcp, err := newDHCPManager(settings.DiskDir, bridgeProvider, nil)
+	dhcp, err := newDHCPManager(settings.DiskDir, bridgeProvider, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dhcp.Configure("br-lab", true, defaultBridgeDHCPCIDR, false); err != nil {
+	if err := dhcp.Configure("br-lab", true, defaultBridgeDHCPCIDR, false, bridgeDNSConfig{}); err != nil {
 		t.Fatal(err)
 	}
 	provider := &fakeNetworkProvider{status: networkingStatus{Bridges: []networkBridgeInfo{{Name: "br-lab", IsUp: true}}}}
@@ -167,5 +167,28 @@ func TestNetworkingStatusIncludesBridgeDHCPConfiguration(t *testing.T) {
 	}
 	if len(status.Bridges) != 1 || !status.Bridges[0].DHCP.Enabled || status.Bridges[0].DHCP.PoolStart != "192.168.100.50" {
 		t.Fatalf("DHCP configuration was not included: %#v", status.Bridges)
+	}
+}
+
+func TestNetworkingRejectsAutoDNSWhenLegacyVMNameIsInvalid(t *testing.T) {
+	vms, _, settings := newTestVMManager(t)
+	vms.vms = append(vms.vms, virtualMachine{
+		ID: "legacy", Name: "Legacy VM", NetworkMode: networkModeBridge,
+		BridgeName: "br0", Status: vmStatusStopped,
+	})
+	bridgeProvider := &fakeDHCPBridgeProvider{}
+	dhcp, err := newDHCPManager(settings.DiskDir, bridgeProvider, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := newNetworkManager(&fakeNetworkProvider{}, vms, settings.DiskDir, dhcp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = manager.ConfigureBridgeDHCP("br0", true, defaultBridgeDHCPCIDR, false, bridgeDNSConfig{
+		Enabled: true, Forwarders: []string{"1.1.1.1"}, Auto: true, Suffix: "br0.internal",
+	})
+	if err == nil {
+		t.Fatal("Auto DNS was enabled for a bridge with an invalid legacy VM name")
 	}
 }
