@@ -36,7 +36,20 @@ func main() {
 	}
 	networkProvider := newLinuxNetworkProvider()
 	manager.bridgeCapability = networkProvider.BridgeCapability
-	networking, err := newNetworkManager(networkProvider, manager, settings.DiskDir)
+	dhcp, err := newDHCPManager(settings.DiskDir, networkProvider)
+	if err != nil {
+		fatal(err)
+	}
+	defer dhcp.Close()
+	manager.networkLifecycle = dhcp
+	vms, err := manager.List()
+	if err != nil {
+		fatal(err)
+	}
+	if err := dhcp.Reconcile(vms); err != nil {
+		slog.Warn("restore bridge DHCP services", "error", err)
+	}
+	networking, err := newNetworkManager(networkProvider, manager, settings.DiskDir, dhcp)
 	if err != nil {
 		fatal(err)
 	}

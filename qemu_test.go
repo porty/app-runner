@@ -14,7 +14,7 @@ func TestQEMUArgumentsUseRequiredVirtualisationProfile(t *testing.T) {
 	qemu := newQEMUHypervisor(settings)
 	vm := virtualMachine{
 		ID: "vm-id", Name: "test VM", CPUs: 4, MemoryMiB: 4096,
-		ISOName: "installer.iso", NetworkMode: networkModeNAT,
+		ISOName: "installer.iso", NetworkMode: networkModeNAT, MACAddress: "52:54:00:11:22:33",
 	}
 	arguments := qemu.arguments(vm)
 
@@ -26,7 +26,7 @@ func TestQEMUArgumentsUseRequiredVirtualisationProfile(t *testing.T) {
 		"virtio-scsi-pci,id=scsi0",
 		"scsi-cd,drive=install,bus=scsi0.0",
 		"user,id=net0",
-		"virtio-net-pci,netdev=net0",
+		"virtio-net-pci,netdev=net0,mac=52:54:00:11:22:33",
 		"unix:" + filepath.Join(settings.DiskDir, "vm-id.vnc.sock"),
 	} {
 		if !slices.Contains(arguments, expected) {

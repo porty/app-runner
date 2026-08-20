@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -59,6 +61,7 @@ type virtualMachine struct {
 	ISOName     string      `json:"iso_name"`
 	NetworkMode networkMode `json:"network_mode"`
 	BridgeName  string      `json:"bridge_name,omitempty"`
+	MACAddress  string      `json:"mac_address,omitempty"`
 	Status      vmStatus    `json:"status"`
 	CreatedAt   time.Time   `json:"created_at"`
 	LastError   string      `json:"last_error,omitempty"`
@@ -101,6 +104,11 @@ type virtualMachineStore interface {
 	Save([]virtualMachine) error
 }
 
+type vmNetworkLifecycle interface {
+	Prepare(virtualMachine) error
+	Release(virtualMachine)
+}
+
 type vmManager struct {
 	mu               sync.Mutex
 	settings         config
@@ -108,6 +116,7 @@ type vmManager struct {
 	hypervisor       hypervisor
 	capabilities     func() hostCapabilities
 	bridgeCapability func(string) (bool, string)
+	networkLifecycle vmNetworkLifecycle
 	now              func() time.Time
 	newID            func() (string, error)
 	vms              []virtualMachine
@@ -135,15 +144,19 @@ func newVMManager(settings config, store virtualMachineStore, hypervisor hypervi
 		return detectBridgeCapability(name)
 	}
 	manager.mu.Lock()
-	migratedBridgeNames := false
+	definitionsChanged := false
 	for index := range manager.vms {
 		if manager.vms[index].NetworkMode == networkModeBridge && manager.vms[index].BridgeName == "" {
 			manager.vms[index].BridgeName = settings.BridgeName
-			migratedBridgeNames = true
+			definitionsChanged = true
+		}
+		if manager.vms[index].MACAddress == "" {
+			manager.vms[index].MACAddress = vmMACAddress(manager.vms[index].ID)
+			definitionsChanged = true
 		}
 	}
 	err = manager.reconcileLocked()
-	if err == nil && migratedBridgeNames {
+	if err == nil && definitionsChanged {
 		err = manager.store.Save(manager.vms)
 	}
 	manager.mu.Unlock()
@@ -206,6 +219,7 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 		ISOName:     options.ISOName,
 		NetworkMode: options.NetworkMode,
 		BridgeName:  options.BridgeName,
+		MACAddress:  vmMACAddress(id),
 		Status:      vmStatusStopped,
 		CreatedAt:   m.now().UTC(),
 	}
@@ -255,9 +269,17 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 	if _, err := os.Stat(m.isoPath(vm.ISOName)); err != nil {
 		return virtualMachine{}, fmt.Errorf("installation ISO is unavailable: %w", err)
 	}
+	if m.networkLifecycle != nil {
+		if err := m.networkLifecycle.Prepare(vm); err != nil {
+			return virtualMachine{}, fmt.Errorf("%w: %v", errBridgeUnavailable, err)
+		}
+	}
 
 	pid, err := m.hypervisor.Start(vm, func(exitErr error) { m.processExited(id, exitErr) })
 	if err != nil {
+		if m.networkLifecycle != nil {
+			m.networkLifecycle.Release(vm)
+		}
 		m.vms[index].Status = vmStatusError
 		m.vms[index].LastError = err.Error()
 		_ = m.store.Save(m.vms)
@@ -268,6 +290,9 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 	m.vms[index].LastError = ""
 	if err := m.store.Save(m.vms); err != nil {
 		_ = m.hypervisor.ForceStop(m.vms[index])
+		if m.networkLifecycle != nil {
+			m.networkLifecycle.Release(vm)
+		}
 		return virtualMachine{}, err
 	}
 	return m.vms[index], nil
@@ -291,8 +316,12 @@ func (m *vmManager) Stop(id string, force bool) (virtualMachine, error) {
 	if force {
 		err = m.hypervisor.ForceStop(m.vms[index])
 		if err == nil {
+			stoppedVM := m.vms[index]
 			m.vms[index].Status = vmStatusStopped
 			m.vms[index].PID = 0
+			if m.networkLifecycle != nil {
+				m.networkLifecycle.Release(stoppedVM)
+			}
 		}
 	} else {
 		err = m.hypervisor.GracefulStop(m.vms[index])
@@ -379,12 +408,16 @@ func (m *vmManager) processExited(id string, exitErr error) {
 		return
 	}
 	wasStopping := m.vms[index].Status == vmStatusStopping
+	exitedVM := m.vms[index]
 	m.vms[index].PID = 0
 	m.vms[index].Status = vmStatusStopped
 	if exitErr != nil && !wasStopping {
 		m.vms[index].LastError = exitErr.Error()
 	}
 	_ = m.store.Save(m.vms)
+	if m.networkLifecycle != nil {
+		m.networkLifecycle.Release(exitedVM)
+	}
 }
 
 func (m *vmManager) reconcileLocked() error {
@@ -395,8 +428,12 @@ func (m *vmManager) reconcileLocked() error {
 			continue
 		}
 		if vm.PID <= 0 || !m.hypervisor.IsRunning(vm.PID) {
+			stoppedVM := *vm
 			vm.PID = 0
 			vm.Status = vmStatusStopped
+			if m.networkLifecycle != nil {
+				m.networkLifecycle.Release(stoppedVM)
+			}
 			changed = true
 		}
 	}
@@ -471,6 +508,12 @@ func randomID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(bytes), nil
+}
+
+func vmMACAddress(id string) string {
+	digest := sha256.Sum256([]byte(id))
+	address := net.HardwareAddr{0x52, 0x54, 0x00, digest[0], digest[1], digest[2]}
+	return address.String()
 }
 
 func removeIfExists(path string) error {

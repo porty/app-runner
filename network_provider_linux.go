@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/user"
 	"sort"
@@ -15,7 +16,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const capNetAdmin = 12
+const (
+	capNetBindService = 10
+	capNetAdmin       = 12
+	capNetRaw         = 13
+)
 
 type linuxNetworkProvider struct{}
 
@@ -110,6 +115,62 @@ func (p *linuxNetworkProvider) BridgeCapability(name string) (bool, string) {
 		return false, fmt.Sprintf("bridge %s is not usable by QEMU", name)
 	}
 	return false, fmt.Sprintf("bridge %s does not exist", name)
+}
+
+func (p *linuxNetworkProvider) ValidateBridgeDHCP(name string, network dhcpRange) error {
+	bridge, err := requireBridge(name)
+	if err != nil {
+		return err
+	}
+	addresses, err := netlink.AddrList(bridge, netlink.FAMILY_V4)
+	if err != nil {
+		return fmt.Errorf("inspect bridge IPv4 addresses: %w", err)
+	}
+	for _, address := range addresses {
+		if address.IPNet == nil {
+			continue
+		}
+		existing, parseErr := netip.ParsePrefix(address.IPNet.String())
+		if parseErr != nil || !existing.Addr().Is4() {
+			continue
+		}
+		existing = existing.Masked()
+		if !network.Prefix.Contains(existing.Addr()) && !existing.Contains(network.Prefix.Addr()) {
+			continue
+		}
+		if address.IP.String() == network.Server.String() && existing.Bits() == network.Prefix.Bits() {
+			continue
+		}
+		return fmt.Errorf("DHCP range %s conflicts with existing address %s on bridge %s", network.Prefix, address.IPNet, name)
+	}
+	return nil
+}
+
+func (p *linuxNetworkProvider) EnsureBridgeDHCPAddress(name string, network dhcpRange) error {
+	if err := p.ValidateBridgeDHCP(name, network); err != nil {
+		return err
+	}
+	bridge, err := requireBridge(name)
+	if err != nil {
+		return err
+	}
+	addresses, err := netlink.AddrList(bridge, netlink.FAMILY_V4)
+	if err != nil {
+		return fmt.Errorf("inspect bridge IPv4 addresses: %w", err)
+	}
+	for _, address := range addresses {
+		if address.IPNet != nil && address.IP.String() == network.Server.String() {
+			return nil
+		}
+	}
+	address, err := netlink.ParseAddr(fmt.Sprintf("%s/%d", network.Server, network.Prefix.Bits()))
+	if err != nil {
+		return err
+	}
+	if err := netlink.AddrAdd(bridge, address); err != nil {
+		return fmt.Errorf("assign DHCP server address %s to bridge %s: %w", address, name, err)
+	}
+	return nil
 }
 
 func (p *linuxNetworkProvider) Snapshot(change networkChange) (networkSnapshot, error) {
@@ -331,6 +392,19 @@ func inspectNetworkAccess() networkAccessDiagnostics {
 	}
 	result.diagnostics = append(result.diagnostics, manageDiagnostic)
 
+	dhcpSocketDiagnostic := networkDiagnostic{Key: "dhcp_socket_permissions", Label: "DHCP socket permissions"}
+	privilegedPortAllowed := identity.IsRoot || identity.HasCAPNetBindService || unprivilegedPortStart() <= 67
+	interfaceBindingAllowed := identity.IsRoot || identity.HasCAPNetRaw
+	if privilegedPortAllowed && interfaceBindingAllowed {
+		dhcpSocketDiagnostic.Status = diagnosticPass
+		dhcpSocketDiagnostic.Detail = "The backend can bind the DHCP server port and bind sockets to a bridge interface."
+	} else {
+		dhcpSocketDiagnostic.Status = diagnosticFail
+		dhcpSocketDiagnostic.Detail = fmt.Sprintf("DHCP port binding allowed=%t, bind-to-interface allowed=%t.", privilegedPortAllowed, interfaceBindingAllowed)
+		dhcpSocketDiagnostic.Remediation = "Grant the production executable the networking capabilities used for bridge and DHCP management:\n$ sudo setcap cap_net_admin,cap_net_bind_service,cap_net_raw=+ep ./bin/app-runner"
+	}
+	result.diagnostics = append(result.diagnostics, dhcpSocketDiagnostic)
+
 	tunDiagnostic := networkDiagnostic{Key: "tun_access", Label: "/dev/net/tun read/write access"}
 	if info, err := os.Stat("/dev/net/tun"); err != nil {
 		tunDiagnostic.Status = diagnosticFail
@@ -415,7 +489,10 @@ func bridgeDiagnostics(access networkAccessDiagnostics, bridge networkBridgeInfo
 }
 
 func currentUserIdentity() userIdentity {
-	identity := userIdentity{IsRoot: os.Geteuid() == 0, HasCAPNetAdmin: effectiveCapability(capNetAdmin)}
+	identity := userIdentity{
+		IsRoot: os.Geteuid() == 0, HasCAPNetAdmin: effectiveCapability(capNetAdmin),
+		HasCAPNetBindService: effectiveCapability(capNetBindService), HasCAPNetRaw: effectiveCapability(capNetRaw),
+	}
 	current, err := user.Current()
 	if err != nil {
 		identity.Username = strconv.Itoa(os.Geteuid())
@@ -436,6 +513,18 @@ func currentUserIdentity() userIdentity {
 	}
 	sort.Strings(identity.Groups)
 	return identity
+}
+
+func unprivilegedPortStart() int {
+	contents, err := os.ReadFile("/proc/sys/net/ipv4/ip_unprivileged_port_start")
+	if err != nil {
+		return 1024
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(string(contents)))
+	if err != nil {
+		return 1024
+	}
+	return value
 }
 
 func effectiveCapability(capability uint) bool {

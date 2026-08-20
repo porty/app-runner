@@ -105,14 +105,22 @@ func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
 		"-boot", "order=dc,menu=on",
 	}
 	if vm.NetworkMode == networkModeBridge {
+		networkDevice := "virtio-net-pci,netdev=net0"
+		if vm.MACAddress != "" {
+			networkDevice += ",mac=" + vm.MACAddress
+		}
 		arguments = append(arguments,
 			"-netdev", "bridge,id=net0,br="+vm.BridgeName,
-			"-device", "virtio-net-pci,netdev=net0",
+			"-device", networkDevice,
 		)
 	} else {
+		networkDevice := "virtio-net-pci,netdev=net0"
+		if vm.MACAddress != "" {
+			networkDevice += ",mac=" + vm.MACAddress
+		}
 		arguments = append(arguments,
 			"-netdev", "user,id=net0",
-			"-device", "virtio-net-pci,netdev=net0",
+			"-device", networkDevice,
 		)
 	}
 	return append(arguments,

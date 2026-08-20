@@ -14,6 +14,21 @@ type memoryVMStore struct {
 	vms []virtualMachine
 }
 
+type fakeVMNetworkLifecycle struct {
+	prepared []string
+	released []string
+	err      error
+}
+
+func (l *fakeVMNetworkLifecycle) Prepare(vm virtualMachine) error {
+	l.prepared = append(l.prepared, vm.ID)
+	return l.err
+}
+
+func (l *fakeVMNetworkLifecycle) Release(vm virtualMachine) {
+	l.released = append(l.released, vm.ID)
+}
+
 func (s *memoryVMStore) Load() ([]virtualMachine, error) {
 	return slices.Clone(s.vms), nil
 }
@@ -203,6 +218,34 @@ func TestVMManagerRejectsUnavailableBridgeAtStart(t *testing.T) {
 	}
 	if _, err := manager.Start(vm.ID); !errors.Is(err, errBridgeUnavailable) {
 		t.Fatalf("expected bridge unavailable error, got %v", err)
+	}
+}
+
+func TestVMManagerCoordinatesBridgeNetworkLifecycle(t *testing.T) {
+	manager, _, _ := newTestVMManager(t)
+	lifecycle := &fakeVMNetworkLifecycle{}
+	manager.networkLifecycle = lifecycle
+	vm, err := manager.Create(context.Background(), createVMOptions{
+		Name: "DHCP VM", CPUs: 1, MemoryMiB: 1024, DiskGiB: 10,
+		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vm.MACAddress == "" {
+		t.Fatal("created VM did not receive a stable MAC address")
+	}
+	if _, err := manager.Start(vm.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(lifecycle.prepared) != 1 || lifecycle.prepared[0] != vm.ID {
+		t.Fatalf("network was not prepared before start: %#v", lifecycle.prepared)
+	}
+	if _, err := manager.Stop(vm.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(lifecycle.released) != 1 || lifecycle.released[0] != vm.ID {
+		t.Fatalf("network was not released after force stop: %#v", lifecycle.released)
 	}
 }
 

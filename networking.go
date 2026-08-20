@@ -35,11 +35,13 @@ type networkDiagnostic struct {
 }
 
 type userIdentity struct {
-	Username       string
-	UID            uint32
-	Groups         []string
-	IsRoot         bool
-	HasCAPNetAdmin bool
+	Username             string
+	UID                  uint32
+	Groups               []string
+	IsRoot               bool
+	HasCAPNetAdmin       bool
+	HasCAPNetBindService bool
+	HasCAPNetRaw         bool
 }
 
 type networkInterfaceInfo struct {
@@ -70,6 +72,7 @@ type networkBridgeInfo struct {
 	Workloads        []workloadAttachment
 	Diagnostics      []networkDiagnostic
 	UsableByQEMU     bool
+	DHCP             bridgeDHCPStatus
 }
 
 type networkingStatus struct {
@@ -151,9 +154,10 @@ type networkManager struct {
 	pending            *pendingNetworkChange
 	timer              *time.Timer
 	confirmationWindow time.Duration
+	dhcp               *dhcpManager
 }
 
-func newNetworkManager(provider networkProvider, vms *vmManager, diskDirectory string) (*networkManager, error) {
+func newNetworkManager(provider networkProvider, vms *vmManager, diskDirectory string, dhcp ...*dhcpManager) (*networkManager, error) {
 	manager := &networkManager{
 		provider:           provider,
 		vms:                vms,
@@ -161,6 +165,9 @@ func newNetworkManager(provider networkProvider, vms *vmManager, diskDirectory s
 		now:                time.Now,
 		newID:              randomID,
 		confirmationWindow: networkConfirmationWindow,
+	}
+	if len(dhcp) != 0 {
+		manager.dhcp = dhcp[0]
 	}
 	if err := manager.recoverPendingChange(); err != nil {
 		return nil, err
@@ -207,6 +214,9 @@ func (m *networkManager) Status() (networkingStatus, error) {
 		sort.Slice(status.Bridges[index].Workloads, func(left, right int) bool {
 			return status.Bridges[index].Workloads[left].Name < status.Bridges[index].Workloads[right].Name
 		})
+		if m.dhcp != nil {
+			status.Bridges[index].DHCP = m.dhcp.Status(status.Bridges[index].Name)
+		}
 	}
 	m.mu.Lock()
 	if m.pending != nil {
@@ -215,6 +225,13 @@ func (m *networkManager) Status() (networkingStatus, error) {
 	}
 	m.mu.Unlock()
 	return status, nil
+}
+
+func (m *networkManager) ConfigureBridgeDHCP(bridge string, enabled bool, cidr string) error {
+	if m.dhcp == nil {
+		return errors.New("DHCP manager is not configured")
+	}
+	return m.dhcp.Configure(bridge, enabled, cidr)
 }
 
 func (m *networkManager) Apply(_ context.Context, change networkChange) (pendingNetworkChange, error) {
@@ -346,6 +363,9 @@ func (m *networkManager) clearPendingLocked() error {
 func (m *networkManager) validateWorkloadSafety(change networkChange) error {
 	if change.Type != networkChangeDeleteBridge && change.Type != networkChangeSetBridgeDown && change.Type != networkChangeDetachInterface {
 		return nil
+	}
+	if change.Type == networkChangeDeleteBridge && m.dhcp != nil && m.dhcp.Enabled(change.BridgeName) {
+		return fmt.Errorf("disable DHCP on bridge %s before deleting it", change.BridgeName)
 	}
 	vms, err := m.vms.List()
 	if err != nil {

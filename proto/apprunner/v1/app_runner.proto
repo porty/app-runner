@@ -19,6 +19,7 @@ service AppRunnerService {
   rpc ApplyNetworkChange(ApplyNetworkChangeRequest) returns (ApplyNetworkChangeResponse);
   rpc ConfirmNetworkChange(ConfirmNetworkChangeRequest) returns (ConfirmNetworkChangeResponse);
   rpc RevertNetworkChange(RevertNetworkChangeRequest) returns (RevertNetworkChangeResponse);
+  rpc ConfigureBridgeDHCP(ConfigureBridgeDHCPRequest) returns (ConfigureBridgeDHCPResponse);
 }
 
 message PingRequest {}
@@ -175,6 +176,8 @@ message UserIdentity {
   repeated string groups = 3;
   bool is_root = 4;
   bool has_cap_net_admin = 5;
+  bool has_cap_net_bind_service = 6;
+  bool has_cap_net_raw = 7;
 }
 
 message NetworkInterface {
@@ -205,6 +208,18 @@ message NetworkBridge {
   repeated WorkloadAttachment workloads = 7;
   repeated NetworkDiagnostic diagnostics = 8;
   bool usable_by_qemu = 9;
+  BridgeDHCPStatus dhcp = 10;
+}
+
+message BridgeDHCPStatus {
+  bool enabled = 1;
+  string cidr = 2;
+  string server_address = 3;
+  string pool_start = 4;
+  string pool_end = 5;
+  bool running = 6;
+  uint32 active_leases = 7;
+  string last_error = 8;
 }
 
 message PendingNetworkChange {
@@ -252,5 +267,15 @@ message RevertNetworkChangeRequest {
 }
 
 message RevertNetworkChangeResponse {
+  NetworkingStatus status = 1;
+}
+
+message ConfigureBridgeDHCPRequest {
+  string bridge_name = 1;
+  bool enabled = 2;
+  string cidr = 3;
+}
+
+message ConfigureBridgeDHCPResponse {
   NetworkingStatus status = 1;
 }

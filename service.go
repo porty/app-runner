@@ -217,6 +217,23 @@ func (s *appRunnerService) RevertNetworkChange(ctx context.Context, request *app
 	return &apprunnerv1.RevertNetworkChangeResponse{Status: networkingStatusToProto(status)}, nil
 }
 
+func (s *appRunnerService) ConfigureBridgeDHCP(ctx context.Context, request *apprunnerv1.ConfigureBridgeDHCPRequest) (*apprunnerv1.ConfigureBridgeDHCPResponse, error) {
+	if s.networking == nil {
+		return nil, twirp.InternalError("network manager is not configured")
+	}
+	if !isLoopbackRequest(ctx) {
+		return nil, twirp.NewError(twirp.PermissionDenied, "DHCP configuration changes are accepted only from a browser connected through loopback")
+	}
+	if err := s.networking.ConfigureBridgeDHCP(request.GetBridgeName(), request.GetEnabled(), request.GetCidr()); err != nil {
+		return nil, twirp.NewError(twirp.FailedPrecondition, err.Error())
+	}
+	status, err := s.networking.Status()
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.ConfigureBridgeDHCPResponse{Status: networkingStatusToProto(status)}, nil
+}
+
 func (s *appRunnerService) requireManager() error {
 	if s.manager == nil {
 		return twirp.InternalError("virtual machine manager is not configured")
@@ -281,6 +298,7 @@ func networkingStatusToProto(status networkingStatus) *apprunnerv1.NetworkingSta
 		User: &apprunnerv1.UserIdentity{
 			Username: status.User.Username, Uid: status.User.UID, Groups: status.User.Groups,
 			IsRoot: status.User.IsRoot, HasCapNetAdmin: status.User.HasCAPNetAdmin,
+			HasCapNetBindService: status.User.HasCAPNetBindService, HasCapNetRaw: status.User.HasCAPNetRaw,
 		},
 		CanManage:     status.CanManage,
 		PendingChange: pendingNetworkChangeToProto(status.Pending),
@@ -300,6 +318,11 @@ func networkingStatusToProto(status networkingStatus) *apprunnerv1.NetworkingSta
 			Name: bridge.Name, IsUp: bridge.IsUp, Mtu: bridge.MTU,
 			HardwareAddress: bridge.HardwareAddress, Addresses: bridge.Addresses,
 			MemberInterfaces: bridge.MemberInterfaces, UsableByQemu: bridge.UsableByQEMU,
+			Dhcp: &apprunnerv1.BridgeDHCPStatus{
+				Enabled: bridge.DHCP.Enabled, Cidr: bridge.DHCP.CIDR, ServerAddress: bridge.DHCP.ServerAddress,
+				PoolStart: bridge.DHCP.PoolStart, PoolEnd: bridge.DHCP.PoolEnd, Running: bridge.DHCP.Running,
+				ActiveLeases: bridge.DHCP.ActiveLeases, LastError: bridge.DHCP.LastError,
+			},
 		}
 		for _, diagnostic := range bridge.Diagnostics {
 			mapped.Diagnostics = append(mapped.Diagnostics, networkDiagnosticToProto(diagnostic))

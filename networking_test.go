@@ -145,3 +145,27 @@ func TestNetworkingStatusMapsManagedVMsToTheirBridges(t *testing.T) {
 		t.Fatalf("managed workload was not mapped to its bridge: %#v", status.Bridges)
 	}
 }
+
+func TestNetworkingStatusIncludesBridgeDHCPConfiguration(t *testing.T) {
+	vms, _, settings := newTestVMManager(t)
+	bridgeProvider := &fakeDHCPBridgeProvider{}
+	dhcp, err := newDHCPManager(settings.DiskDir, bridgeProvider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dhcp.Configure("br-lab", true, defaultBridgeDHCPCIDR); err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeNetworkProvider{status: networkingStatus{Bridges: []networkBridgeInfo{{Name: "br-lab", IsUp: true}}}}
+	manager, err := newNetworkManager(provider, vms, settings.DiskDir, dhcp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := manager.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Bridges) != 1 || !status.Bridges[0].DHCP.Enabled || status.Bridges[0].DHCP.PoolStart != "192.168.100.50" {
+		t.Fatalf("DHCP configuration was not included: %#v", status.Bridges)
+	}
+}
