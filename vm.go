@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -53,19 +54,38 @@ func (e *fieldError) Error() string {
 }
 
 type virtualMachine struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	CPUs        uint32      `json:"cpus"`
-	MemoryMiB   uint32      `json:"memory_mib"`
-	DiskGiB     uint32      `json:"disk_gib"`
-	ISOName     string      `json:"iso_name"`
-	NetworkMode networkMode `json:"network_mode"`
-	BridgeName  string      `json:"bridge_name,omitempty"`
-	MACAddress  string      `json:"mac_address,omitempty"`
-	Status      vmStatus    `json:"status"`
-	CreatedAt   time.Time   `json:"created_at"`
-	LastError   string      `json:"last_error,omitempty"`
-	PID         int         `json:"pid,omitempty"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	CPUs        uint32       `json:"cpus"`
+	MemoryMiB   uint32       `json:"memory_mib"`
+	DiskGiB     uint32       `json:"disk_gib"`
+	ISOName     string       `json:"iso_name"`
+	NetworkMode networkMode  `json:"network_mode"`
+	BridgeName  string       `json:"bridge_name,omitempty"`
+	MACAddress  string       `json:"mac_address,omitempty"`
+	Status      vmStatus     `json:"status"`
+	CreatedAt   time.Time    `json:"created_at"`
+	LastError   string       `json:"last_error,omitempty"`
+	PID         int          `json:"pid,omitempty"`
+	IPMI        vmIPMIConfig `json:"ipmi,omitempty"`
+	IPMIRunning bool         `json:"-"`
+	IPMIError   string       `json:"-"`
+}
+
+type vmIPMIConfig struct {
+	Enabled        bool   `json:"enabled,omitempty"`
+	BridgeName     string `json:"bridge_name,omitempty"`
+	Address        string `json:"address,omitempty"`
+	Username       string `json:"username,omitempty"`
+	Password       string `json:"password,omitempty"`
+	BootDevice     uint8  `json:"boot_device,omitempty"`
+	BootPersistent bool   `json:"boot_persistent,omitempty"`
+}
+
+type vmIPMIController interface {
+	Configure(virtualMachine) error
+	Disable(virtualMachine)
+	Status(string) (bool, string)
 }
 
 type createVMOptions struct {
@@ -93,10 +113,11 @@ type hostCapabilities struct {
 
 type hypervisor interface {
 	CreateDisk(context.Context, string, uint32) error
-	Start(virtualMachine, func(error)) (int, error)
+	Start(virtualMachine, func(int, error)) (int, error)
 	IsRunning(int) bool
 	GracefulStop(virtualMachine) error
 	ForceStop(virtualMachine) error
+	Reset(virtualMachine) error
 }
 
 type virtualMachineStore interface {
@@ -117,6 +138,7 @@ type vmManager struct {
 	capabilities     func() hostCapabilities
 	bridgeCapability func(string) (bool, string)
 	networkLifecycle vmNetworkLifecycle
+	ipmi             vmIPMIController
 	now              func() time.Time
 	newID            func() (string, error)
 	vms              []virtualMachine
@@ -173,6 +195,11 @@ func (m *vmManager) List() ([]virtualMachine, error) {
 		return nil, err
 	}
 	result := slices.Clone(m.vms)
+	if m.ipmi != nil {
+		for index := range result {
+			result[index].IPMIRunning, result[index].IPMIError = m.ipmi.Status(result[index].ID)
+		}
+	}
 	sort.Slice(result, func(left, right int) bool {
 		return result[left].CreatedAt.Before(result[right].CreatedAt)
 	})
@@ -189,7 +216,11 @@ func (m *vmManager) Get(id string) (virtualMachine, error) {
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
 	}
-	return m.vms[index], nil
+	result := m.vms[index]
+	if m.ipmi != nil {
+		result.IPMIRunning, result.IPMIError = m.ipmi.Status(result.ID)
+	}
+	return result, nil
 }
 
 func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtualMachine, error) {
@@ -275,7 +306,7 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 		}
 	}
 
-	pid, err := m.hypervisor.Start(vm, func(exitErr error) { m.processExited(id, exitErr) })
+	pid, err := m.hypervisor.Start(vm, func(exitedPID int, exitErr error) { m.processExited(id, exitedPID, exitErr) })
 	if err != nil {
 		if m.networkLifecycle != nil {
 			m.networkLifecycle.Release(vm)
@@ -288,6 +319,9 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 	m.vms[index].PID = pid
 	m.vms[index].Status = vmStatusRunning
 	m.vms[index].LastError = ""
+	if m.vms[index].IPMI.BootDevice != 0 && !m.vms[index].IPMI.BootPersistent {
+		m.vms[index].IPMI.BootDevice = 0
+	}
 	if err := m.store.Save(m.vms); err != nil {
 		_ = m.hypervisor.ForceStop(m.vms[index])
 		if m.networkLifecycle != nil {
@@ -352,6 +386,9 @@ func (m *vmManager) Delete(id string) error {
 		return errDeleteRunningVM
 	}
 	vm := m.vms[index]
+	if m.ipmi != nil {
+		m.ipmi.Disable(vm)
+	}
 	if err := removeIfExists(m.diskPath(vm.ID)); err != nil {
 		return fmt.Errorf("remove system disk: %w", err)
 	}
@@ -362,6 +399,95 @@ func (m *vmManager) Delete(id string) error {
 	}
 	m.vms = append(m.vms[:index], m.vms[index+1:]...)
 	return m.store.Save(m.vms)
+}
+
+func (m *vmManager) ConfigureIPMI(id string, config vmIPMIConfig) (virtualMachine, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index := m.indexByID(id)
+	if index == -1 {
+		return virtualMachine{}, errVMNotFound
+	}
+	previous := m.vms[index].IPMI
+	if !config.Enabled {
+		if m.ipmi != nil {
+			m.ipmi.Disable(m.vms[index])
+		}
+		m.vms[index].IPMI = vmIPMIConfig{}
+	} else {
+		config.BridgeName = strings.TrimSpace(config.BridgeName)
+		config.Address = strings.TrimSpace(config.Address)
+		config.Username = strings.TrimSpace(config.Username)
+		if config.Password == "" {
+			config.Password = previous.Password
+		}
+		if err := validateIPMIConfig(config); err != nil {
+			return virtualMachine{}, err
+		}
+		candidate := m.vms[index]
+		candidate.IPMI = config
+		if m.ipmi == nil {
+			return virtualMachine{}, errors.New("IPMI service is unavailable")
+		}
+		if err := m.ipmi.Configure(candidate); err != nil {
+			return virtualMachine{}, err
+		}
+		m.vms[index].IPMI = candidate.IPMI
+	}
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms[index].IPMI = previous
+		if m.ipmi != nil {
+			if previous.Enabled {
+				_ = m.ipmi.Configure(m.vms[index])
+			} else {
+				m.ipmi.Disable(m.vms[index])
+			}
+		}
+		return virtualMachine{}, err
+	}
+	return m.vms[index], nil
+}
+
+func validateIPMIConfig(config vmIPMIConfig) error {
+	if err := validateInterfaceName(config.BridgeName); err != nil {
+		return &fieldError{field: "bridge_name", message: err.Error()}
+	}
+	address, err := netip.ParseAddr(config.Address)
+	if err != nil || !address.Is4() || address.IsUnspecified() || address.IsMulticast() {
+		return &fieldError{field: "address", message: "must be a usable IPv4 address"}
+	}
+	if config.Username == "" || len(config.Username) > 16 {
+		return &fieldError{field: "username", message: "must be between 1 and 16 characters"}
+	}
+	if config.Password == "" || len(config.Password) > 20 {
+		return &fieldError{field: "password", message: "must be between 1 and 20 bytes"}
+	}
+	return nil
+}
+
+func (m *vmManager) SetIPMIBootFlags(id string, device uint8, persistent bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index := m.indexByID(id)
+	if index == -1 {
+		return errVMNotFound
+	}
+	m.vms[index].IPMI.BootDevice = device
+	m.vms[index].IPMI.BootPersistent = persistent
+	return m.store.Save(m.vms)
+}
+
+func (m *vmManager) Reset(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index := m.indexByID(id)
+	if index == -1 {
+		return errVMNotFound
+	}
+	if m.vms[index].Status != vmStatusRunning {
+		return errVMNotRunning
+	}
+	return m.hypervisor.Reset(m.vms[index])
 }
 
 func (m *vmManager) ListISOs() ([]isoImage, error) {
@@ -397,14 +523,14 @@ func (m *vmManager) ConsoleSocket(id string) (string, error) {
 	return m.vncSocketPath(id), nil
 }
 
-func (m *vmManager) processExited(id string, exitErr error) {
+func (m *vmManager) processExited(id string, expectedPID int, exitErr error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	index := m.indexByID(id)
 	if index == -1 {
 		return
 	}
-	if m.vms[index].PID == 0 {
+	if m.vms[index].PID == 0 || (expectedPID != 0 && m.vms[index].PID != expectedPID) {
 		return
 	}
 	wasStopping := m.vms[index].Status == vmStatusStopping

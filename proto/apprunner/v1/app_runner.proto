@@ -14,6 +14,7 @@ service AppRunnerService {
   rpc CreateVM(CreateVMRequest) returns (CreateVMResponse);
   rpc StartVM(StartVMRequest) returns (StartVMResponse);
   rpc StopVM(StopVMRequest) returns (StopVMResponse);
+  rpc ConfigureVMIPMI(ConfigureVMIPMIRequest) returns (ConfigureVMIPMIResponse);
   rpc DeleteVM(DeleteVMRequest) returns (DeleteVMResponse);
   rpc GetNetworkingStatus(GetNetworkingStatusRequest) returns (GetNetworkingStatusResponse);
   rpc ApplyNetworkChange(ApplyNetworkChangeRequest) returns (ApplyNetworkChangeResponse);
@@ -64,6 +65,17 @@ message VirtualMachine {
   string last_error = 10;
   string console_path = 11;
   string bridge_name = 12;
+  VMIPMIStatus ipmi = 13;
+}
+
+message VMIPMIStatus {
+  bool enabled = 1;
+  string bridge_name = 2;
+  string address = 3;
+  uint32 port = 4;
+  string username = 5;
+  bool running = 6;
+  string last_error = 7;
 }
 
 message HostStatus {
@@ -133,6 +145,19 @@ message StopVMRequest {
 }
 
 message StopVMResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message ConfigureVMIPMIRequest {
+  string id = 1;
+  bool enabled = 2;
+  string bridge_name = 3;
+  string address = 4;
+  string username = 5;
+  string password = 6;
+}
+
+message ConfigureVMIPMIResponse {
   VirtualMachine virtual_machine = 1;
 }
 

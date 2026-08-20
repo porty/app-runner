@@ -8,8 +8,10 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControlLabel,
   MenuItem,
   Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -26,11 +28,13 @@ import {
   PlayArrowRounded,
   PowerSettingsNewRounded,
   StopRounded,
+  SettingsEthernetRounded,
 } from '@mui/icons-material'
 import { Link } from 'react-router-dom'
 
 import {
   createVM,
+  configureVMIPMI,
   deleteVM,
   getNetworkingStatus,
   listISOs,
@@ -42,6 +46,7 @@ import {
   type NetworkingStatus,
   type VirtualMachine,
   type VMStatus,
+  type VMIPMIConfiguration,
 } from './api'
 
 const defaultCreateRequest: CreateVMRequest = {
@@ -72,6 +77,8 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
   const [busyID, setBusyID] = useState('')
   const [error, setError] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
+  const [ipmiVM, setIPMIVM] = useState<VirtualMachine | null>(null)
+  const [ipmiRequest, setIPMIRequest] = useState<VMIPMIConfiguration | null>(null)
   const [createRequest, setCreateRequest] = useState<CreateVMRequest>(defaultCreateRequest)
   const createName = createRequest.name.trim()
   const createNameValid = dnsLabelPattern.test(createName)
@@ -137,6 +144,36 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
     await runOperation(vm.id, () => deleteVM(vm.id))
   }
 
+  const openIPMI = (vm: VirtualMachine) => {
+    const bridges = networking?.bridges ?? []
+    const bridgeName = vm.ipmi?.bridge_name || bridges.find((bridge) => bridge.dhcp?.enabled)?.name || bridges[0]?.name || ''
+    setIPMIVM(vm)
+    setIPMIRequest({
+      id: vm.id,
+      enabled: vm.ipmi?.enabled ?? false,
+      bridge_name: bridgeName,
+      address: vm.ipmi?.address || suggestIPMIAddress(bridgeName, bridges, virtualMachines),
+      username: vm.ipmi?.username || 'admin',
+      password: '',
+    })
+  }
+
+  const submitIPMI = async () => {
+    if (!ipmiRequest) return
+    setBusyID(`ipmi-${ipmiRequest.id}`)
+    setError('')
+    try {
+      await configureVMIPMI(ipmiRequest)
+      setIPMIVM(null)
+      setIPMIRequest(null)
+      await refresh()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to configure IPMI')
+    } finally {
+      setBusyID('')
+    }
+  }
+
   return (
     <Box>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', mb: 3.5 }}>
@@ -194,10 +231,20 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
                   </TableCell>
                   <TableCell><Chip size="small" label={status.label} color={status.color} /></TableCell>
                   <TableCell>{vm.cpus} vCPU · {formatMemory(vm.memory_mib)} · {vm.disk_gib} GiB</TableCell>
-                  <TableCell>{vm.network_mode === 'NETWORK_MODE_BRIDGE' ? `Bridge (${vm.bridge_name || 'missing'})` : 'NAT'}</TableCell>
+                  <TableCell>
+                    <Typography variant="body2">{vm.network_mode === 'NETWORK_MODE_BRIDGE' ? `Bridge (${vm.bridge_name || 'missing'})` : 'NAT'}</Typography>
+                    {vm.ipmi?.enabled && (
+                      <Typography variant="caption" color={vm.ipmi.running ? 'success.main' : 'error.main'}>
+                        IPMI {vm.ipmi.address}:{vm.ipmi.port || 623}{vm.ipmi.running ? '' : ` · ${vm.ipmi.last_error || 'not listening'}`}
+                      </Typography>
+                    )}
+                  </TableCell>
                   <TableCell>{vm.iso_name}</TableCell>
                   <TableCell align="right">
                     <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
+                      <Button size="small" startIcon={<SettingsEthernetRounded />} disabled={busy} onClick={() => openIPMI(vm)}>
+                        IPMI
+                      </Button>
                       {running && (
                         <Button
                           component={Link}
@@ -309,8 +356,79 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Dialog open={ipmiVM !== null} onClose={() => { setIPMIVM(null); setIPMIRequest(null) }} fullWidth maxWidth="sm">
+        <DialogTitle>IPMI · {ipmiVM?.name}</DialogTitle>
+        <DialogContent>
+          {ipmiRequest && (
+            <Stack spacing={2.25} sx={{ mt: 1 }}>
+              <FormControlLabel
+                control={<Switch checked={ipmiRequest.enabled} onChange={(event) => setIPMIRequest({ ...ipmiRequest, enabled: event.target.checked })} />}
+                label="Enable IPMI"
+              />
+              {ipmiRequest.enabled && (
+                <>
+                  <TextField
+                    select
+                    label="Management bridge"
+                    value={ipmiRequest.bridge_name}
+                    onChange={(event) => {
+                      const bridgeName = event.target.value
+                      setIPMIRequest({ ...ipmiRequest, bridge_name: bridgeName, address: suggestIPMIAddress(bridgeName, networking?.bridges ?? [], virtualMachines, ipmiVM?.id) })
+                    }}
+                  >
+                    {(networking?.bridges ?? []).map((bridge) => <MenuItem key={bridge.name} value={bridge.name}>{bridge.name}{bridge.dhcp?.enabled ? ' · managed subnet' : ''}</MenuItem>)}
+                  </TextField>
+                  <TextField
+                    label="Management IPv4 address"
+                    value={ipmiRequest.address}
+                    onChange={(event) => setIPMIRequest({ ...ipmiRequest, address: event.target.value })}
+                    helperText="A unique address on this bridge; App Runner assigns it to the bridge while IPMI is enabled."
+                  />
+                  <TextField label="Username" value={ipmiRequest.username} onChange={(event) => setIPMIRequest({ ...ipmiRequest, username: event.target.value })} slotProps={{ htmlInput: { maxLength: 16 } }} />
+                  <TextField
+                    label="Password"
+                    type="password"
+                    value={ipmiRequest.password}
+                    onChange={(event) => setIPMIRequest({ ...ipmiRequest, password: event.target.value })}
+                    helperText={ipmiVM?.ipmi?.enabled ? 'Leave blank to retain the existing password.' : 'Required; IPMI passwords are limited to 20 bytes.'}
+                    slotProps={{ htmlInput: { maxLength: 20 } }}
+                  />
+                  <Alert severity="warning">Expose IPMI only on a trusted management network. The listener uses IPMI 2.0 lanplus on UDP port 623.</Alert>
+                </>
+              )}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setIPMIVM(null); setIPMIRequest(null) }}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => void submitIPMI()}
+            disabled={!ipmiRequest || busyID === `ipmi-${ipmiRequest.id}` || (ipmiRequest.enabled && (!ipmiRequest.bridge_name || !ipmiRequest.address || !ipmiRequest.username || (!ipmiVM?.ipmi?.enabled && !ipmiRequest.password)))}
+          >
+            {busyID.startsWith('ipmi-') ? 'Saving…' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
+}
+
+function suggestIPMIAddress(bridgeName: string, bridges: NetworkingStatus['bridges'], vms: VirtualMachine[], excludeVMID = ''): string {
+  const bridge = (bridges ?? []).find((candidate) => candidate.name === bridgeName)
+  const cidr = bridge?.dhcp?.enabled ? bridge.dhcp.cidr : bridge?.addresses?.find((address) => address.includes('.'))
+  if (!cidr) return ''
+  const [address, bitsText] = cidr.split('/')
+  const bits = Number(bitsText)
+  const octets = address.split('.').map(Number)
+  if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255) || bits !== 24) return ''
+  const used = new Set(vms.filter((vm) => vm.id !== excludeVMID && vm.ipmi?.enabled).map((vm) => vm.ipmi?.address))
+  for (let host = 2; host < 50; host += 1) {
+    const candidate = `${octets[0]}.${octets[1]}.${octets[2]}.${host}`
+    if (!used.has(candidate) && candidate !== bridge?.dhcp?.server_address) return candidate
+  }
+  return ''
 }
 
 function formatMemory(memoryMiB: number): string {

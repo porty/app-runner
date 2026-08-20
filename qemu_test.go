@@ -95,3 +95,11 @@ func TestQEMUArgumentsSupportBridgeNetworking(t *testing.T) {
 		t.Fatalf("NAT arguments were included for a bridge VM: %#v", arguments)
 	}
 }
+
+func TestQEMUArgumentsHonorIPMIBootDevice(t *testing.T) {
+	qemu := newQEMUHypervisor(defaultConfig(t.TempDir()))
+	arguments := qemu.arguments(virtualMachine{ID: "vm-id", ISOName: "installer.iso", IPMI: vmIPMIConfig{BootDevice: uint8(1)}})
+	if !slices.Contains(arguments, "order=ncd,menu=on") {
+		t.Fatalf("PXE boot order is missing: %#v", arguments)
+	}
+}

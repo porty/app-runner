@@ -8,6 +8,7 @@ App Runner is a single-user web control plane for local QEMU/KVM virtual machine
 - Node.js and npm
 - Buf, only when regenerating protobuf sources
 - `qemu-system-x86_64`, `qemu-img`, and access to `/dev/kvm` to run VMs
+- root or `CAP_NET_ADMIN` plus `CAP_NET_BIND_SERVICE` when exposing virtual BMC/IPMI endpoints
 
 ## Development
 
@@ -90,6 +91,8 @@ NAT can optionally be enabled with managed DHCP. While at least one VM uses the 
 Managed DNS can also be enabled per DHCP bridge. App Runner binds its in-process DNS server to the bridge address on UDP and TCP port 53, advertises that address to DHCP clients, and forwards non-authoritative queries to the configured upstream IP addresses. It starts with the first VM on the bridge and stops with the last. DNS can be used with or without NAT; automatic host-firewall allowances currently follow the NAT lifecycle.
 
 Auto DNS adds an authoritative zone whose suffix defaults to `<bridge>.internal`, advertises that suffix through DHCP, and publishes an A record for each running VM after it acquires a managed DHCP lease. For example, `web-1` on `br0` becomes `web-1.br0.internal`. New VM names must therefore be a single 1–63 character DNS label containing letters, numbers, or interior hyphens. Existing definitions with incompatible names continue to load, but must be recreated with a valid name before Auto DNS can be enabled on their bridge.
+
+Each VM can optionally expose an IPMI 2.0 virtual BMC on a unique IPv4 address attached to a selected management bridge. The listener remains available while the VM is stopped and maps `lanplus` chassis power, reset, shutdown, cycle, status, and supported boot-device commands to App Runner's VM lifecycle and QMP. Managed `/24` bridges suggest addresses below the `.50` DHCP pool; otherwise enter an unused address within a subnet configured on the bridge. IPMI uses UDP port 623, requires `CAP_NET_ADMIN` and `CAP_NET_BIND_SERVICE` (or root), and should be restricted to a trusted management network.
 
 The host can use a managed zone in several ways:
 

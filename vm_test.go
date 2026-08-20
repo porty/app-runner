@@ -43,7 +43,7 @@ type fakeHypervisor struct {
 	nextPID      int
 	gracefulStop bool
 	forcedStop   bool
-	onExit       func(error)
+	onExit       func(int, error)
 }
 
 func newFakeHypervisor() *fakeHypervisor {
@@ -54,7 +54,7 @@ func (h *fakeHypervisor) CreateDisk(_ context.Context, path string, _ uint32) er
 	return os.WriteFile(path, []byte("qcow2"), 0o600)
 }
 
-func (h *fakeHypervisor) Start(_ virtualMachine, onExit func(error)) (int, error) {
+func (h *fakeHypervisor) Start(_ virtualMachine, onExit func(int, error)) (int, error) {
 	h.nextPID++
 	h.running[h.nextPID] = true
 	h.onExit = onExit
@@ -75,6 +75,8 @@ func (h *fakeHypervisor) ForceStop(vm virtualMachine) error {
 	delete(h.running, vm.PID)
 	return nil
 }
+
+func (h *fakeHypervisor) Reset(virtualMachine) error { return nil }
 
 func newTestVMManager(t *testing.T) (*vmManager, *fakeHypervisor, config) {
 	t.Helper()
@@ -131,7 +133,7 @@ func TestVMManagerLifecycle(t *testing.T) {
 		t.Fatalf("graceful stop was not requested: %#v", vm)
 	}
 	hypervisor.running[vm.PID] = false
-	hypervisor.onExit(nil)
+	hypervisor.onExit(vm.PID, nil)
 
 	vm, err = manager.Get(vm.ID)
 	if err != nil || vm.Status != vmStatusStopped {

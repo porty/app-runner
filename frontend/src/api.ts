@@ -31,6 +31,26 @@ export interface VirtualMachine {
   created_at: string
   last_error?: string
   console_path: string
+  ipmi?: VMIPMIStatus
+}
+
+export interface VMIPMIStatus {
+  enabled: boolean
+  bridge_name?: string
+  address?: string
+  port: number
+  username?: string
+  running: boolean
+  last_error?: string
+}
+
+export interface VMIPMIConfiguration {
+  id: string
+  enabled: boolean
+  bridge_name: string
+  address: string
+  username: string
+  password: string
 }
 
 export interface HostStatus {
@@ -243,6 +263,11 @@ export async function startVM(id: string): Promise<VirtualMachine> {
 
 export async function stopVM(id: string, force = false): Promise<VirtualMachine> {
   const response = await callTwirp<{ virtual_machine: VirtualMachine }>('StopVM', { id, force })
+  return response.virtual_machine
+}
+
+export async function configureVMIPMI(configuration: VMIPMIConfiguration): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('ConfigureVMIPMI', configuration)
   return response.virtual_machine
 }
 

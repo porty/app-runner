@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 )
 
@@ -47,12 +48,25 @@ func main() {
 	}
 	defer dhcp.Close()
 	manager.networkLifecycle = dhcp
+	ipmi := newIPMIManager(manager, func(bridge string) (netip.Prefix, bool) {
+		status := dhcp.Status(bridge)
+		if !status.Enabled {
+			return netip.Prefix{}, false
+		}
+		prefix, err := netip.ParsePrefix(status.CIDR)
+		return prefix, err == nil
+	})
+	manager.ipmi = ipmi
+	defer ipmi.Close()
 	vms, err := manager.List()
 	if err != nil {
 		fatal(err)
 	}
 	if err := dhcp.Reconcile(vms); err != nil {
 		slog.Warn("restore managed bridge network services", "error", err)
+	}
+	if err := ipmi.Reconcile(vms); err != nil {
+		slog.Warn("restore virtual BMC services", "error", err)
 	}
 	networking, err := newNetworkManager(networkProvider, manager, settings.DiskDir, dhcp)
 	if err != nil {

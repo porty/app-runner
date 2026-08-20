@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { applyNetworkChange, configureBridgeDHCP, createVM, echo, getNetworkingStatus, listVMs, ping } from './api'
+import { applyNetworkChange, configureBridgeDHCP, configureVMIPMI, createVM, echo, getNetworkingStatus, listVMs, ping } from './api'
 
 describe('Twirp API client', () => {
   afterEach(() => {
@@ -185,6 +185,23 @@ describe('Twirp API client', () => {
       expect.objectContaining({
         body: JSON.stringify(configuration),
       }),
+    )
+  })
+
+  it('configures a VM IPMI endpoint', async () => {
+    const configuration = {
+      id: 'vm-id', enabled: true, bridge_name: 'mgmt0', address: '192.168.50.2', username: 'admin', password: 'secret',
+    }
+    const virtualMachine = { id: 'vm-id', name: 'node-1', ipmi: { enabled: true, address: '192.168.50.2', port: 623, running: true } }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ virtual_machine: virtualMachine }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(configureVMIPMI(configuration)).resolves.toEqual(virtualMachine)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/twirp/apprunner.v1.AppRunnerService/ConfigureVMIPMI',
+      expect.objectContaining({ body: JSON.stringify(configuration) }),
     )
   })
 })

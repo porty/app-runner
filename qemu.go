@@ -33,7 +33,7 @@ func (q *qemuHypervisor) CreateDisk(ctx context.Context, path string, sizeGiB ui
 	return nil
 }
 
-func (q *qemuHypervisor) Start(vm virtualMachine, onExit func(error)) (int, error) {
+func (q *qemuHypervisor) Start(vm virtualMachine, onExit func(int, error)) (int, error) {
 	for _, socket := range []string{q.qmpSocketPath(vm.ID), q.vncSocketPath(vm.ID)} {
 		if err := removeIfExists(socket); err != nil {
 			return 0, fmt.Errorf("remove stale runtime socket: %w", err)
@@ -51,7 +51,7 @@ func (q *qemuHypervisor) Start(vm virtualMachine, onExit func(error)) (int, erro
 		for _, socket := range []string{q.qmpSocketPath(vm.ID), q.vncSocketPath(vm.ID)} {
 			_ = removeIfExists(socket)
 		}
-		onExit(err)
+		onExit(command.Process.Pid, err)
 	}()
 	return command.Process.Pid, nil
 }
@@ -79,6 +79,10 @@ func (q *qemuHypervisor) ForceStop(vm virtualMachine) error {
 	return err
 }
 
+func (q *qemuHypervisor) Reset(vm virtualMachine) error {
+	return executeQMP(q.qmpSocketPath(vm.ID), "system_reset")
+}
+
 func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
 	diskPath := filepath.Join(q.settings.DiskDir, vm.ID+".qcow2")
 	isoPath := filepath.Join(q.settings.ISODir, vm.ISOName)
@@ -102,7 +106,7 @@ func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
 		"-device", "virtio-scsi-pci,id=scsi0",
 		"-drive", "file=" + isoPath + ",if=none,id=install,media=cdrom,readonly=on",
 		"-device", "scsi-cd,drive=install,bus=scsi0.0",
-		"-boot", "order=dc,menu=on",
+		"-boot", "order=" + q.bootOrder(vm) + ",menu=on",
 	}
 	if vm.NetworkMode == networkModeBridge {
 		networkDevice := "virtio-net-pci,netdev=net0"
@@ -127,6 +131,19 @@ func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
 		"-qmp", "unix:"+q.qmpSocketPath(vm.ID)+",server=on,wait=off",
 		"-vnc", "unix:"+q.vncSocketPath(vm.ID),
 	)
+}
+
+func (q *qemuHypervisor) bootOrder(vm virtualMachine) string {
+	switch vm.IPMI.BootDevice {
+	case 1:
+		return "ncd"
+	case 2:
+		return "cdn"
+	case 5:
+		return "dcn"
+	default:
+		return "dcn"
+	}
 }
 
 func (q *qemuHypervisor) qmpSocketPath(id string) string {

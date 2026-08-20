@@ -62,6 +62,19 @@ Launch and manage QEMU/KVM virtual machines from the web interface.
 - proxies the noVNC WebSocket connection to that local socket in the Go backend
 - does not expose QEMU's VNC listener directly on a network interface
 
+## IPMI
+
+- optionally exposes a persistent virtual BMC for each VM over IPMI 2.0/RMCP+ on UDP port 623
+- assigns each virtual BMC a unique IPv4 address on a selected management bridge and keeps it reachable while its guest is powered off
+- suggests unused addresses from `.2` through `.49` on managed `/24` networks, below the managed DHCP pool; other bridge networks accept an explicit address
+- supports authenticated `lanplus` sessions using encrypted cipher suite 17 and disables legacy IPMI 1.5 sessions
+- maps chassis status, power on, immediate power off, soft shutdown, reset, and power cycle to the VM manager and QMP
+- supports one-shot or persistent PXE, disk, and optical boot overrides through QEMU boot order
+- stores credentials only in mode-`0600` VM metadata, omits passwords from API responses, and supports credential rotation
+- restores enabled listeners after an App Runner restart and removes their bridge addresses when disabled, deleted, or shut down
+- requires `CAP_NET_ADMIN` to assign management addresses and root or `CAP_NET_BIND_SERVICE` to bind UDP port 623
+- is intended for isolated management networks and should not be exposed to the public Internet
+
 ## Completion criteria
 
 - the frontend can create a persistent VM from an ISO already in `iso/`
@@ -72,3 +85,4 @@ Launch and manage QEMU/KVM virtual machines from the web interface.
 - DHCP configuration, `.50` pool allocation, lease persistence, packet responses, and per-bridge VM lifecycle are covered by automated tests
 - direct navigation to the VM list and console routes works in the production executable
 - configuration precedence, persistence, lifecycle behavior, QEMU argument construction, and relevant frontend API behavior have automated tests
+- IPMI configuration persistence, boot overrides, API behavior, and QEMU power-control integration have automated tests

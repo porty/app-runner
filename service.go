@@ -137,6 +137,20 @@ func (s *appRunnerService) StopVM(_ context.Context, request *apprunnerv1.StopVM
 	return &apprunnerv1.StopVMResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
 }
 
+func (s *appRunnerService) ConfigureVMIPMI(_ context.Context, request *apprunnerv1.ConfigureVMIPMIRequest) (*apprunnerv1.ConfigureVMIPMIResponse, error) {
+	if err := s.requireManager(); err != nil {
+		return nil, err
+	}
+	vm, err := s.manager.ConfigureIPMI(request.GetId(), vmIPMIConfig{
+		Enabled: request.GetEnabled(), BridgeName: request.GetBridgeName(), Address: request.GetAddress(),
+		Username: request.GetUsername(), Password: request.GetPassword(),
+	})
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.ConfigureVMIPMIResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+}
+
 func (s *appRunnerService) DeleteVM(_ context.Context, request *apprunnerv1.DeleteVMRequest) (*apprunnerv1.DeleteVMResponse, error) {
 	if err := s.requireManager(); err != nil {
 		return nil, err
@@ -268,6 +282,10 @@ func virtualMachineToProto(vm virtualMachine) *apprunnerv1.VirtualMachine {
 		IsoName: vm.ISOName, NetworkMode: mode, Status: status, BridgeName: vm.BridgeName,
 		CreatedAt: vm.CreatedAt.Format(time.RFC3339), LastError: vm.LastError,
 		ConsolePath: "/console/" + vm.ID,
+		Ipmi: &apprunnerv1.VMIPMIStatus{
+			Enabled: vm.IPMI.Enabled, BridgeName: vm.IPMI.BridgeName, Address: vm.IPMI.Address,
+			Port: ipmiPort, Username: vm.IPMI.Username, Running: vm.IPMIRunning, LastError: vm.IPMIError,
+		},
 	}
 }
 
