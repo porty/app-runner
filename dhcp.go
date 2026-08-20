@@ -531,6 +531,20 @@ func (m *dhcpManager) handlePacket(bridge string, network dhcpRange, config brid
 		return
 	}
 	messageType := request.MessageType()
+	requested := requestedAddress(request)
+	requestedAddressValue := ""
+	if requested.IsValid() {
+		requestedAddressValue = requested.String()
+	}
+	slog.Info("DHCP request received",
+		"bridge", bridge,
+		"client", request.ClientHWAddr.String(),
+		"peer", peer,
+		"transaction_id", request.TransactionID.String(),
+		"message_type", messageType.String(),
+		"requested_address", requestedAddressValue,
+		"hostname", request.HostName(),
+	)
 	if messageType == dhcpv4.MessageTypeRelease || messageType == dhcpv4.MessageTypeDecline {
 		m.releaseLease(bridge, clientKey(request))
 		return
@@ -549,11 +563,11 @@ func (m *dhcpManager) handlePacket(bridge string, network dhcpRange, config brid
 	if messageType == dhcpv4.MessageTypeInform {
 		replyType = dhcpv4.MessageTypeAck
 	} else {
-		requested := netip.Addr{}
 		strictRequested := false
 		if messageType == dhcpv4.MessageTypeRequest {
-			requested = requestedAddress(request)
 			strictRequested = requested.IsValid()
+		} else {
+			requested = netip.Addr{}
 		}
 		var err error
 		leaseAddress, err = m.acquireLease(bridge, network, clientKey(request), request.ClientHWAddr.String(), requested, strictRequested)
@@ -595,9 +609,24 @@ func (m *dhcpManager) handlePacket(bridge string, network dhcpRange, config brid
 			reply.UpdateOption(dhcpv4.OptIPAddressLeaseTime(dhcpLeaseDuration))
 		}
 	}
-	if _, err := connection.WriteTo(reply.ToBytes(), peer); err != nil {
+	packet := reply.ToBytes()
+	if _, err := connection.WriteTo(packet, peer); err != nil {
 		slog.Warn("send DHCP response", "bridge", bridge, "client", request.ClientHWAddr, "error", err)
+		return
 	}
+	assignedAddress := ""
+	if leaseAddress.IsValid() {
+		assignedAddress = leaseAddress.String()
+	}
+	slog.Info("DHCP response sent",
+		"bridge", bridge,
+		"client", request.ClientHWAddr.String(),
+		"peer", peer,
+		"transaction_id", request.TransactionID.String(),
+		"message_type", replyType.String(),
+		"assigned_address", assignedAddress,
+		"bytes", len(packet),
+	)
 }
 
 func (m *dhcpManager) acquireLease(bridge string, network dhcpRange, key, hardwareAddress string, requested netip.Addr, strictRequested bool) (netip.Addr, error) {

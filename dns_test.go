@@ -3,6 +3,7 @@ package main
 import (
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -74,6 +75,38 @@ func TestManagedDNSAnswersAuthoritativeVMRecords(t *testing.T) {
 	handler.ServeDNS(writer, request)
 	if writer.message == nil || writer.message.Rcode != dns.RcodeNameError || !writer.message.Authoritative || len(writer.message.Ns) != 1 {
 		t.Fatalf("unknown local name was not answered authoritatively: %#v", writer.message)
+	}
+}
+
+func TestManagedDNSLogsQueriesAndResponses(t *testing.T) {
+	logs := captureDefaultLogs(t)
+	handler := &managedDNSHandler{
+		bridge:  "br0",
+		address: netip.MustParseAddr("192.168.100.1"),
+		config:  bridgeDNSConfig{Enabled: true, Auto: true, Suffix: "br0.internal", Forwarders: []string{"1.1.1.1"}},
+		records: func() map[string]netip.Addr {
+			return map[string]netip.Addr{"web-1": netip.MustParseAddr("192.168.100.50")}
+		},
+	}
+	request := new(dns.Msg)
+	request.SetQuestion("web-1.br0.internal.", dns.TypeA)
+	request.Id = 1234
+	handler.ServeDNS(&recordingDNSWriter{}, request)
+
+	output := logs.String()
+	for _, expected := range []string{
+		`"msg":"DNS query received"`,
+		`"msg":"DNS response sent"`,
+		`"bridge":"br0"`,
+		`"transaction_id":1234`,
+		`"name":"web-1.br0.internal."`,
+		`"type":"A"`,
+		`"rcode":"NOERROR"`,
+		`"answers":1`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("DNS logs do not contain %s: %s", expected, output)
+		}
 	}
 }
 

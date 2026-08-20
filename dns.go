@@ -63,7 +63,7 @@ func (m *dnsManager) Start(bridge string, address netip.Addr, config bridgeDNSCo
 	if runtime := m.runtimes[bridge]; runtime != nil && runtime.running {
 		return nil
 	}
-	handler := &managedDNSHandler{address: address, config: config, records: records}
+	handler := &managedDNSHandler{bridge: bridge, address: address, config: config, records: records}
 	server, err := m.newServer(address, handler)
 	if err != nil {
 		return fmt.Errorf("listen on %s UDP/TCP port %d: %w", address, managedDNSPort, err)
@@ -200,12 +200,45 @@ func ignoreClosedNetworkError(err error) error {
 }
 
 type managedDNSHandler struct {
+	bridge  string
 	address netip.Addr
 	config  bridgeDNSConfig
 	records dnsRecordProvider
 }
 
 func (h *managedDNSHandler) ServeDNS(writer dns.ResponseWriter, request *dns.Msg) {
+	client := ""
+	if writer.RemoteAddr() != nil {
+		client = writer.RemoteAddr().String()
+	}
+	requestID := uint16(0)
+	questionName := ""
+	questionType := ""
+	questionCount := 0
+	if request != nil {
+		requestID = request.Id
+		questionCount = len(request.Question)
+		if questionCount != 0 {
+			questionName = request.Question[0].Name
+			questionType = dnsTypeName(request.Question[0].Qtype)
+		}
+	}
+	slog.Info("DNS query received",
+		"bridge", h.bridge,
+		"client", client,
+		"transaction_id", requestID,
+		"name", questionName,
+		"type", questionType,
+		"question_count", questionCount,
+	)
+	writer = &loggingDNSResponseWriter{
+		ResponseWriter: writer,
+		bridge:         h.bridge,
+		client:         client,
+		requestID:      requestID,
+		questionName:   questionName,
+		questionType:   questionType,
+	}
 	if request == nil || len(request.Question) != 1 {
 		response := new(dns.Msg)
 		if request != nil {
@@ -219,6 +252,40 @@ func (h *managedDNSHandler) ServeDNS(writer dns.ResponseWriter, request *dns.Msg
 		return
 	}
 	h.serveForwarded(writer, request)
+}
+
+type loggingDNSResponseWriter struct {
+	dns.ResponseWriter
+	bridge       string
+	client       string
+	requestID    uint16
+	questionName string
+	questionType string
+}
+
+func (w *loggingDNSResponseWriter) WriteMsg(response *dns.Msg) error {
+	err := w.ResponseWriter.WriteMsg(response)
+	if err == nil && response != nil {
+		slog.Info("DNS response sent",
+			"bridge", w.bridge,
+			"client", w.client,
+			"transaction_id", w.requestID,
+			"name", w.questionName,
+			"type", w.questionType,
+			"rcode", dns.RcodeToString[response.Rcode],
+			"answers", len(response.Answer),
+			"authoritative", response.Authoritative,
+			"truncated", response.Truncated,
+		)
+	}
+	return err
+}
+
+func dnsTypeName(value uint16) string {
+	if name, found := dns.TypeToString[value]; found {
+		return name
+	}
+	return strconv.FormatUint(uint64(value), 10)
 }
 
 func (h *managedDNSHandler) serveAuthoritative(writer dns.ResponseWriter, request *dns.Msg) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -276,6 +277,47 @@ func TestDHCPHandlerOffersFirstPoolAddress(t *testing.T) {
 	}
 	if nak.MessageType() != dhcpv4.MessageTypeNak {
 		t.Fatalf("conflicting request was not rejected: %s", nak.Summary())
+	}
+}
+
+func TestDHCPHandlerLogsRequestsAndResponses(t *testing.T) {
+	logs := captureDefaultLogs(t)
+	manager, err := newDHCPManager(t.TempDir(), &fakeDHCPBridgeProvider{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.now = func() time.Time { return time.Date(2026, 8, 20, 1, 0, 0, 0, time.UTC) }
+	network, err := parseDHCPRange(defaultBridgeDHCPCIDR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	discover, err := dhcpv4.NewDiscovery(net.HardwareAddr{0x52, 0x54, 0x00, 0, 0, 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection := &recordingPacketConn{}
+	manager.handlePacket(
+		"br0",
+		network,
+		bridgeDHCPConfig{Enabled: true, CIDR: defaultBridgeDHCPCIDR},
+		connection,
+		&net.UDPAddr{IP: net.IPv4bcast, Port: dhcpv4.ClientPort},
+		discover,
+	)
+
+	output := logs.String()
+	for _, expected := range []string{
+		`"msg":"DHCP request received"`,
+		`"msg":"DHCP response sent"`,
+		`"bridge":"br0"`,
+		`"client":"52:54:00:00:00:01"`,
+		`"message_type":"DISCOVER"`,
+		`"message_type":"OFFER"`,
+		`"assigned_address":"192.168.100.50"`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("DHCP logs do not contain %s: %s", expected, output)
+		}
 	}
 }
 
