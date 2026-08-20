@@ -297,11 +297,8 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
       <Dialog open={Boolean(dhcpBridge)} onClose={() => setDHCPBridge(null)} fullWidth maxWidth="sm">
         <DialogTitle>Managed network services for {dhcpBridge?.name}</DialogTitle>
         <DialogContent>
-          <Alert severity="warning" sx={{ mt: 1, mb: 2 }}>
-            Only enable this server when another DHCP server is not already serving the bridge. App Runner assigns the first usable address to the bridge and leases addresses beginning at host offset 50.
-          </Alert>
           {(dhcpBridge?.workloads ?? []).some((workload) => workload.running) && (
-            <Alert severity="info" sx={{ mb: 2 }}>Stop all running workloads on this bridge before changing its DHCP configuration.</Alert>
+            <Alert severity="info" sx={{ mt: 1, mb: 2 }}>Stop all running workloads on this bridge before changing its DHCP configuration.</Alert>
           )}
           <FormControlLabel
             control={<Checkbox checked={dhcpEnabled} onChange={(event) => {
@@ -328,11 +325,6 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
             control={<Checkbox checked={natEnabled} disabled={!dhcpEnabled} onChange={(event) => setNATEnabled(event.target.checked)} />}
             label="Enable NAT and outbound routing for this range"
           />
-          {dhcpEnabled && natEnabled && (
-            <Alert severity="info" sx={{ mt: 1 }}>
-              While this bridge has running workloads, App Runner advertises the bridge address as the DHCP router, enables IPv4 forwarding, and manages masquerade and forwarding rules in its own nftables table. NAT itself does not select a DNS server. The prior forwarding setting and App Runner rules are restored when the last workload stops.
-            </Alert>
-          )}
           <Divider sx={{ my: 2 }} />
           <FormControlLabel
             control={<Checkbox checked={dnsEnabled} disabled={!dhcpEnabled} onChange={(event) => {
@@ -367,11 +359,6 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
             helperText={dnsSuffixValid ? `VMs are published as VM-NAME.${dnsSuffix}` : 'Use one or more DNS labels separated by dots'}
             sx={{ mt: 1.5 }}
           />
-          {dhcpEnabled && dnsEnabled && (
-            <Alert severity="info" sx={{ mt: 1.5 }}>
-              App Runner listens on the bridge address over UDP and TCP port 53 and advertises it through DHCP. Auto DNS authoritatively publishes active VM leases under this suffix; all other queries use the forwarding servers.
-            </Alert>
-          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDHCPBridge(null)}>Cancel</Button>
