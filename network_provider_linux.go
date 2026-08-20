@@ -122,7 +122,7 @@ func (p *linuxNetworkProvider) ValidateBridgeDHCP(name string, network dhcpRange
 	if err != nil {
 		return err
 	}
-	addresses, err := netlink.AddrList(bridge, netlink.FAMILY_V4)
+	addresses, err := netlink.AddrList(nil, netlink.FAMILY_V4)
 	if err != nil {
 		return fmt.Errorf("inspect bridge IPv4 addresses: %w", err)
 	}
@@ -138,10 +138,14 @@ func (p *linuxNetworkProvider) ValidateBridgeDHCP(name string, network dhcpRange
 		if !network.Prefix.Contains(existing.Addr()) && !existing.Contains(network.Prefix.Addr()) {
 			continue
 		}
-		if address.IP.String() == network.Server.String() && existing.Bits() == network.Prefix.Bits() {
+		if address.LinkIndex == bridge.Attrs().Index && address.IP.String() == network.Server.String() && existing.Bits() == network.Prefix.Bits() {
 			continue
 		}
-		return fmt.Errorf("DHCP range %s conflicts with existing address %s on bridge %s", network.Prefix, address.IPNet, name)
+		interfaceName := strconv.Itoa(address.LinkIndex)
+		if link, linkErr := netlink.LinkByIndex(address.LinkIndex); linkErr == nil {
+			interfaceName = link.Attrs().Name
+		}
+		return fmt.Errorf("DHCP range %s conflicts with existing address %s on interface %s", network.Prefix, address.IPNet, interfaceName)
 	}
 	return nil
 }

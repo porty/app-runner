@@ -215,3 +215,20 @@ func TestDHCPManagerReportsBridgePreparationFailure(t *testing.T) {
 		t.Fatalf("preparation failure was not reported: %v, %#v", err, manager.Status("br0"))
 	}
 }
+
+func TestDHCPManagerSuggestsAndEnforcesDistinctBridgeRanges(t *testing.T) {
+	provider := &fakeDHCPBridgeProvider{}
+	manager, err := newDHCPManager(t.TempDir(), provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Configure("br0", true, "192.168.100.0/24"); err != nil {
+		t.Fatal(err)
+	}
+	if suggestion := manager.Status("br1").CIDR; suggestion != "192.168.101.0/24" {
+		t.Fatalf("unexpected range suggestion for second bridge: %s", suggestion)
+	}
+	if err := manager.Configure("br1", true, "192.168.100.0/24"); err == nil {
+		t.Fatal("overlapping bridge DHCP ranges were accepted")
+	}
+}

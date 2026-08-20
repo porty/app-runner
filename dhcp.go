@@ -131,6 +131,17 @@ func (m *dhcpManager) Configure(bridge string, enabled bool, cidr string) error 
 	if runtime := m.runtimes[bridge]; runtime != nil && len(runtime.users) != 0 {
 		return fmt.Errorf("stop all running workloads on bridge %s before changing its DHCP configuration", bridge)
 	}
+	if enabled {
+		for otherBridge, otherConfig := range m.state.Bridges {
+			if otherBridge == bridge || !otherConfig.Enabled {
+				continue
+			}
+			otherRange, parseErr := parseDHCPRange(otherConfig.CIDR)
+			if parseErr == nil && prefixesOverlap(parsed.Prefix, otherRange.Prefix) {
+				return fmt.Errorf("DHCP range %s overlaps range %s configured for bridge %s", parsed.Prefix, otherRange.Prefix, otherBridge)
+			}
+		}
+	}
 	previous, found := m.state.Bridges[bridge]
 	previousLeases := m.state.Leases[bridge]
 	if enabled {
@@ -166,7 +177,7 @@ func (m *dhcpManager) Status(bridge string) bridgeDHCPStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	config, found := m.state.Bridges[bridge]
-	status := bridgeDHCPStatus{CIDR: defaultBridgeDHCPCIDR, LastError: m.errors[bridge]}
+	status := bridgeDHCPStatus{CIDR: m.suggestCIDRLocked(bridge), LastError: m.errors[bridge]}
 	if !found || !config.Enabled {
 		return status
 	}
@@ -188,6 +199,32 @@ func (m *dhcpManager) Status(bridge string) bridgeDHCPStatus {
 		}
 	}
 	return status
+}
+
+func (m *dhcpManager) suggestCIDRLocked(bridge string) string {
+	used := make([]netip.Prefix, 0, len(m.state.Bridges))
+	for otherBridge, config := range m.state.Bridges {
+		if otherBridge == bridge || !config.Enabled {
+			continue
+		}
+		if parsed, err := parseDHCPRange(config.CIDR); err == nil {
+			used = append(used, parsed.Prefix)
+		}
+	}
+	for thirdOctet := 100; thirdOctet <= 254; thirdOctet++ {
+		candidate := netip.MustParsePrefix(fmt.Sprintf("192.168.%d.0/24", thirdOctet))
+		available := true
+		for _, existing := range used {
+			if prefixesOverlap(candidate, existing) {
+				available = false
+				break
+			}
+		}
+		if available {
+			return candidate.String()
+		}
+	}
+	return "10.0.0.0/24"
 }
 
 func (m *dhcpManager) Prepare(vm virtualMachine) error {
@@ -513,6 +550,10 @@ func clientKey(request *dhcpv4.DHCPv4) string {
 
 func addressInDHCPPool(network dhcpRange, address netip.Addr) bool {
 	return address.Is4() && compareIPv4(address, network.PoolStart) >= 0 && compareIPv4(address, network.PoolEnd) <= 0
+}
+
+func prefixesOverlap(left, right netip.Prefix) bool {
+	return left.Contains(right.Addr()) || right.Contains(left.Addr())
 }
 
 func compareIPv4(left, right netip.Addr) int {
