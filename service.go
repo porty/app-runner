@@ -137,6 +137,72 @@ func (s *appRunnerService) StopVM(_ context.Context, request *apprunnerv1.StopVM
 	return &apprunnerv1.StopVMResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
 }
 
+func (s *appRunnerService) UpdateVM(_ context.Context, request *apprunnerv1.UpdateVMRequest) (*apprunnerv1.UpdateVMResponse, error) {
+	if err := s.requireManager(); err != nil {
+		return nil, err
+	}
+	vm, err := s.manager.Update(request.GetId(), request.GetName(), request.GetDescription(), request.GetCpus(), request.GetMemoryMib())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.UpdateVMResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+}
+
+func (s *appRunnerService) AddVMDisk(ctx context.Context, request *apprunnerv1.AddVMDiskRequest) (*apprunnerv1.AddVMDiskResponse, error) {
+	if err := s.requireManager(); err != nil {
+		return nil, err
+	}
+	vm, err := s.manager.AddDisk(ctx, request.GetId(), request.GetSizeGib())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.AddVMDiskResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+}
+
+func (s *appRunnerService) RemoveVMDisk(_ context.Context, request *apprunnerv1.RemoveVMDiskRequest) (*apprunnerv1.RemoveVMDiskResponse, error) {
+	if err := s.requireManager(); err != nil {
+		return nil, err
+	}
+	vm, err := s.manager.RemoveDisk(request.GetId(), request.GetDiskId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.RemoveVMDiskResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+}
+
+func (s *appRunnerService) AddVMCDROM(_ context.Context, request *apprunnerv1.AddVMCDROMRequest) (*apprunnerv1.AddVMCDROMResponse, error) {
+	if err := s.requireManager(); err != nil {
+		return nil, err
+	}
+	vm, err := s.manager.AddCDROM(request.GetId(), request.GetIsoName())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.AddVMCDROMResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+}
+
+func (s *appRunnerService) UpdateVMCDROM(_ context.Context, request *apprunnerv1.UpdateVMCDROMRequest) (*apprunnerv1.UpdateVMCDROMResponse, error) {
+	if err := s.requireManager(); err != nil {
+		return nil, err
+	}
+	vm, err := s.manager.UpdateCDROM(request.GetId(), request.GetCdromId(), request.GetIsoName())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.UpdateVMCDROMResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+}
+
+func (s *appRunnerService) RemoveVMCDROM(_ context.Context, request *apprunnerv1.RemoveVMCDROMRequest) (*apprunnerv1.RemoveVMCDROMResponse, error) {
+	if err := s.requireManager(); err != nil {
+		return nil, err
+	}
+	vm, err := s.manager.RemoveCDROM(request.GetId(), request.GetCdromId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.RemoveVMCDROMResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+}
+
 func (s *appRunnerService) ConfigureVMIPMI(_ context.Context, request *apprunnerv1.ConfigureVMIPMIRequest) (*apprunnerv1.ConfigureVMIPMIResponse, error) {
 	if err := s.requireManager(); err != nil {
 		return nil, err
@@ -277,16 +343,23 @@ func virtualMachineToProto(vm virtualMachine) *apprunnerv1.VirtualMachine {
 	if vm.NetworkMode == networkModeBridge {
 		mode = apprunnerv1.NetworkMode_NETWORK_MODE_BRIDGE
 	}
-	return &apprunnerv1.VirtualMachine{
+	result := &apprunnerv1.VirtualMachine{
 		Id: vm.ID, Name: vm.Name, Cpus: vm.CPUs, MemoryMib: vm.MemoryMiB, DiskGib: vm.DiskGiB,
 		IsoName: vm.ISOName, NetworkMode: mode, Status: status, BridgeName: vm.BridgeName,
-		CreatedAt: vm.CreatedAt.Format(time.RFC3339), LastError: vm.LastError,
+		CreatedAt: vm.CreatedAt.Format(time.RFC3339), LastError: vm.LastError, Description: vm.Description,
 		ConsolePath: "/console/" + vm.ID,
 		Ipmi: &apprunnerv1.VMIPMIStatus{
 			Enabled: vm.IPMI.Enabled, BridgeName: vm.IPMI.BridgeName, Address: vm.IPMI.Address,
 			Port: ipmiPort, Username: vm.IPMI.Username, Running: vm.IPMIRunning, LastError: vm.IPMIError,
 		},
 	}
+	for _, disk := range vm.Disks {
+		result.Disks = append(result.Disks, &apprunnerv1.VMDisk{Id: disk.ID, SizeGib: disk.SizeGiB, System: disk.System})
+	}
+	for _, cdrom := range vm.CDROMs {
+		result.Cdroms = append(result.Cdroms, &apprunnerv1.VMCDROM{Id: cdrom.ID, IsoName: cdrom.ISOName})
+	}
+	return result
 }
 
 func networkModeFromProto(mode apprunnerv1.NetworkMode) (networkMode, error) {
@@ -310,7 +383,7 @@ func rpcError(err error) error {
 	case errors.Is(err, errVMNameExists):
 		return twirp.NewError(twirp.AlreadyExists, err.Error())
 	case errors.Is(err, errVMAlreadyRunning), errors.Is(err, errVMNotRunning), errors.Is(err, errBridgeUnavailable),
-		errors.Is(err, errHostUnavailable), errors.Is(err, errDeleteRunningVM):
+		errors.Is(err, errHostUnavailable), errors.Is(err, errDeleteRunningVM), errors.Is(err, errDeviceRunningVM):
 		return twirp.NewError(twirp.FailedPrecondition, err.Error())
 	default:
 		return twirp.InternalError(fmt.Sprintf("virtual machine operation failed: %v", err))

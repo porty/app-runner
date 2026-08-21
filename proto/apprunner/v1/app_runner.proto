@@ -14,6 +14,12 @@ service AppRunnerService {
   rpc CreateVM(CreateVMRequest) returns (CreateVMResponse);
   rpc StartVM(StartVMRequest) returns (StartVMResponse);
   rpc StopVM(StopVMRequest) returns (StopVMResponse);
+  rpc UpdateVM(UpdateVMRequest) returns (UpdateVMResponse);
+  rpc AddVMDisk(AddVMDiskRequest) returns (AddVMDiskResponse);
+  rpc RemoveVMDisk(RemoveVMDiskRequest) returns (RemoveVMDiskResponse);
+  rpc AddVMCDROM(AddVMCDROMRequest) returns (AddVMCDROMResponse);
+  rpc UpdateVMCDROM(UpdateVMCDROMRequest) returns (UpdateVMCDROMResponse);
+  rpc RemoveVMCDROM(RemoveVMCDROMRequest) returns (RemoveVMCDROMResponse);
   rpc ConfigureVMIPMI(ConfigureVMIPMIRequest) returns (ConfigureVMIPMIResponse);
   rpc DeleteVM(DeleteVMRequest) returns (DeleteVMResponse);
   rpc GetNetworkingStatus(GetNetworkingStatusRequest) returns (GetNetworkingStatusResponse);
@@ -66,6 +72,20 @@ message VirtualMachine {
   string console_path = 11;
   string bridge_name = 12;
   VMIPMIStatus ipmi = 13;
+  string description = 14;
+  repeated VMDisk disks = 15;
+  repeated VMCDROM cdroms = 16;
+}
+
+message VMDisk {
+  string id = 1;
+  uint32 size_gib = 2;
+  bool system = 3;
+}
+
+message VMCDROM {
+  string id = 1;
+  string iso_name = 2;
 }
 
 message VMIPMIStatus {
@@ -145,6 +165,64 @@ message StopVMRequest {
 }
 
 message StopVMResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message UpdateVMRequest {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  uint32 cpus = 4;
+  uint32 memory_mib = 5;
+}
+
+message UpdateVMResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message AddVMDiskRequest {
+  string id = 1;
+  uint32 size_gib = 2;
+}
+
+message AddVMDiskResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message RemoveVMDiskRequest {
+  string id = 1;
+  string disk_id = 2;
+}
+
+message RemoveVMDiskResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message AddVMCDROMRequest {
+  string id = 1;
+  string iso_name = 2;
+}
+
+message AddVMCDROMResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message UpdateVMCDROMRequest {
+  string id = 1;
+  string cdrom_id = 2;
+  string iso_name = 3;
+}
+
+message UpdateVMCDROMResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message RemoveVMCDROMRequest {
+  string id = 1;
+  string cdrom_id = 2;
+}
+
+message RemoveVMCDROMResponse {
   VirtualMachine virtual_machine = 1;
 }
 

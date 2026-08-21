@@ -8,6 +8,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControlLabel,
   MenuItem,
   Stack,
@@ -25,25 +26,33 @@ import {
   AddRounded,
   DeleteOutlineRounded,
   DesktopWindowsRounded,
+  EjectRounded,
   PlayArrowRounded,
   PowerSettingsNewRounded,
   StopRounded,
-  SettingsEthernetRounded,
+  SettingsRounded,
 } from '@mui/icons-material'
 import { Link } from 'react-router-dom'
 
 import {
   createVM,
+  addVMCDROM,
+  addVMDisk,
   configureVMIPMI,
   deleteVM,
   getNetworkingStatus,
   listISOs,
   listVMs,
+  removeVMCDROM,
+  removeVMDisk,
   startVM,
   stopVM,
+  updateVM,
+  updateVMCDROM,
   type CreateVMRequest,
   type ISOImage,
   type NetworkingStatus,
+  type UpdateVMRequest,
   type VirtualMachine,
   type VMStatus,
   type VMIPMIConfiguration,
@@ -77,11 +86,19 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
   const [busyID, setBusyID] = useState('')
   const [error, setError] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
-  const [ipmiVM, setIPMIVM] = useState<VirtualMachine | null>(null)
+  const [settingsVM, setSettingsVM] = useState<VirtualMachine | null>(null)
+  const [settingsRequest, setSettingsRequest] = useState<UpdateVMRequest | null>(null)
   const [ipmiRequest, setIPMIRequest] = useState<VMIPMIConfiguration | null>(null)
+  const [newDiskGiB, setNewDiskGiB] = useState(20)
+  const [newCDROMISO, setNewCDROMISO] = useState('')
   const [createRequest, setCreateRequest] = useState<CreateVMRequest>(defaultCreateRequest)
   const createName = createRequest.name.trim()
   const createNameValid = dnsLabelPattern.test(createName)
+  const settingsName = settingsRequest?.name.trim() ?? ''
+  const settingsNameValid = dnsLabelPattern.test(settingsName)
+  const settingsRunning = settingsVM?.status === 'VM_STATUS_RUNNING'
+  const settingsStopping = settingsVM?.status === 'VM_STATUS_STOPPING'
+  const settingsBusy = busyID.startsWith('settings-')
 
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true)
@@ -144,10 +161,11 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
     await runOperation(vm.id, () => deleteVM(vm.id))
   }
 
-  const openIPMI = (vm: VirtualMachine) => {
+  const openSettings = (vm: VirtualMachine) => {
     const bridges = networking?.bridges ?? []
     const bridgeName = vm.ipmi?.bridge_name || bridges.find((bridge) => bridge.dhcp?.enabled)?.name || bridges[0]?.name || ''
-    setIPMIVM(vm)
+    setSettingsVM(vm)
+    setSettingsRequest({ id: vm.id, name: vm.name, description: vm.description ?? '', cpus: vm.cpus, memory_mib: vm.memory_mib })
     setIPMIRequest({
       id: vm.id,
       enabled: vm.ipmi?.enabled ?? false,
@@ -156,19 +174,42 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
       username: vm.ipmi?.username || 'admin',
       password: '',
     })
+    setNewDiskGiB(20)
+    setNewCDROMISO(images[0]?.name ?? '')
   }
 
-  const submitIPMI = async () => {
-    if (!ipmiRequest) return
-    setBusyID(`ipmi-${ipmiRequest.id}`)
+  const closeSettings = () => {
+    setSettingsVM(null)
+    setSettingsRequest(null)
+    setIPMIRequest(null)
+  }
+
+  const submitSettings = async () => {
+    if (!settingsRequest || !ipmiRequest) return
+    setBusyID(`settings-${settingsRequest.id}`)
     setError('')
     try {
+      await updateVM(settingsRequest)
       await configureVMIPMI(ipmiRequest)
-      setIPMIVM(null)
-      setIPMIRequest(null)
+      closeSettings()
       await refresh()
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to configure IPMI')
+      setError(requestError instanceof Error ? requestError.message : 'Unable to update virtual machine settings')
+    } finally {
+      setBusyID('')
+    }
+  }
+
+  const runSettingsDeviceOperation = async (operation: () => Promise<VirtualMachine>) => {
+    if (!settingsVM) return
+    setBusyID(`settings-device-${settingsVM.id}`)
+    setError('')
+    try {
+      const updated = await operation()
+      setSettingsVM(updated)
+      setVirtualMachines((current) => current.map((vm) => vm.id === updated.id ? updated : vm))
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to update virtual machine devices')
     } finally {
       setBusyID('')
     }
@@ -227,10 +268,11 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
                 <TableRow key={vm.id} hover>
                   <TableCell>
                     <Typography sx={{ fontWeight: 650 }}>{vm.name}</Typography>
+                    {vm.description && <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{vm.description}</Typography>}
                     {vm.last_error && <Typography variant="caption" color="error">{vm.last_error}</Typography>}
                   </TableCell>
                   <TableCell><Chip size="small" label={status.label} color={status.color} /></TableCell>
-                  <TableCell>{vm.cpus} vCPU · {formatMemory(vm.memory_mib)} · {vm.disk_gib} GiB</TableCell>
+                  <TableCell>{vm.cpus} vCPU · {formatMemory(vm.memory_mib)} · {(vm.disks ?? []).length || 1} disk{((vm.disks ?? []).length || 1) === 1 ? '' : 's'}</TableCell>
                   <TableCell>
                     <Typography variant="body2">{vm.network_mode === 'NETWORK_MODE_BRIDGE' ? `Bridge (${vm.bridge_name || 'missing'})` : 'NAT'}</Typography>
                     {vm.ipmi?.enabled && (
@@ -239,11 +281,11 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
                       </Typography>
                     )}
                   </TableCell>
-                  <TableCell>{vm.iso_name}</TableCell>
+                  <TableCell>{(vm.cdroms ?? []).map((cdrom) => cdrom.iso_name || 'Ejected').join(', ') || vm.iso_name || 'No CD-ROM'}</TableCell>
                   <TableCell align="right">
                     <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
-                      <Button size="small" startIcon={<SettingsEthernetRounded />} disabled={busy} onClick={() => openIPMI(vm)}>
-                        IPMI
+                      <Button size="small" startIcon={<SettingsRounded />} disabled={busy} onClick={() => openSettings(vm)}>
+                        Settings
                       </Button>
                       {running && (
                         <Button
@@ -357,57 +399,227 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
         </DialogActions>
       </Dialog>
 
-      <Dialog open={ipmiVM !== null} onClose={() => { setIPMIVM(null); setIPMIRequest(null) }} fullWidth maxWidth="sm">
-        <DialogTitle>IPMI · {ipmiVM?.name}</DialogTitle>
+      <Dialog open={settingsVM !== null} onClose={settingsBusy ? undefined : closeSettings} fullWidth maxWidth="md">
+        <DialogTitle>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            <Typography variant="h6">Settings · {settingsVM?.name}</Typography>
+            {settingsVM && <Chip size="small" color={settingsRunning ? 'success' : settingsStopping ? 'warning' : 'default'} label={statusDetails[settingsVM.status]?.label ?? 'Unknown'} />}
+          </Stack>
+        </DialogTitle>
         <DialogContent>
-          {ipmiRequest && (
-            <Stack spacing={2.25} sx={{ mt: 1 }}>
-              <FormControlLabel
-                control={<Switch checked={ipmiRequest.enabled} onChange={(event) => setIPMIRequest({ ...ipmiRequest, enabled: event.target.checked })} />}
-                label="Enable IPMI"
-              />
-              {ipmiRequest.enabled && (
-                <>
-                  <TextField
-                    select
-                    label="Management bridge"
-                    value={ipmiRequest.bridge_name}
-                    onChange={(event) => {
-                      const bridgeName = event.target.value
-                      setIPMIRequest({ ...ipmiRequest, bridge_name: bridgeName, address: suggestIPMIAddress(bridgeName, networking?.bridges ?? [], virtualMachines, ipmiVM?.id) })
-                    }}
-                  >
-                    {(networking?.bridges ?? []).map((bridge) => <MenuItem key={bridge.name} value={bridge.name}>{bridge.name}{bridge.dhcp?.enabled ? ' · managed subnet' : ''}</MenuItem>)}
-                  </TextField>
-                  <TextField
-                    label="Management IPv4 address"
-                    value={ipmiRequest.address}
-                    onChange={(event) => setIPMIRequest({ ...ipmiRequest, address: event.target.value })}
-                    helperText="A unique address on this bridge; App Runner assigns it to the bridge while IPMI is enabled."
-                  />
-                  <TextField label="Username" value={ipmiRequest.username} onChange={(event) => setIPMIRequest({ ...ipmiRequest, username: event.target.value })} slotProps={{ htmlInput: { maxLength: 16 } }} />
-                  <TextField
-                    label="Password"
-                    type="password"
-                    value={ipmiRequest.password}
-                    onChange={(event) => setIPMIRequest({ ...ipmiRequest, password: event.target.value })}
-                    helperText={ipmiVM?.ipmi?.enabled ? 'Leave blank to retain the existing password.' : 'Required; IPMI passwords are limited to 20 bytes.'}
-                    slotProps={{ htmlInput: { maxLength: 20 } }}
-                  />
-                  <Alert severity="warning">Expose IPMI only on a trusted management network. The listener uses IPMI 2.0 lanplus on UDP port 623.</Alert>
-                </>
+          {settingsVM && settingsRequest && ipmiRequest && (
+            <Stack spacing={3} sx={{ mt: 1 }}>
+              {(settingsRunning || settingsStopping) && (
+                <Alert severity={settingsRunning ? 'info' : 'warning'}>
+                  {settingsRunning
+                    ? 'This VM is running. Name and description changes are immediate; CPU and memory changes apply on its next start. CD-ROM media can be changed or ejected live.'
+                    : 'This VM is stopping. Wait for it to stop before changing device configuration.'}
+                </Alert>
               )}
+
+              <Box>
+                <Typography variant="h6" sx={{ mb: 1.5 }}>General</Typography>
+                <Stack spacing={2}>
+                  <TextField
+                    label="Name"
+                    value={settingsRequest.name}
+                    onChange={(event) => setSettingsRequest({ ...settingsRequest, name: event.target.value })}
+                    error={settingsName.length > 0 && !settingsNameValid}
+                    helperText="Used as the VM display name and Auto DNS hostname"
+                  />
+                  <TextField
+                    label="Description"
+                    multiline
+                    minRows={2}
+                    value={settingsRequest.description}
+                    onChange={(event) => setSettingsRequest({ ...settingsRequest, description: event.target.value })}
+                    slotProps={{ htmlInput: { maxLength: 4096 } }}
+                  />
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      label="vCPUs"
+                      value={settingsRequest.cpus}
+                      onChange={(event) => setSettingsRequest({ ...settingsRequest, cpus: Number(event.target.value) })}
+                      helperText={settingsRunning ? 'Applies on next start' : undefined}
+                      slotProps={{ htmlInput: { min: 1, max: 64 } }}
+                    />
+                    <TextField
+                      fullWidth
+                      type="number"
+                      label="Memory (MiB)"
+                      value={settingsRequest.memory_mib}
+                      onChange={(event) => setSettingsRequest({ ...settingsRequest, memory_mib: Number(event.target.value) })}
+                      helperText={settingsRunning ? 'Applies on next start' : undefined}
+                      slotProps={{ htmlInput: { min: 256, max: 1048576, step: 256 } }}
+                    />
+                  </Stack>
+                </Stack>
+              </Box>
+
+              <Divider />
+              <Box>
+                <Typography variant="h6">Disks</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  Disk devices can only be added or removed while the VM is stopped.
+                </Typography>
+                <Stack spacing={1}>
+                  {(settingsVM.disks ?? []).map((disk) => (
+                    <Stack key={disk.id} direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between', border: 1, borderColor: 'divider', borderRadius: 1.5, p: 1.25 }}>
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 650 }}>{disk.system ? 'System disk' : 'Data disk'}</Typography>
+                        <Typography variant="caption" color="text.secondary">{disk.size_gib} GiB · qcow2</Typography>
+                      </Box>
+                      {!disk.system && (
+                        <Button
+                          size="small"
+                          color="error"
+                          startIcon={<DeleteOutlineRounded />}
+                          disabled={settingsRunning || settingsStopping || settingsBusy}
+                          onClick={() => {
+                            if (window.confirm(`Remove this ${disk.size_gib} GiB disk? Its data will be permanently deleted.`)) {
+                              void runSettingsDeviceOperation(() => removeVMDisk(settingsVM.id, disk.id))
+                            }
+                          }}
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </Stack>
+                  ))}
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+                    <TextField
+                      size="small"
+                      type="number"
+                      label="New disk size (GiB)"
+                      value={newDiskGiB}
+                      onChange={(event) => setNewDiskGiB(Number(event.target.value))}
+                      slotProps={{ htmlInput: { min: 1, max: 2048 } }}
+                    />
+                    <Button
+                      variant="outlined"
+                      startIcon={<AddRounded />}
+                      disabled={settingsRunning || settingsStopping || settingsBusy || newDiskGiB < 1 || newDiskGiB > 2048}
+                      onClick={() => void runSettingsDeviceOperation(() => addVMDisk(settingsVM.id, newDiskGiB))}
+                    >
+                      Add disk
+                    </Button>
+                  </Stack>
+                </Stack>
+              </Box>
+
+              <Divider />
+              <Box>
+                <Typography variant="h6">CD-ROM devices</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  ISO media changes and ejects apply immediately. Adding or removing a CD-ROM device requires the VM to be stopped.
+                </Typography>
+                <Stack spacing={1}>
+                  {(settingsVM.cdroms ?? []).map((cdrom, index) => (
+                    <Stack key={cdrom.id} direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ alignItems: { sm: 'center' }, border: 1, borderColor: 'divider', borderRadius: 1.5, p: 1.25 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 650, minWidth: 90 }}>CD-ROM {index + 1}</Typography>
+                      <TextField
+                        select
+                        fullWidth
+                        size="small"
+                        label="ISO media"
+                        value={cdrom.iso_name ?? ''}
+                        disabled={settingsStopping || settingsBusy}
+                        onChange={(event) => void runSettingsDeviceOperation(() => updateVMCDROM(settingsVM.id, cdrom.id, event.target.value))}
+                      >
+                        <MenuItem value="">Empty</MenuItem>
+                        {images.map((image) => <MenuItem key={image.name} value={image.name}>{image.name} · {formatBytes(image.size_bytes)}</MenuItem>)}
+                      </TextField>
+                      <Button
+                        size="small"
+                        startIcon={<EjectRounded />}
+                        disabled={!cdrom.iso_name || settingsStopping || settingsBusy}
+                        onClick={() => void runSettingsDeviceOperation(() => updateVMCDROM(settingsVM.id, cdrom.id, ''))}
+                      >
+                        Eject
+                      </Button>
+                      <Button
+                        size="small"
+                        color="error"
+                        disabled={settingsRunning || settingsStopping || settingsBusy}
+                        onClick={() => void runSettingsDeviceOperation(() => removeVMCDROM(settingsVM.id, cdrom.id))}
+                      >
+                        Remove device
+                      </Button>
+                    </Stack>
+                  ))}
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                    <TextField select size="small" label="Initial ISO media" value={newCDROMISO} onChange={(event) => setNewCDROMISO(event.target.value)} sx={{ minWidth: 260 }}>
+                      <MenuItem value="">Empty</MenuItem>
+                      {images.map((image) => <MenuItem key={image.name} value={image.name}>{image.name}</MenuItem>)}
+                    </TextField>
+                    <Button
+                      variant="outlined"
+                      startIcon={<AddRounded />}
+                      disabled={settingsRunning || settingsStopping || settingsBusy}
+                      onClick={() => void runSettingsDeviceOperation(() => addVMCDROM(settingsVM.id, newCDROMISO))}
+                    >
+                      Add CD-ROM
+                    </Button>
+                  </Stack>
+                </Stack>
+              </Box>
+
+              <Divider />
+              <Box>
+                <Typography variant="h6" sx={{ mb: 1 }}>IPMI</Typography>
+                <FormControlLabel
+                  control={<Switch checked={ipmiRequest.enabled} onChange={(event) => setIPMIRequest({ ...ipmiRequest, enabled: event.target.checked })} />}
+                  label="Enable IPMI"
+                />
+                {ipmiRequest.enabled && (
+                  <Stack spacing={2} sx={{ mt: 1.5 }}>
+                    <TextField
+                      select
+                      label="Management bridge"
+                      value={ipmiRequest.bridge_name}
+                      onChange={(event) => {
+                        const bridgeName = event.target.value
+                        setIPMIRequest({ ...ipmiRequest, bridge_name: bridgeName, address: suggestIPMIAddress(bridgeName, networking?.bridges ?? [], virtualMachines, settingsVM.id) })
+                      }}
+                    >
+                      {(networking?.bridges ?? []).map((bridge) => <MenuItem key={bridge.name} value={bridge.name}>{bridge.name}{bridge.dhcp?.enabled ? ' · managed subnet' : ''}</MenuItem>)}
+                    </TextField>
+                    <TextField
+                      label="Management IPv4 address"
+                      value={ipmiRequest.address}
+                      onChange={(event) => setIPMIRequest({ ...ipmiRequest, address: event.target.value })}
+                      helperText="A unique address on this bridge; App Runner assigns it while IPMI is enabled."
+                    />
+                    <TextField label="Username" value={ipmiRequest.username} onChange={(event) => setIPMIRequest({ ...ipmiRequest, username: event.target.value })} slotProps={{ htmlInput: { maxLength: 16 } }} />
+                    <TextField
+                      label="Password"
+                      type="password"
+                      value={ipmiRequest.password}
+                      onChange={(event) => setIPMIRequest({ ...ipmiRequest, password: event.target.value })}
+                      helperText={settingsVM.ipmi?.enabled ? 'Leave blank to retain the existing password.' : 'Required; IPMI passwords are limited to 20 bytes.'}
+                      slotProps={{ htmlInput: { maxLength: 20 } }}
+                    />
+                    <Alert severity="warning">Expose IPMI only on a trusted management network. The listener uses IPMI 2.0 lanplus on UDP port 623.</Alert>
+                  </Stack>
+                )}
+              </Box>
             </Stack>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setIPMIVM(null); setIPMIRequest(null) }}>Cancel</Button>
+          <Button onClick={closeSettings} disabled={settingsBusy}>Cancel</Button>
           <Button
             variant="contained"
-            onClick={() => void submitIPMI()}
-            disabled={!ipmiRequest || busyID === `ipmi-${ipmiRequest.id}` || (ipmiRequest.enabled && (!ipmiRequest.bridge_name || !ipmiRequest.address || !ipmiRequest.username || (!ipmiVM?.ipmi?.enabled && !ipmiRequest.password)))}
+            onClick={() => void submitSettings()}
+            disabled={
+              !settingsRequest || !ipmiRequest || settingsBusy || !settingsNameValid ||
+              settingsRequest.cpus < 1 || settingsRequest.cpus > 64 || settingsRequest.memory_mib < 256 || settingsRequest.memory_mib > 1048576 ||
+              (ipmiRequest.enabled && (!ipmiRequest.bridge_name || !ipmiRequest.address || !ipmiRequest.username || (!settingsVM?.ipmi?.enabled && !ipmiRequest.password)))
+            }
           >
-            {busyID.startsWith('ipmi-') ? 'Saving…' : 'Save'}
+            {settingsBusy ? 'Saving…' : 'Save settings'}
           </Button>
         </DialogActions>
       </Dialog>

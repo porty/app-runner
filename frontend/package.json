@@ -8,7 +8,8 @@
     "dev:all": "concurrently --kill-others --names backend,frontend --prefix-colors blue,magenta \"go -C .. run .\" \"vite --host\"",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sudodev:all": "concurrently --kill-others --names backend,frontend --prefix-colors blue,magenta \"cd .. && ./bin/app-runner\" \"vite --host\""
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
