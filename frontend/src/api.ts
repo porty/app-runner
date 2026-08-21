@@ -28,6 +28,7 @@ export interface VirtualMachine {
   iso_name: string
   network_mode: NetworkMode
   bridge_name?: string
+  mac_address: string
   status: VMStatus
   created_at: string
   last_error?: string
@@ -54,6 +55,13 @@ export interface UpdateVMRequest {
   description: string
   cpus: number
   memory_mib: number
+}
+
+export interface UpdateVMNetworkRequest {
+  id: string
+  network_mode: NetworkMode
+  bridge_name: string
+  mac_address: string
 }
 
 export interface VMIPMIStatus {
@@ -151,6 +159,7 @@ export interface WorkloadAttachment {
 
 export interface NetworkBridge {
   name: string
+  description?: string
   is_up: boolean
   mtu: number
   hardware_address: string
@@ -182,6 +191,7 @@ export interface BridgeDHCPStatus {
 
 export interface BridgeDHCPConfiguration {
   bridge_name: string
+  description: string
   enabled: boolean
   cidr: string
   nat_enabled: boolean
@@ -290,6 +300,11 @@ export async function stopVM(id: string, force = false): Promise<VirtualMachine>
 
 export async function updateVM(request: UpdateVMRequest): Promise<VirtualMachine> {
   const response = await callTwirp<{ virtual_machine: VirtualMachine }>('UpdateVM', request)
+  return response.virtual_machine
+}
+
+export async function updateVMNetwork(request: UpdateVMNetworkRequest): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('UpdateVMNetwork', request)
   return response.virtual_machine
 }
 

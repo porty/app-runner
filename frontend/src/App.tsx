@@ -45,6 +45,7 @@ import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import { echo, ping, type PingResponse } from './api'
 import HostWarnings from './HostWarnings'
 import NetworkingPage from './NetworkingPage'
+import VirtualMachineSettingsPage from './VirtualMachineSettingsPage'
 import VirtualMachinesPage from './VirtualMachinesPage'
 import { refreshIntervals, type RefreshSpeed } from './refreshSettings'
 
@@ -173,7 +174,7 @@ function Sidebar({ expanded, onToggle }: { expanded: boolean; onToggle: () => vo
                       key={item.path}
                       component={NavLink}
                       to={item.path}
-                      selected={location.pathname === item.path}
+                      selected={location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)}
                       sx={{ minHeight: 40, pl: 3.25, borderRadius: 2, my: 0.25 }}
                     >
                       <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
@@ -407,6 +408,7 @@ export default function App({ mode, onToggleMode, refreshSpeed, onRefreshSpeedCh
             <Route path="/" element={<Overview />} />
             <Route path="/activity" element={<PlaceholderPage title="Activity" description="Recent control plane events and operations." />} />
             <Route path="/compute/virtual-machines" element={<VirtualMachinesPage refreshInterval={refreshIntervals[refreshSpeed]} />} />
+            <Route path="/compute/virtual-machines/:id/settings" element={<VirtualMachineSettingsPage />} />
             <Route
               path="/compute/virtual-machines/:id/console"
               element={

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -64,6 +65,7 @@ type workloadAttachment struct {
 
 type networkBridgeInfo struct {
 	Name             string
+	Description      string
 	IsUp             bool
 	MTU              uint32
 	HardwareAddress  string
@@ -142,6 +144,10 @@ type networkProvider interface {
 	Snapshot(networkChange) (networkSnapshot, error)
 	Apply(networkChange) error
 	Restore(networkSnapshot) error
+}
+
+type networkBridgeDescriptionProvider interface {
+	SetBridgeDescription(string, string) error
 }
 
 type networkManager struct {
@@ -227,9 +233,13 @@ func (m *networkManager) Status() (networkingStatus, error) {
 	return status, nil
 }
 
-func (m *networkManager) ConfigureBridgeDHCP(bridge string, enabled bool, cidr string, natEnabled bool, dnsConfig bridgeDNSConfig) error {
+func (m *networkManager) ConfigureBridgeSettings(bridge, description string, enabled bool, cidr string, natEnabled bool, dnsConfig bridgeDNSConfig) error {
 	if m.dhcp == nil {
 		return errors.New("DHCP manager is not configured")
+	}
+	description = strings.TrimSpace(description)
+	if len(description) > 255 || strings.ContainsAny(description, "\x00\r\n") {
+		return &fieldError{field: "description", message: "must be a single line of at most 255 characters"}
 	}
 	if dnsConfig.Auto {
 		vms, err := m.vms.List()
@@ -245,7 +255,62 @@ func (m *networkManager) ConfigureBridgeDHCP(bridge string, enabled bool, cidr s
 			}
 		}
 	}
-	return m.dhcp.Configure(bridge, enabled, cidr, natEnabled, dnsConfig)
+	status, err := m.provider.Inspect()
+	if err != nil {
+		return err
+	}
+	currentDescription := ""
+	found := false
+	for _, candidate := range status.Bridges {
+		if candidate.Name == bridge {
+			currentDescription = candidate.Description
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("bridge %s does not exist", bridge)
+	}
+	descriptionChanged := currentDescription != description
+	descriptionProvider, canSetDescription := m.provider.(networkBridgeDescriptionProvider)
+	if descriptionChanged && !canSetDescription {
+		return errors.New("bridge descriptions are not supported by the network provider")
+	}
+	currentDHCP := m.dhcp.Status(bridge)
+	servicesChanged := bridgeServicesChanged(currentDHCP, enabled, cidr, natEnabled, dnsConfig)
+	if descriptionChanged {
+		if err := descriptionProvider.SetBridgeDescription(bridge, description); err != nil {
+			return err
+		}
+	}
+	if servicesChanged {
+		if err := m.dhcp.Configure(bridge, enabled, cidr, natEnabled, dnsConfig); err != nil {
+			if descriptionChanged {
+				_ = descriptionProvider.SetBridgeDescription(bridge, currentDescription)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func bridgeServicesChanged(current bridgeDHCPStatus, enabled bool, cidr string, natEnabled bool, dnsConfig bridgeDNSConfig) bool {
+	if current.Enabled != enabled {
+		return true
+	}
+	if !enabled {
+		return false
+	}
+	if current.CIDR != strings.TrimSpace(cidr) || current.NATEnabled != natEnabled || current.DNSEnabled != dnsConfig.Enabled {
+		return true
+	}
+	if !dnsConfig.Enabled {
+		return false
+	}
+	if !slices.Equal(current.DNSForwarders, dnsConfig.Forwarders) || current.AutoDNS != dnsConfig.Auto {
+		return true
+	}
+	return dnsConfig.Auto && current.DNSSuffix != strings.TrimSpace(dnsConfig.Suffix)
 }
 
 func (m *networkManager) Apply(_ context.Context, change networkChange) (pendingNetworkChange, error) {

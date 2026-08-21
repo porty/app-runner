@@ -76,6 +76,7 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
   const [attachInterface, setAttachInterface] = useState('')
   const [migrateAddresses, setMigrateAddresses] = useState(true)
   const [dhcpBridge, setDHCPBridge] = useState<NetworkBridge | null>(null)
+  const [bridgeDescription, setBridgeDescription] = useState('')
   const [dhcpEnabled, setDHCPEnabled] = useState(false)
   const [dhcpCIDR, setDHCPCIDR] = useState('192.168.100.0/24')
   const [natEnabled, setNATEnabled] = useState(false)
@@ -149,6 +150,7 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
     try {
       setStatus(await configureBridgeDHCP({
         bridge_name: dhcpBridge.name,
+        description: bridgeDescription.trim(),
         enabled: dhcpEnabled,
         cidr: dhcpCIDR.trim(),
         nat_enabled: dhcpEnabled && natEnabled,
@@ -159,7 +161,7 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
       }))
       setDHCPBridge(null)
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to configure managed network services')
+      setError(requestError instanceof Error ? requestError.message : 'Unable to configure bridge settings')
     } finally {
       setBusy(false)
     }
@@ -169,6 +171,7 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
   const interfaces = status?.interfaces ?? []
   const attachableInterfaces = interfaces.filter((networkInterface) => networkInterface.can_attach)
   const mutationsDisabled = busy || Boolean(status?.pending_change) || !status?.can_manage
+  const settingsHasRunningWorkloads = (dhcpBridge?.workloads ?? []).some((workload) => workload.running)
 
   return (
     <Box>
@@ -225,7 +228,7 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
                   key={bridge.name}
                   bridge={bridge}
                   disabled={mutationsDisabled}
-                  configurationDisabled={busy || Boolean(status?.pending_change)}
+                  configurationDisabled={mutationsDisabled}
                   canAttach={attachableInterfaces.length > 0}
                   onApply={apply}
                   onAttach={() => {
@@ -234,6 +237,7 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
                   }}
                   onConfigureDHCP={() => {
                     setDHCPBridge(bridge)
+                    setBridgeDescription(bridge.description ?? '')
                     setDHCPEnabled(Boolean(bridge.dhcp?.enabled))
                     setDHCPCIDR(bridge.dhcp?.cidr || '192.168.100.0/24')
                     setNATEnabled(Boolean(bridge.dhcp?.nat_enabled))
@@ -316,13 +320,22 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
       </Dialog>
 
       <Dialog open={Boolean(dhcpBridge)} onClose={() => setDHCPBridge(null)} fullWidth maxWidth="sm">
-        <DialogTitle>Managed network services for {dhcpBridge?.name}</DialogTitle>
+        <DialogTitle>Bridge settings for {dhcpBridge?.name}</DialogTitle>
         <DialogContent>
-          {(dhcpBridge?.workloads ?? []).some((workload) => workload.running) && (
-            <Alert severity="warning" sx={{ mt: 1, mb: 2 }}>There are currently running workloads on this bridge</Alert>
+          {settingsHasRunningWorkloads && (
+            <Alert severity="warning" sx={{ mt: 1, mb: 2 }}>Network service settings are locked while workloads are running. The bridge description can still be changed.</Alert>
           )}
+          <TextField
+            fullWidth
+            label="Description"
+            value={bridgeDescription}
+            onChange={(event) => setBridgeDescription(event.target.value)}
+            helperText="Shown when selecting this bridge for a virtual machine"
+            slotProps={{ htmlInput: { maxLength: 255 } }}
+            sx={{ mb: 2 }}
+          />
           <FormControlLabel
-            control={<Checkbox checked={dhcpEnabled} onChange={(event) => {
+            control={<Checkbox checked={dhcpEnabled} disabled={settingsHasRunningWorkloads} onChange={(event) => {
               setDHCPEnabled(event.target.checked)
               if (!event.target.checked) {
                 setNATEnabled(false)
@@ -337,18 +350,18 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
             label="IPv4 range (CIDR)"
             value={dhcpCIDR}
             onChange={(event) => setDHCPCIDR(event.target.value)}
-            disabled={!dhcpEnabled}
+            disabled={!dhcpEnabled || settingsHasRunningWorkloads}
             helperText="Example: 192.168.100.0/24 reserves .1 for the bridge and leases .50–.254"
             sx={{ mt: 2 }}
           />
           <FormControlLabel
             sx={{ mt: 1.5 }}
-            control={<Checkbox checked={natEnabled} disabled={!dhcpEnabled} onChange={(event) => setNATEnabled(event.target.checked)} />}
+            control={<Checkbox checked={natEnabled} disabled={!dhcpEnabled || settingsHasRunningWorkloads} onChange={(event) => setNATEnabled(event.target.checked)} />}
             label="Enable NAT and outbound routing for this range"
           />
           <Divider sx={{ my: 2 }} />
           <FormControlLabel
-            control={<Checkbox checked={dnsEnabled} disabled={!dhcpEnabled} onChange={(event) => {
+            control={<Checkbox checked={dnsEnabled} disabled={!dhcpEnabled || settingsHasRunningWorkloads} onChange={(event) => {
               setDNSEnabled(event.target.checked)
               if (!event.target.checked) setAutoDNS(false)
             }} />}
@@ -361,13 +374,13 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
             label="Forwarding DNS servers"
             value={dnsForwarders}
             onChange={(event) => setDNSForwarders(event.target.value)}
-            disabled={!dhcpEnabled || !dnsEnabled}
+            disabled={!dhcpEnabled || !dnsEnabled || settingsHasRunningWorkloads}
             helperText="One IP address per line, or separate addresses with commas. An optional port is supported."
             sx={{ mt: 1.5 }}
           />
           <FormControlLabel
             sx={{ mt: 1 }}
-            control={<Checkbox checked={autoDNS} disabled={!dhcpEnabled || !dnsEnabled} onChange={(event) => setAutoDNS(event.target.checked)} />}
+            control={<Checkbox checked={autoDNS} disabled={!dhcpEnabled || !dnsEnabled || settingsHasRunningWorkloads} onChange={(event) => setAutoDNS(event.target.checked)} />}
             label="Auto DNS for virtual machines on this bridge"
           />
           <TextField
@@ -375,7 +388,7 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
             label="Auto DNS suffix"
             value={dnsSuffix}
             onChange={(event) => setDNSSuffix(event.target.value)}
-            disabled={!dhcpEnabled || !dnsEnabled || !autoDNS}
+            disabled={!dhcpEnabled || !dnsEnabled || !autoDNS || settingsHasRunningWorkloads}
             error={dhcpEnabled && dnsEnabled && autoDNS && !dnsSuffixValid}
             helperText={dnsSuffixValid ? `VMs are published as VM-NAME.${dnsSuffix}` : 'Use one or more DNS labels separated by dots'}
             sx={{ mt: 1.5 }}
@@ -388,12 +401,11 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
             disabled={
               busy || (dhcpEnabled && !dhcpCIDR.trim()) ||
               (dhcpEnabled && dnsEnabled && !dnsForwarders.trim()) ||
-              (dhcpEnabled && dnsEnabled && autoDNS && !dnsSuffixValid) ||
-              (dhcpBridge?.workloads ?? []).some((workload) => workload.running)
+              (dhcpEnabled && dnsEnabled && autoDNS && !dnsSuffixValid)
             }
             onClick={() => void configureDHCP()}
           >
-            Save network services
+            Save settings
           </Button>
         </DialogActions>
       </Dialog>
@@ -445,7 +457,8 @@ function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply
             <HubRounded color="primary" fontSize="small" />
             <Typography sx={{ fontWeight: 650 }}>{bridge.name}</Typography>
           </Stack>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>MTU {bridge.mtu}</Typography>
+          {bridge.description && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{bridge.description}</Typography>}
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: bridge.description ? 0.25 : 0.75 }}>MTU {bridge.mtu}</Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{bridge.hardware_address || 'No hardware address'}</Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{(bridge.addresses ?? []).join(', ') || 'No addresses'}</Typography>
         </TableCell>
@@ -533,8 +546,8 @@ function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply
             <Button aria-label={`Attach interface to ${bridge.name}`} disabled={disabled || !canAttach} onClick={onAttach}>
               <Tooltip title="Attach interface"><span><CableRounded /></span></Tooltip>
             </Button>
-            <Button aria-label={`Configure network services for ${bridge.name}`} disabled={configurationDisabled} onClick={onConfigureDHCP}>
-              <Tooltip title="Network services"><span><SettingsEthernetRounded /></span></Tooltip>
+            <Button aria-label={`Configure settings for ${bridge.name}`} disabled={configurationDisabled} onClick={onConfigureDHCP}>
+              <Tooltip title="Settings"><span><SettingsEthernetRounded /></span></Tooltip>
             </Button>
             <Button aria-label={`Delete bridge ${bridge.name}`} color="error" disabled={disabled || members.length > 0 || workloads.length > 0 || dhcp?.enabled} onClick={deleteBridge}>
               <Tooltip title="Delete bridge"><span><DeleteOutlineRounded /></span></Tooltip>
