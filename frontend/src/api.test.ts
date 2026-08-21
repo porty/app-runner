@@ -176,7 +176,7 @@ describe('Twirp API client', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const configuration = {
-      bridge_name: 'br0', enabled: true, cidr: '192.168.100.0/24', nat_enabled: true,
+      bridge_name: 'br0', description: 'VM network', enabled: true, cidr: '192.168.100.0/24', nat_enabled: true,
       dns_enabled: true, dns_forwarders: ['1.1.1.1', '9.9.9.9'], auto_dns: true, dns_suffix: 'br0.internal',
     }
     await expect(configureBridgeDHCP(configuration)).resolves.toEqual(status)

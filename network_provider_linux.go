@@ -78,7 +78,7 @@ func (p *linuxNetworkProvider) Inspect() (networkingStatus, error) {
 			continue
 		}
 		bridge := networkBridgeInfo{
-			Name: attributes.Name, IsUp: attributes.Flags&net.FlagUp != 0, MTU: uint32(attributes.MTU),
+			Name: attributes.Name, Description: attributes.Alias, IsUp: attributes.Flags&net.FlagUp != 0, MTU: uint32(attributes.MTU),
 			HardwareAddress: attributes.HardwareAddr.String(), Addresses: addresses,
 		}
 		for _, member := range links {
@@ -115,6 +115,17 @@ func (p *linuxNetworkProvider) BridgeCapability(name string) (bool, string) {
 		return false, fmt.Sprintf("bridge %s is not usable by QEMU", name)
 	}
 	return false, fmt.Sprintf("bridge %s does not exist", name)
+}
+
+func (p *linuxNetworkProvider) SetBridgeDescription(name, description string) error {
+	bridge, err := requireBridge(name)
+	if err != nil {
+		return err
+	}
+	if err := netlink.LinkSetAlias(bridge, description); err != nil {
+		return fmt.Errorf("set description for bridge %s: %w", name, err)
+	}
+	return nil
 }
 
 func (p *linuxNetworkProvider) ValidateBridgeDHCP(name string, network dhcpRange) error {

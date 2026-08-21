@@ -15,6 +15,7 @@ service AppRunnerService {
   rpc StartVM(StartVMRequest) returns (StartVMResponse);
   rpc StopVM(StopVMRequest) returns (StopVMResponse);
   rpc UpdateVM(UpdateVMRequest) returns (UpdateVMResponse);
+  rpc UpdateVMNetwork(UpdateVMNetworkRequest) returns (UpdateVMNetworkResponse);
   rpc AddVMDisk(AddVMDiskRequest) returns (AddVMDiskResponse);
   rpc RemoveVMDisk(RemoveVMDiskRequest) returns (RemoveVMDiskResponse);
   rpc AddVMCDROM(AddVMCDROMRequest) returns (AddVMCDROMResponse);
@@ -75,6 +76,7 @@ message VirtualMachine {
   string description = 14;
   repeated VMDisk disks = 15;
   repeated VMCDROM cdroms = 16;
+  string mac_address = 17;
 }
 
 message VMDisk {
@@ -177,6 +179,17 @@ message UpdateVMRequest {
 }
 
 message UpdateVMResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message UpdateVMNetworkRequest {
+  string id = 1;
+  NetworkMode network_mode = 2;
+  string bridge_name = 3;
+  string mac_address = 4;
+}
+
+message UpdateVMNetworkResponse {
   VirtualMachine virtual_machine = 1;
 }
 
@@ -312,6 +325,7 @@ message NetworkBridge {
   repeated NetworkDiagnostic diagnostics = 8;
   bool usable_by_qemu = 9;
   BridgeDHCPStatus dhcp = 10;
+  string description = 11;
 }
 
 message BridgeDHCPStatus {
@@ -389,6 +403,7 @@ message ConfigureBridgeDHCPRequest {
   repeated string dns_forwarders = 6;
   bool auto_dns = 7;
   string dns_suffix = 8;
+  string description = 9;
 }
 
 message ConfigureBridgeDHCPResponse {

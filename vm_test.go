@@ -170,6 +170,10 @@ func TestVMManagerUpdatesSettingsAndDevices(t *testing.T) {
 	if len(vm.Disks) != 1 || !vm.Disks[0].System || len(vm.CDROMs) != 1 {
 		t.Fatalf("created VM does not expose its devices: %#v", vm)
 	}
+	vm, err = manager.UpdateNetwork(vm.ID, networkModeBridge, "br0", "52:54:00:aa:bb:cc")
+	if err != nil || vm.NetworkMode != networkModeBridge || vm.BridgeName != "br0" || vm.MACAddress != "52:54:00:aa:bb:cc" {
+		t.Fatalf("network settings were not updated: %#v, %v", vm, err)
+	}
 	vm, err = manager.Start(vm.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -184,6 +188,12 @@ func TestVMManagerUpdatesSettingsAndDevices(t *testing.T) {
 	}
 	if _, err := manager.AddDisk(context.Background(), vm.ID, 5); !errors.Is(err, errDeviceRunningVM) {
 		t.Fatalf("adding a running disk returned %v", err)
+	}
+	if _, err := manager.UpdateNetwork(vm.ID, networkModeNAT, "", vm.MACAddress); !errors.Is(err, errDeviceRunningVM) {
+		t.Fatalf("changing a running NIC returned %v", err)
+	}
+	if _, err := manager.UpdateNetwork(vm.ID, vm.NetworkMode, vm.BridgeName, vm.MACAddress); err != nil {
+		t.Fatalf("saving an unchanged running NIC returned %v", err)
 	}
 	if _, err := manager.Stop(vm.ID, true); err != nil {
 		t.Fatal(err)
@@ -325,6 +335,33 @@ func TestVMManagerListsOnlyISOFiles(t *testing.T) {
 	}
 	if len(images) != 2 || images[0].Name != "installer.iso" || images[1].Name != "SECOND.ISO" {
 		t.Fatalf("unexpected ISO list: %#v", images)
+	}
+}
+
+func TestVMManagerReportsSymlinkedISOTargetSize(t *testing.T) {
+	manager, _, settings := newTestVMManager(t)
+	targetPath := filepath.Join(t.TempDir(), "large-installer.iso")
+	const targetSize = int64(128 * 1024 * 1024)
+	if err := os.WriteFile(targetPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(targetPath, targetSize); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetPath, filepath.Join(settings.ISODir, "linked.iso")); err != nil {
+		t.Fatal(err)
+	}
+
+	images, err := manager.ListISOs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkedIndex := slices.IndexFunc(images, func(image isoImage) bool { return image.Name == "linked.iso" })
+	if linkedIndex == -1 {
+		t.Fatalf("symlinked ISO is missing from the list: %#v", images)
+	}
+	if images[linkedIndex].SizeBytes != uint64(targetSize) {
+		t.Fatalf("symlinked ISO size = %d, want target size %d", images[linkedIndex].SizeBytes, targetSize)
 	}
 }
 
