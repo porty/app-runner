@@ -148,6 +148,21 @@ func (s *appRunnerService) UpdateVM(_ context.Context, request *apprunnerv1.Upda
 	return &apprunnerv1.UpdateVMResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
 }
 
+func (s *appRunnerService) UpdateVMNetwork(_ context.Context, request *apprunnerv1.UpdateVMNetworkRequest) (*apprunnerv1.UpdateVMNetworkResponse, error) {
+	if err := s.requireManager(); err != nil {
+		return nil, err
+	}
+	mode, err := networkModeFromProto(request.GetNetworkMode())
+	if err != nil {
+		return nil, err
+	}
+	vm, err := s.manager.UpdateNetwork(request.GetId(), mode, request.GetBridgeName(), request.GetMacAddress())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.UpdateVMNetworkResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+}
+
 func (s *appRunnerService) AddVMDisk(ctx context.Context, request *apprunnerv1.AddVMDiskRequest) (*apprunnerv1.AddVMDiskResponse, error) {
 	if err := s.requireManager(); err != nil {
 		return nil, err
@@ -304,8 +319,8 @@ func (s *appRunnerService) ConfigureBridgeDHCP(ctx context.Context, request *app
 	if !isLoopbackRequest(ctx) {
 		return nil, twirp.NewError(twirp.PermissionDenied, "managed network service changes are accepted only from a browser connected through loopback")
 	}
-	if err := s.networking.ConfigureBridgeDHCP(
-		request.GetBridgeName(), request.GetEnabled(), request.GetCidr(), request.GetNatEnabled(),
+	if err := s.networking.ConfigureBridgeSettings(
+		request.GetBridgeName(), request.GetDescription(), request.GetEnabled(), request.GetCidr(), request.GetNatEnabled(),
 		bridgeDNSConfig{
 			Enabled: request.GetDnsEnabled(), Forwarders: request.GetDnsForwarders(),
 			Auto: request.GetAutoDns(), Suffix: request.GetDnsSuffix(),
@@ -346,7 +361,7 @@ func virtualMachineToProto(vm virtualMachine) *apprunnerv1.VirtualMachine {
 	result := &apprunnerv1.VirtualMachine{
 		Id: vm.ID, Name: vm.Name, Cpus: vm.CPUs, MemoryMib: vm.MemoryMiB, DiskGib: vm.DiskGiB,
 		IsoName: vm.ISOName, NetworkMode: mode, Status: status, BridgeName: vm.BridgeName,
-		CreatedAt: vm.CreatedAt.Format(time.RFC3339), LastError: vm.LastError, Description: vm.Description,
+		CreatedAt: vm.CreatedAt.Format(time.RFC3339), LastError: vm.LastError, Description: vm.Description, MacAddress: vm.MACAddress,
 		ConsolePath: "/console/" + vm.ID,
 		Ipmi: &apprunnerv1.VMIPMIStatus{
 			Enabled: vm.IPMI.Enabled, BridgeName: vm.IPMI.BridgeName, Address: vm.IPMI.Address,
@@ -412,7 +427,7 @@ func networkingStatusToProto(status networkingStatus) *apprunnerv1.NetworkingSta
 	}
 	for _, bridge := range status.Bridges {
 		mapped := &apprunnerv1.NetworkBridge{
-			Name: bridge.Name, IsUp: bridge.IsUp, Mtu: bridge.MTU,
+			Name: bridge.Name, Description: bridge.Description, IsUp: bridge.IsUp, Mtu: bridge.MTU,
 			HardwareAddress: bridge.HardwareAddress, Addresses: bridge.Addresses,
 			MemberInterfaces: bridge.MemberInterfaces, UsableByQemu: bridge.UsableByQEMU,
 			Dhcp: &apprunnerv1.BridgeDHCPStatus{

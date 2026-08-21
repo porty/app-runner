@@ -12,6 +12,7 @@ type fakeNetworkProvider struct {
 	applied      []networkChange
 	restoreCount int
 	restored     chan struct{}
+	descriptions map[string]string
 }
 
 func (p *fakeNetworkProvider) Inspect() (networkingStatus, error) {
@@ -34,6 +35,19 @@ func (p *fakeNetworkProvider) Restore(networkSnapshot) error {
 		select {
 		case p.restored <- struct{}{}:
 		default:
+		}
+	}
+	return nil
+}
+
+func (p *fakeNetworkProvider) SetBridgeDescription(name, description string) error {
+	if p.descriptions == nil {
+		p.descriptions = make(map[string]string)
+	}
+	p.descriptions[name] = description
+	for index := range p.status.Bridges {
+		if p.status.Bridges[index].Name == name {
+			p.status.Bridges[index].Description = description
 		}
 	}
 	return nil
@@ -185,10 +199,30 @@ func TestNetworkingRejectsAutoDNSWhenLegacyVMNameIsInvalid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = manager.ConfigureBridgeDHCP("br0", true, defaultBridgeDHCPCIDR, false, bridgeDNSConfig{
+	err = manager.ConfigureBridgeSettings("br0", "", true, defaultBridgeDHCPCIDR, false, bridgeDNSConfig{
 		Enabled: true, Forwarders: []string{"1.1.1.1"}, Auto: true, Suffix: "br0.internal",
 	})
 	if err == nil {
 		t.Fatal("Auto DNS was enabled for a bridge with an invalid legacy VM name")
+	}
+}
+
+func TestNetworkManagerUpdatesBridgeDescriptionWithoutChangingServices(t *testing.T) {
+	vms, _, settings := newTestVMManager(t)
+	dhcp, err := newDHCPManager(settings.DiskDir, &fakeDHCPBridgeProvider{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeNetworkProvider{status: networkingStatus{Bridges: []networkBridgeInfo{{Name: "br0", Description: "Old description"}}}}
+	manager, err := newNetworkManager(provider, vms, settings.DiskDir, dhcp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := dhcp.Status("br0")
+	if err := manager.ConfigureBridgeSettings("br0", "VM network", false, current.CIDR, false, bridgeDNSConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	if provider.descriptions["br0"] != "VM network" {
+		t.Fatalf("bridge description was not updated: %#v", provider.descriptions)
 	}
 }

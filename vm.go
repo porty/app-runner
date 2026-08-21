@@ -196,6 +196,10 @@ func newVMManager(settings config, store virtualMachineStore, hypervisor hypervi
 			manager.vms[index].BridgeName = settings.BridgeName
 			definitionsChanged = true
 		}
+		if manager.vms[index].NetworkMode == networkModeNAT && manager.vms[index].BridgeName != "" {
+			manager.vms[index].BridgeName = ""
+			definitionsChanged = true
+		}
 		if manager.vms[index].MACAddress == "" {
 			manager.vms[index].MACAddress = vmMACAddress(manager.vms[index].ID)
 			definitionsChanged = true
@@ -251,6 +255,9 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 	options.Name = strings.TrimSpace(options.Name)
 	if err := m.validateCreateOptions(options); err != nil {
 		return virtualMachine{}, err
+	}
+	if options.NetworkMode == networkModeNAT {
+		options.BridgeName = ""
 	}
 
 	m.mu.Lock()
@@ -461,6 +468,54 @@ func (m *vmManager) Update(id, name, description string, cpus, memoryMiB uint32)
 	m.vms[index].Description = description
 	m.vms[index].CPUs = cpus
 	m.vms[index].MemoryMiB = memoryMiB
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms[index] = previous
+		return virtualMachine{}, err
+	}
+	return m.vms[index], nil
+}
+
+func (m *vmManager) UpdateNetwork(id string, mode networkMode, bridgeName, macAddress string) (virtualMachine, error) {
+	bridgeName = strings.TrimSpace(bridgeName)
+	if mode != networkModeNAT && mode != networkModeBridge {
+		return virtualMachine{}, &fieldError{field: "network_mode", message: "must be NAT or bridge"}
+	}
+	if mode == networkModeBridge {
+		if err := validateInterfaceName(bridgeName); err != nil {
+			return virtualMachine{}, &fieldError{field: "bridge_name", message: err.Error()}
+		}
+	} else {
+		bridgeName = ""
+	}
+	parsedMAC, err := net.ParseMAC(strings.TrimSpace(macAddress))
+	if err != nil || len(parsedMAC) != 6 || parsedMAC[0]&1 != 0 {
+		return virtualMachine{}, &fieldError{field: "mac_address", message: "must be a valid unicast MAC address"}
+	}
+	macAddress = parsedMAC.String()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.reconcileLocked(); err != nil {
+		return virtualMachine{}, err
+	}
+	index := m.indexByID(id)
+	if index == -1 {
+		return virtualMachine{}, errVMNotFound
+	}
+	current := m.vms[index]
+	changed := current.NetworkMode != mode || current.BridgeName != bridgeName || !strings.EqualFold(current.MACAddress, macAddress)
+	if changed && vmIsActive(current) {
+		return virtualMachine{}, errDeviceRunningVM
+	}
+	for candidateIndex, candidate := range m.vms {
+		if candidateIndex != index && strings.EqualFold(candidate.MACAddress, macAddress) {
+			return virtualMachine{}, &fieldError{field: "mac_address", message: "is already assigned to another virtual machine"}
+		}
+	}
+	previous := m.vms[index]
+	m.vms[index].NetworkMode = mode
+	m.vms[index].BridgeName = bridgeName
+	m.vms[index].MACAddress = macAddress
 	if err := m.store.Save(m.vms); err != nil {
 		m.vms[index] = previous
 		return virtualMachine{}, err
@@ -737,9 +792,12 @@ func (m *vmManager) ListISOs() ([]isoImage, error) {
 		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".iso") {
 			continue
 		}
-		info, err := entry.Info()
+		info, err := os.Stat(filepath.Join(m.settings.ISODir, entry.Name()))
 		if err != nil {
 			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			continue
 		}
 		images = append(images, isoImage{Name: entry.Name(), SizeBytes: uint64(info.Size())})
 	}

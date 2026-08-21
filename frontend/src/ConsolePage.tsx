@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Alert, Box, Button, Chip, CircularProgress, Stack, Typography } from '@mui/material'
-import { KeyboardRounded, RefreshRounded } from '@mui/icons-material'
+import { KeyboardRounded, PlayArrowRounded, RefreshRounded } from '@mui/icons-material'
 import { Link, useParams } from 'react-router-dom'
 import RFB from '@novnc/novnc'
 
-import { getVM, type VirtualMachine } from './api'
+import { getVM, startVM, type VirtualMachine } from './api'
+import { canAccessVMConsole } from './vmConsoleAccess'
 
 export default function ConsolePage() {
   const { id = '' } = useParams()
@@ -13,6 +14,20 @@ export default function ConsolePage() {
   const [vm, setVM] = useState<VirtualMachine | null>(null)
   const [connection, setConnection] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [error, setError] = useState('')
+  const [starting, setStarting] = useState(false)
+
+  const start = async () => {
+    setStarting(true)
+    setError('')
+    try {
+      setConnection('connecting')
+      setVM(await startVM(id))
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to start the virtual machine')
+    } finally {
+      setStarting(false)
+    }
+  }
 
   useEffect(() => {
     void getVM(id).then(setVM).catch((requestError: unknown) => {
@@ -21,7 +36,7 @@ export default function ConsolePage() {
   }, [id])
 
   useEffect(() => {
-    if (!vm || vm.status !== 'VM_STATUS_RUNNING' || !target.current) return
+    if (!vm || !canAccessVMConsole(vm.status) || !target.current) return
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const client = new RFB(target.current, `${protocol}//${window.location.host}${vm.console_path}`, { shared: true })
     client.scaleViewport = true
@@ -46,7 +61,24 @@ export default function ConsolePage() {
 
   if (error && !vm) return <Alert severity="error">{error}</Alert>
   if (!vm) return <Box sx={{ display: 'grid', placeItems: 'center', minHeight: 320 }}><CircularProgress /></Box>
-  if (vm.status !== 'VM_STATUS_RUNNING') {
+  if (vm.status === 'VM_STATUS_STOPPED') {
+    return (
+      <Stack spacing={2}>
+        {error && <Alert severity="error" onClose={() => setError('')}>{error}</Alert>}
+        <Alert
+          severity="info"
+          action={
+            <Button color="inherit" startIcon={<PlayArrowRounded />} disabled={starting} onClick={() => void start()}>
+              {starting ? 'Starting…' : 'Start'}
+            </Button>
+          }
+        >
+          {vm.name} is currently off.
+        </Alert>
+      </Stack>
+    )
+  }
+  if (!canAccessVMConsole(vm.status)) {
     return (
       <Alert severity="info" action={<Button component={Link} to="/compute/virtual-machines">Back to virtual machines</Button>}>
         Start {vm.name} before opening its console.
