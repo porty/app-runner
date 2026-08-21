@@ -21,6 +21,7 @@ export type NetworkMode = 'NETWORK_MODE_NAT' | 'NETWORK_MODE_BRIDGE'
 export interface VirtualMachine {
   id: string
   name: string
+  description?: string
   cpus: number
   memory_mib: number
   disk_gib: number
@@ -32,6 +33,27 @@ export interface VirtualMachine {
   last_error?: string
   console_path: string
   ipmi?: VMIPMIStatus
+  disks?: VMDisk[]
+  cdroms?: VMCDROM[]
+}
+
+export interface VMDisk {
+  id: string
+  size_gib: number
+  system: boolean
+}
+
+export interface VMCDROM {
+  id: string
+  iso_name?: string
+}
+
+export interface UpdateVMRequest {
+  id: string
+  name: string
+  description: string
+  cpus: number
+  memory_mib: number
 }
 
 export interface VMIPMIStatus {
@@ -263,6 +285,36 @@ export async function startVM(id: string): Promise<VirtualMachine> {
 
 export async function stopVM(id: string, force = false): Promise<VirtualMachine> {
   const response = await callTwirp<{ virtual_machine: VirtualMachine }>('StopVM', { id, force })
+  return response.virtual_machine
+}
+
+export async function updateVM(request: UpdateVMRequest): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('UpdateVM', request)
+  return response.virtual_machine
+}
+
+export async function addVMDisk(id: string, sizeGib: number): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('AddVMDisk', { id, size_gib: sizeGib })
+  return response.virtual_machine
+}
+
+export async function removeVMDisk(id: string, diskID: string): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('RemoveVMDisk', { id, disk_id: diskID })
+  return response.virtual_machine
+}
+
+export async function addVMCDROM(id: string, isoName = ''): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('AddVMCDROM', { id, iso_name: isoName })
+  return response.virtual_machine
+}
+
+export async function updateVMCDROM(id: string, cdromID: string, isoName: string): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('UpdateVMCDROM', { id, cdrom_id: cdromID, iso_name: isoName })
+  return response.virtual_machine
+}
+
+export async function removeVMCDROM(id: string, cdromID: string): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('RemoveVMCDROM', { id, cdrom_id: cdromID })
   return response.virtual_machine
 }
 

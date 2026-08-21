@@ -42,6 +42,7 @@ var (
 	errBridgeUnavailable = errors.New("bridge networking is unavailable")
 	errHostUnavailable   = errors.New("required host virtualisation support is unavailable")
 	errDeleteRunningVM   = errors.New("stop the virtual machine before deleting it")
+	errDeviceRunningVM   = errors.New("stop the virtual machine before changing its device configuration")
 )
 
 type fieldError struct {
@@ -56,6 +57,7 @@ func (e *fieldError) Error() string {
 type virtualMachine struct {
 	ID          string       `json:"id"`
 	Name        string       `json:"name"`
+	Description string       `json:"description,omitempty"`
 	CPUs        uint32       `json:"cpus"`
 	MemoryMiB   uint32       `json:"memory_mib"`
 	DiskGiB     uint32       `json:"disk_gib"`
@@ -70,6 +72,19 @@ type virtualMachine struct {
 	IPMI        vmIPMIConfig `json:"ipmi,omitempty"`
 	IPMIRunning bool         `json:"-"`
 	IPMIError   string       `json:"-"`
+	Disks       []vmDisk     `json:"disks,omitempty"`
+	CDROMs      []vmCDROM    `json:"cdroms,omitempty"`
+}
+
+type vmDisk struct {
+	ID      string `json:"id"`
+	SizeGiB uint32 `json:"size_gib"`
+	System  bool   `json:"system,omitempty"`
+}
+
+type vmCDROM struct {
+	ID      string `json:"id"`
+	ISOName string `json:"iso_name,omitempty"`
 }
 
 type vmIPMIConfig struct {
@@ -118,6 +133,7 @@ type hypervisor interface {
 	GracefulStop(virtualMachine) error
 	ForceStop(virtualMachine) error
 	Reset(virtualMachine) error
+	ChangeCDROMMedia(virtualMachine, string, string) error
 }
 
 type virtualMachineStore interface {
@@ -168,6 +184,14 @@ func newVMManager(settings config, store virtualMachineStore, hypervisor hypervi
 	manager.mu.Lock()
 	definitionsChanged := false
 	for index := range manager.vms {
+		if len(manager.vms[index].Disks) == 0 {
+			manager.vms[index].Disks = []vmDisk{{ID: "system", SizeGiB: manager.vms[index].DiskGiB, System: true}}
+			definitionsChanged = true
+		}
+		if len(manager.vms[index].CDROMs) == 0 && manager.vms[index].ISOName != "" {
+			manager.vms[index].CDROMs = []vmCDROM{{ID: "cdrom0", ISOName: manager.vms[index].ISOName}}
+			definitionsChanged = true
+		}
 		if manager.vms[index].NetworkMode == networkModeBridge && manager.vms[index].BridgeName == "" {
 			manager.vms[index].BridgeName = settings.BridgeName
 			definitionsChanged = true
@@ -253,6 +277,8 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 		MACAddress:  vmMACAddress(id),
 		Status:      vmStatusStopped,
 		CreatedAt:   m.now().UTC(),
+		Disks:       []vmDisk{{ID: "system", SizeGiB: options.DiskGiB, System: true}},
+		CDROMs:      []vmCDROM{{ID: "cdrom0", ISOName: options.ISOName}},
 	}
 	diskPath := m.diskPath(vm.ID)
 	if err := m.hypervisor.CreateDisk(ctx, diskPath, vm.DiskGiB); err != nil {
@@ -294,11 +320,18 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 			return virtualMachine{}, fmt.Errorf("%w: %s", errBridgeUnavailable, warning)
 		}
 	}
-	if _, err := os.Stat(m.diskPath(vm.ID)); err != nil {
-		return virtualMachine{}, fmt.Errorf("system disk is unavailable: %w", err)
+	for _, disk := range vm.Disks {
+		if _, err := os.Stat(m.vmDiskPath(vm.ID, disk)); err != nil {
+			return virtualMachine{}, fmt.Errorf("disk %s is unavailable: %w", disk.ID, err)
+		}
 	}
-	if _, err := os.Stat(m.isoPath(vm.ISOName)); err != nil {
-		return virtualMachine{}, fmt.Errorf("installation ISO is unavailable: %w", err)
+	for _, cdrom := range vm.CDROMs {
+		if cdrom.ISOName == "" {
+			continue
+		}
+		if _, err := os.Stat(m.isoPath(cdrom.ISOName)); err != nil {
+			return virtualMachine{}, fmt.Errorf("CD-ROM ISO %s is unavailable: %w", cdrom.ISOName, err)
+		}
 	}
 	if m.networkLifecycle != nil {
 		if err := m.networkLifecycle.Prepare(vm); err != nil {
@@ -389,8 +422,10 @@ func (m *vmManager) Delete(id string) error {
 	if m.ipmi != nil {
 		m.ipmi.Disable(vm)
 	}
-	if err := removeIfExists(m.diskPath(vm.ID)); err != nil {
-		return fmt.Errorf("remove system disk: %w", err)
+	for _, disk := range vm.Disks {
+		if err := removeIfExists(m.vmDiskPath(vm.ID, disk)); err != nil {
+			return fmt.Errorf("remove disk %s: %w", disk.ID, err)
+		}
 	}
 	for _, path := range []string{m.qmpSocketPath(vm.ID), m.vncSocketPath(vm.ID)} {
 		if err := removeIfExists(path); err != nil {
@@ -399,6 +434,208 @@ func (m *vmManager) Delete(id string) error {
 	}
 	m.vms = append(m.vms[:index], m.vms[index+1:]...)
 	return m.store.Save(m.vms)
+}
+
+func (m *vmManager) Update(id, name, description string, cpus, memoryMiB uint32) (virtualMachine, error) {
+	name = strings.TrimSpace(name)
+	description = strings.TrimSpace(description)
+	if err := validateVMIdentityAndResources(name, description, cpus, memoryMiB); err != nil {
+		return virtualMachine{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.reconcileLocked(); err != nil {
+		return virtualMachine{}, err
+	}
+	index := m.indexByID(id)
+	if index == -1 {
+		return virtualMachine{}, errVMNotFound
+	}
+	for candidateIndex, candidate := range m.vms {
+		if candidateIndex != index && strings.EqualFold(candidate.Name, name) {
+			return virtualMachine{}, errVMNameExists
+		}
+	}
+	previous := m.vms[index]
+	m.vms[index].Name = name
+	m.vms[index].Description = description
+	m.vms[index].CPUs = cpus
+	m.vms[index].MemoryMiB = memoryMiB
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms[index] = previous
+		return virtualMachine{}, err
+	}
+	return m.vms[index], nil
+}
+
+func (m *vmManager) AddDisk(ctx context.Context, id string, sizeGiB uint32) (virtualMachine, error) {
+	if sizeGiB < 1 || sizeGiB > 2048 {
+		return virtualMachine{}, &fieldError{field: "size_gib", message: "must be between 1 and 2048"}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index := m.indexByID(id)
+	if index == -1 {
+		return virtualMachine{}, errVMNotFound
+	}
+	if vmIsActive(m.vms[index]) {
+		return virtualMachine{}, errDeviceRunningVM
+	}
+	diskID, err := randomID()
+	if err != nil {
+		return virtualMachine{}, fmt.Errorf("generate disk ID: %w", err)
+	}
+	disk := vmDisk{ID: diskID, SizeGiB: sizeGiB}
+	path := m.vmDiskPath(id, disk)
+	if err := m.hypervisor.CreateDisk(ctx, path, sizeGiB); err != nil {
+		return virtualMachine{}, fmt.Errorf("create disk: %w", err)
+	}
+	m.vms[index].Disks = append(m.vms[index].Disks, disk)
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms[index].Disks = m.vms[index].Disks[:len(m.vms[index].Disks)-1]
+		_ = removeIfExists(path)
+		return virtualMachine{}, err
+	}
+	return m.vms[index], nil
+}
+
+func (m *vmManager) RemoveDisk(id, diskID string) (virtualMachine, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index := m.indexByID(id)
+	if index == -1 {
+		return virtualMachine{}, errVMNotFound
+	}
+	if vmIsActive(m.vms[index]) {
+		return virtualMachine{}, errDeviceRunningVM
+	}
+	diskIndex := slices.IndexFunc(m.vms[index].Disks, func(disk vmDisk) bool { return disk.ID == diskID })
+	if diskIndex == -1 {
+		return virtualMachine{}, &fieldError{field: "disk_id", message: "disk was not found"}
+	}
+	disk := m.vms[index].Disks[diskIndex]
+	if disk.System {
+		return virtualMachine{}, &fieldError{field: "disk_id", message: "the system disk cannot be removed"}
+	}
+	path := m.vmDiskPath(id, disk)
+	stagedPath := path + ".removing"
+	if err := os.Rename(path, stagedPath); err != nil {
+		return virtualMachine{}, fmt.Errorf("stage disk removal: %w", err)
+	}
+	previous := slices.Clone(m.vms[index].Disks)
+	m.vms[index].Disks = append(m.vms[index].Disks[:diskIndex], m.vms[index].Disks[diskIndex+1:]...)
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms[index].Disks = previous
+		_ = os.Rename(stagedPath, path)
+		return virtualMachine{}, err
+	}
+	if err := removeIfExists(stagedPath); err != nil {
+		return virtualMachine{}, fmt.Errorf("remove disk: %w", err)
+	}
+	return m.vms[index], nil
+}
+
+func (m *vmManager) AddCDROM(id, isoName string) (virtualMachine, error) {
+	if err := m.validateOptionalISO(isoName); err != nil {
+		return virtualMachine{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index := m.indexByID(id)
+	if index == -1 {
+		return virtualMachine{}, errVMNotFound
+	}
+	if vmIsActive(m.vms[index]) {
+		return virtualMachine{}, errDeviceRunningVM
+	}
+	cdromID, err := randomID()
+	if err != nil {
+		return virtualMachine{}, fmt.Errorf("generate CD-ROM ID: %w", err)
+	}
+	m.vms[index].CDROMs = append(m.vms[index].CDROMs, vmCDROM{ID: cdromID, ISOName: isoName})
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms[index].CDROMs = m.vms[index].CDROMs[:len(m.vms[index].CDROMs)-1]
+		return virtualMachine{}, err
+	}
+	return m.vms[index], nil
+}
+
+func (m *vmManager) UpdateCDROM(id, cdromID, isoName string) (virtualMachine, error) {
+	if err := m.validateOptionalISO(isoName); err != nil {
+		return virtualMachine{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index := m.indexByID(id)
+	if index == -1 {
+		return virtualMachine{}, errVMNotFound
+	}
+	cdromIndex := slices.IndexFunc(m.vms[index].CDROMs, func(cdrom vmCDROM) bool { return cdrom.ID == cdromID })
+	if cdromIndex == -1 {
+		return virtualMachine{}, &fieldError{field: "cdrom_id", message: "CD-ROM device was not found"}
+	}
+	previousISO := m.vms[index].CDROMs[cdromIndex].ISOName
+	if previousISO == isoName {
+		return m.vms[index], nil
+	}
+	if vmIsActive(m.vms[index]) {
+		path := ""
+		if isoName != "" {
+			path = m.isoPath(isoName)
+		}
+		if err := m.hypervisor.ChangeCDROMMedia(m.vms[index], cdromID, path); err != nil {
+			return virtualMachine{}, fmt.Errorf("change live CD-ROM media: %w", err)
+		}
+	}
+	m.vms[index].CDROMs[cdromIndex].ISOName = isoName
+	if cdromIndex == 0 {
+		m.vms[index].ISOName = isoName
+	}
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms[index].CDROMs[cdromIndex].ISOName = previousISO
+		if cdromIndex == 0 {
+			m.vms[index].ISOName = previousISO
+		}
+		if vmIsActive(m.vms[index]) {
+			previousPath := ""
+			if previousISO != "" {
+				previousPath = m.isoPath(previousISO)
+			}
+			_ = m.hypervisor.ChangeCDROMMedia(m.vms[index], cdromID, previousPath)
+		}
+		return virtualMachine{}, err
+	}
+	return m.vms[index], nil
+}
+
+func (m *vmManager) RemoveCDROM(id, cdromID string) (virtualMachine, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	index := m.indexByID(id)
+	if index == -1 {
+		return virtualMachine{}, errVMNotFound
+	}
+	if vmIsActive(m.vms[index]) {
+		return virtualMachine{}, errDeviceRunningVM
+	}
+	cdromIndex := slices.IndexFunc(m.vms[index].CDROMs, func(cdrom vmCDROM) bool { return cdrom.ID == cdromID })
+	if cdromIndex == -1 {
+		return virtualMachine{}, &fieldError{field: "cdrom_id", message: "CD-ROM device was not found"}
+	}
+	previous := slices.Clone(m.vms[index].CDROMs)
+	previousISO := m.vms[index].ISOName
+	m.vms[index].CDROMs = append(m.vms[index].CDROMs[:cdromIndex], m.vms[index].CDROMs[cdromIndex+1:]...)
+	if len(m.vms[index].CDROMs) == 0 {
+		m.vms[index].ISOName = ""
+	} else {
+		m.vms[index].ISOName = m.vms[index].CDROMs[0].ISOName
+	}
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms[index].CDROMs = previous
+		m.vms[index].ISOName = previousISO
+		return virtualMachine{}, err
+	}
+	return m.vms[index], nil
 }
 
 func (m *vmManager) ConfigureIPMI(id string, config vmIPMIConfig) (virtualMachine, error) {
@@ -570,20 +807,8 @@ func (m *vmManager) reconcileLocked() error {
 }
 
 func (m *vmManager) validateCreateOptions(options createVMOptions) error {
-	if options.Name == "" {
-		return &fieldError{field: "name", message: "a name is required"}
-	}
-	if len(options.Name) > 80 {
-		return &fieldError{field: "name", message: "must not exceed 80 characters"}
-	}
-	if err := validateDNSLabel(options.Name); err != nil {
-		return &fieldError{field: "name", message: "must be a valid DNS hostname label: " + err.Error()}
-	}
-	if options.CPUs < 1 || options.CPUs > 64 {
-		return &fieldError{field: "cpus", message: "must be between 1 and 64"}
-	}
-	if options.MemoryMiB < 256 || options.MemoryMiB > 1_048_576 {
-		return &fieldError{field: "memory_mib", message: "must be between 256 and 1048576"}
+	if err := validateVMIdentityAndResources(options.Name, "", options.CPUs, options.MemoryMiB); err != nil {
+		return err
 	}
 	if options.DiskGiB < 1 || options.DiskGiB > 2048 {
 		return &fieldError{field: "disk_gib", message: "must be between 1 and 2048"}
@@ -596,14 +821,50 @@ func (m *vmManager) validateCreateOptions(options createVMOptions) error {
 			return &fieldError{field: "bridge_name", message: err.Error()}
 		}
 	}
-	if options.ISOName == "" || filepath.Base(options.ISOName) != options.ISOName || !strings.EqualFold(filepath.Ext(options.ISOName), ".iso") {
+	if options.ISOName == "" {
+		return &fieldError{field: "iso_name", message: "an installation ISO is required"}
+	}
+	return m.validateOptionalISO(options.ISOName)
+}
+
+func validateVMIdentityAndResources(name, description string, cpus, memoryMiB uint32) error {
+	if name == "" {
+		return &fieldError{field: "name", message: "a name is required"}
+	}
+	if len(name) > 80 {
+		return &fieldError{field: "name", message: "must not exceed 80 characters"}
+	}
+	if err := validateDNSLabel(name); err != nil {
+		return &fieldError{field: "name", message: "must be a valid DNS hostname label: " + err.Error()}
+	}
+	if len(description) > 4096 {
+		return &fieldError{field: "description", message: "must not exceed 4096 characters"}
+	}
+	if cpus < 1 || cpus > 64 {
+		return &fieldError{field: "cpus", message: "must be between 1 and 64"}
+	}
+	if memoryMiB < 256 || memoryMiB > 1_048_576 {
+		return &fieldError{field: "memory_mib", message: "must be between 256 and 1048576"}
+	}
+	return nil
+}
+
+func (m *vmManager) validateOptionalISO(isoName string) error {
+	if isoName == "" {
+		return nil
+	}
+	if filepath.Base(isoName) != isoName || !strings.EqualFold(filepath.Ext(isoName), ".iso") {
 		return &fieldError{field: "iso_name", message: "must name an ISO file in the configured ISO directory"}
 	}
-	info, err := os.Stat(m.isoPath(options.ISOName))
+	info, err := os.Stat(m.isoPath(isoName))
 	if err != nil || !info.Mode().IsRegular() {
 		return &fieldError{field: "iso_name", message: "the selected ISO does not exist"}
 	}
 	return nil
+}
+
+func vmIsActive(vm virtualMachine) bool {
+	return vm.Status == vmStatusRunning || vm.Status == vmStatusStopping
 }
 
 func (m *vmManager) indexByID(id string) int {
@@ -617,6 +878,13 @@ func (m *vmManager) indexByID(id string) int {
 
 func (m *vmManager) diskPath(id string) string {
 	return filepath.Join(m.settings.DiskDir, id+".qcow2")
+}
+
+func (m *vmManager) vmDiskPath(vmID string, disk vmDisk) string {
+	if disk.System {
+		return m.diskPath(vmID)
+	}
+	return filepath.Join(m.settings.DiskDir, vmID+"-"+disk.ID+".qcow2")
 }
 
 func (m *vmManager) isoPath(name string) string {

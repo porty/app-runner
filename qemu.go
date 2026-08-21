@@ -83,9 +83,20 @@ func (q *qemuHypervisor) Reset(vm virtualMachine) error {
 	return executeQMP(q.qmpSocketPath(vm.ID), "system_reset")
 }
 
+func (q *qemuHypervisor) ChangeCDROMMedia(vm virtualMachine, cdromID, isoPath string) error {
+	driveID := q.cdromDriveID(vm, cdromID)
+	if driveID == "" {
+		return errors.New("CD-ROM device was not found")
+	}
+	if isoPath == "" {
+		return executeQMPCommand(q.qmpSocketPath(vm.ID), "eject", map[string]any{"id": driveID, "force": true})
+	}
+	return executeQMPCommand(q.qmpSocketPath(vm.ID), "blockdev-change-medium", map[string]any{
+		"id": driveID, "filename": isoPath, "format": "raw", "read-only-mode": "retain",
+	})
+}
+
 func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
-	diskPath := filepath.Join(q.settings.DiskDir, vm.ID+".qcow2")
-	isoPath := filepath.Join(q.settings.ISODir, vm.ISOName)
 	arguments := []string{
 		"-name", vm.Name,
 		"-machine", "q35,accel=kvm",
@@ -101,13 +112,31 @@ func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
 		"-device", "qemu-xhci,id=usb",
 		"-device", "usb-kbd,bus=usb.0",
 		"-device", "usb-tablet,bus=usb.0",
-		"-drive", "file=" + diskPath + ",if=none,id=system,format=qcow2,cache=none",
-		"-device", "virtio-blk-pci,drive=system",
-		"-device", "virtio-scsi-pci,id=scsi0",
-		"-drive", "file=" + isoPath + ",if=none,id=install,media=cdrom,readonly=on",
-		"-device", "scsi-cd,drive=install,bus=scsi0.0",
-		"-boot", "order=" + q.bootOrder(vm) + ",menu=on",
 	}
+	for diskIndex, disk := range effectiveVMDisks(vm) {
+		driveID := "disk" + strconv.Itoa(diskIndex)
+		if disk.System {
+			driveID = "system"
+		}
+		diskPath := q.vmDiskPath(vm.ID, disk)
+		arguments = append(arguments,
+			"-drive", "file="+diskPath+",if=none,id="+driveID+",format=qcow2,cache=none",
+			"-device", "virtio-blk-pci,drive="+driveID,
+		)
+	}
+	arguments = append(arguments, "-device", "virtio-scsi-pci,id=scsi0")
+	for cdromIndex, cdrom := range effectiveVMCDROMs(vm) {
+		driveID := cdromDriveID(cdromIndex)
+		deviceID := cdromDeviceID(cdromIndex)
+		if cdrom.ISOName != "" {
+			isoPath := filepath.Join(q.settings.ISODir, cdrom.ISOName)
+			arguments = append(arguments, "-drive", "file="+isoPath+",if=none,id="+driveID+",media=cdrom,readonly=on")
+			arguments = append(arguments, "-device", "scsi-cd,drive="+driveID+",bus=scsi0.0,id="+deviceID)
+		} else {
+			arguments = append(arguments, "-device", "scsi-cd,id="+deviceID+",bus=scsi0.0")
+		}
+	}
+	arguments = append(arguments, "-boot", "order="+q.bootOrder(vm)+",menu=on")
 	if vm.NetworkMode == networkModeBridge {
 		networkDevice := "virtio-net-pci,netdev=net0"
 		if vm.MACAddress != "" {
@@ -155,6 +184,10 @@ func (q *qemuHypervisor) vncSocketPath(id string) string {
 }
 
 func executeQMP(socketPath, command string) error {
+	return executeQMPCommand(socketPath, command, nil)
+}
+
+func executeQMPCommand(socketPath, command string, arguments map[string]any) error {
 	connection, err := net.DialTimeout("unix", socketPath, 2*time.Second)
 	if err != nil {
 		return fmt.Errorf("connect to QMP: %w", err)
@@ -175,13 +208,61 @@ func executeQMP(socketPath, command string) error {
 	if err := waitForQMPResponse(decoder, "return"); err != nil {
 		return fmt.Errorf("enable QMP capabilities: %w", err)
 	}
-	if err := encoder.Encode(map[string]string{"execute": command}); err != nil {
+	request := map[string]any{"execute": command}
+	if arguments != nil {
+		request["arguments"] = arguments
+	}
+	if err := encoder.Encode(request); err != nil {
 		return err
 	}
 	if err := waitForQMPResponse(decoder, "return"); err != nil {
 		return fmt.Errorf("execute QMP command %s: %w", command, err)
 	}
 	return nil
+}
+
+func effectiveVMDisks(vm virtualMachine) []vmDisk {
+	if len(vm.Disks) != 0 {
+		return vm.Disks
+	}
+	return []vmDisk{{ID: "system", SizeGiB: vm.DiskGiB, System: true}}
+}
+
+func effectiveVMCDROMs(vm virtualMachine) []vmCDROM {
+	if len(vm.CDROMs) != 0 {
+		return vm.CDROMs
+	}
+	if vm.ISOName == "" {
+		return nil
+	}
+	return []vmCDROM{{ID: "cdrom0", ISOName: vm.ISOName}}
+}
+
+func cdromDriveID(index int) string {
+	if index == 0 {
+		return "install"
+	}
+	return "cdrom" + strconv.Itoa(index)
+}
+
+func cdromDeviceID(index int) string {
+	return "cdromdev" + strconv.Itoa(index)
+}
+
+func (q *qemuHypervisor) cdromDriveID(vm virtualMachine, id string) string {
+	for index, cdrom := range effectiveVMCDROMs(vm) {
+		if cdrom.ID == id {
+			return cdromDeviceID(index)
+		}
+	}
+	return ""
+}
+
+func (q *qemuHypervisor) vmDiskPath(vmID string, disk vmDisk) string {
+	if disk.System {
+		return filepath.Join(q.settings.DiskDir, vmID+".qcow2")
+	}
+	return filepath.Join(q.settings.DiskDir, vmID+"-"+disk.ID+".qcow2")
 }
 
 func waitForQMPResponse(decoder *json.Decoder, expectedKey string) error {
