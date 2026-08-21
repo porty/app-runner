@@ -44,6 +44,8 @@ type fakeHypervisor struct {
 	gracefulStop bool
 	forcedStop   bool
 	onExit       func(int, error)
+	changedCDROM string
+	changedISO   string
 }
 
 func newFakeHypervisor() *fakeHypervisor {
@@ -77,6 +79,12 @@ func (h *fakeHypervisor) ForceStop(vm virtualMachine) error {
 }
 
 func (h *fakeHypervisor) Reset(virtualMachine) error { return nil }
+
+func (h *fakeHypervisor) ChangeCDROMMedia(_ virtualMachine, cdromID, isoPath string) error {
+	h.changedCDROM = cdromID
+	h.changedISO = isoPath
+	return nil
+}
 
 func newTestVMManager(t *testing.T) (*vmManager, *fakeHypervisor, config) {
 	t.Helper()
@@ -144,6 +152,57 @@ func TestVMManagerLifecycle(t *testing.T) {
 	}
 	if _, err := manager.Get(vm.ID); !errors.Is(err, errVMNotFound) {
 		t.Fatalf("deleted VM is still present: %v", err)
+	}
+}
+
+func TestVMManagerUpdatesSettingsAndDevices(t *testing.T) {
+	manager, hypervisor, settings := newTestVMManager(t)
+	if err := os.WriteFile(filepath.Join(settings.ISODir, "tools.iso"), []byte("iso"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	vm, err := manager.Create(context.Background(), createVMOptions{
+		Name: "settings-vm", CPUs: 2, MemoryMiB: 2048, DiskGiB: 20,
+		ISOName: "installer.iso", NetworkMode: networkModeNAT,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vm.Disks) != 1 || !vm.Disks[0].System || len(vm.CDROMs) != 1 {
+		t.Fatalf("created VM does not expose its devices: %#v", vm)
+	}
+	vm, err = manager.Start(vm.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vm, err = manager.Update(vm.ID, "renamed-vm", "Build worker", 4, 4096)
+	if err != nil || vm.Name != "renamed-vm" || vm.Description != "Build worker" || vm.CPUs != 4 || vm.MemoryMiB != 4096 {
+		t.Fatalf("settings were not persisted while running: %#v, %v", vm, err)
+	}
+	vm, err = manager.UpdateCDROM(vm.ID, vm.CDROMs[0].ID, "tools.iso")
+	if err != nil || hypervisor.changedCDROM != vm.CDROMs[0].ID || hypervisor.changedISO != filepath.Join(settings.ISODir, "tools.iso") {
+		t.Fatalf("live CD-ROM update was not applied: %#v, %v", hypervisor, err)
+	}
+	if _, err := manager.AddDisk(context.Background(), vm.ID, 5); !errors.Is(err, errDeviceRunningVM) {
+		t.Fatalf("adding a running disk returned %v", err)
+	}
+	if _, err := manager.Stop(vm.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	vm, err = manager.AddDisk(context.Background(), vm.ID, 5)
+	if err != nil || len(vm.Disks) != 2 {
+		t.Fatalf("data disk was not added: %#v, %v", vm, err)
+	}
+	dataDisk := vm.Disks[1]
+	if _, err := os.Stat(manager.vmDiskPath(vm.ID, dataDisk)); err != nil {
+		t.Fatalf("data disk file is missing: %v", err)
+	}
+	vm, err = manager.RemoveDisk(vm.ID, dataDisk.ID)
+	if err != nil || len(vm.Disks) != 1 {
+		t.Fatalf("data disk was not removed: %#v, %v", vm, err)
+	}
+	vm, err = manager.AddCDROM(vm.ID, "")
+	if err != nil || len(vm.CDROMs) != 2 || vm.CDROMs[1].ISOName != "" {
+		t.Fatalf("empty CD-ROM was not added: %#v, %v", vm, err)
 	}
 }
 

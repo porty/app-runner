@@ -24,7 +24,7 @@ func TestQEMUArgumentsUseRequiredVirtualisationProfile(t *testing.T) {
 		"virtio-vga",
 		"virtio-blk-pci,drive=system",
 		"virtio-scsi-pci,id=scsi0",
-		"scsi-cd,drive=install,bus=scsi0.0",
+		"scsi-cd,drive=install,bus=scsi0.0,id=cdromdev0",
 		"user,id=net0",
 		"virtio-net-pci,netdev=net0,mac=52:54:00:11:22:33",
 		"unix:" + filepath.Join(settings.DiskDir, "vm-id.vnc.sock"),

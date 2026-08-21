@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -466,17 +465,5 @@ func dnsForwarderEndpoint(value string) (string, error) {
 }
 
 func defaultDNSForwarders() []string {
-	configuration, err := dns.ClientConfigFromFile("/etc/resolv.conf")
-	if err != nil {
-		return nil
-	}
-	result := make([]string, 0, len(configuration.Servers))
-	for _, server := range configuration.Servers {
-		address, err := netip.ParseAddr(server)
-		if err == nil {
-			result = append(result, address.Unmap().String())
-		}
-	}
-	sort.Strings(result)
-	return result
+	return []string{"1.1.1.1", "8.8.8.8"}
 }

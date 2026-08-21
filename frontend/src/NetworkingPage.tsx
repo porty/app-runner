@@ -4,6 +4,7 @@ import {
   AlertTitle,
   Box,
   Button,
+  ButtonGroup,
   Card,
   CardContent,
   Checkbox,
@@ -24,10 +25,13 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import {
   AddRounded,
+  ArrowDownwardRounded,
+  ArrowUpwardRounded,
   CableRounded,
   CheckCircleRounded,
   DeleteOutlineRounded,
@@ -36,6 +40,7 @@ import {
   LinkOffRounded,
   NetworkCheckRounded,
   RefreshRounded,
+  SettingsEthernetRounded,
   WarningAmberRounded,
 } from '@mui/icons-material'
 import { Link } from 'react-router-dom'
@@ -201,32 +206,48 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
           No Linux bridges were detected. {status?.can_manage ? 'Create one here or configure one outside App Runner.' : 'Grant bridge modification permission or configure one outside App Runner.'}
         </Alert>
       )}
-      <Stack spacing={2}>
-        {bridges.map((bridge) => (
-          <BridgeCard
-            key={bridge.name}
-            bridge={bridge}
-            disabled={mutationsDisabled}
-            configurationDisabled={busy || Boolean(status?.pending_change)}
-            canAttach={attachableInterfaces.length > 0}
-            onApply={apply}
-            onAttach={() => {
-              setAttachBridge(bridge.name)
-              setAttachInterface(attachableInterfaces[0]?.name ?? '')
-            }}
-            onConfigureDHCP={() => {
-              setDHCPBridge(bridge)
-              setDHCPEnabled(Boolean(bridge.dhcp?.enabled))
-              setDHCPCIDR(bridge.dhcp?.cidr || '192.168.100.0/24')
-              setNATEnabled(Boolean(bridge.dhcp?.nat_enabled))
-              setDNSEnabled(Boolean(bridge.dhcp?.dns_enabled))
-              setDNSForwarders((bridge.dhcp?.dns_forwarders ?? []).join('\n'))
-              setAutoDNS(Boolean(bridge.dhcp?.auto_dns))
-              setDNSSuffix(bridge.dhcp?.dns_suffix || `${bridge.name.toLowerCase()}.internal`)
-            }}
-          />
-        ))}
-      </Stack>
+      {bridges.length > 0 && (
+        <TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
+          <Table size="small" sx={{ minWidth: 1100 }}>
+            <TableHead>
+              <TableRow>
+                <TableCell>Bridge</TableCell>
+                <TableCell>State</TableCell>
+                <TableCell>Member interfaces</TableCell>
+                <TableCell>Network services</TableCell>
+                <TableCell>Managed workloads</TableCell>
+                <TableCell align="right">Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {bridges.map((bridge) => (
+                <BridgeRow
+                  key={bridge.name}
+                  bridge={bridge}
+                  disabled={mutationsDisabled}
+                  configurationDisabled={busy || Boolean(status?.pending_change)}
+                  canAttach={attachableInterfaces.length > 0}
+                  onApply={apply}
+                  onAttach={() => {
+                    setAttachBridge(bridge.name)
+                    setAttachInterface(attachableInterfaces[0]?.name ?? '')
+                  }}
+                  onConfigureDHCP={() => {
+                    setDHCPBridge(bridge)
+                    setDHCPEnabled(Boolean(bridge.dhcp?.enabled))
+                    setDHCPCIDR(bridge.dhcp?.cidr || '192.168.100.0/24')
+                    setNATEnabled(Boolean(bridge.dhcp?.nat_enabled))
+                    setDNSEnabled(Boolean(bridge.dhcp?.dns_enabled))
+                    setDNSForwarders((bridge.dhcp?.dns_forwarders ?? []).join('\n'))
+                    setAutoDNS(Boolean(bridge.dhcp?.auto_dns))
+                    setDNSSuffix(bridge.dhcp?.dns_suffix || `${bridge.name.toLowerCase()}.internal`)
+                  }}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
 
       <Typography variant="h5" sx={{ mt: 4, mb: 2 }}>Host interfaces</Typography>
       <TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
@@ -398,7 +419,7 @@ function IdentitySummary({ status }: { status: NetworkingStatus }) {
   )
 }
 
-function BridgeCard({ bridge, disabled, configurationDisabled, canAttach, onApply, onAttach, onConfigureDHCP }: {
+function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply, onAttach, onConfigureDHCP }: {
   bridge: NetworkBridge
   disabled: boolean
   configurationDisabled: boolean
@@ -410,137 +431,117 @@ function BridgeCard({ bridge, disabled, configurationDisabled, canAttach, onAppl
   const members = bridge.member_interfaces ?? []
   const workloads = bridge.workloads ?? []
   const dhcp = bridge.dhcp
+  const issues = (bridge.diagnostics ?? []).filter((diagnostic) =>
+    diagnostic.status === 'DIAGNOSTIC_STATUS_FAIL' || diagnostic.status === 'DIAGNOSTIC_STATUS_WARNING')
   const deleteBridge = () => {
     if (!window.confirm(`Delete bridge ${bridge.name}? The change will still require confirmation.`)) return
     void onApply({ type: 'NETWORK_CHANGE_TYPE_DELETE_BRIDGE', bridge_name: bridge.name })
   }
 
   return (
-    <Card variant="outlined">
-      <CardContent sx={{ p: 3 }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ justifyContent: 'space-between' }}>
-          <Box>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-              <HubRounded color="primary" />
-              <Typography variant="h6">{bridge.name}</Typography>
-              <Chip size="small" color={bridge.is_up ? 'success' : 'default'} label={bridge.is_up ? 'Up' : 'Down'} />
-              <Chip size="small" color={bridge.usable_by_qemu ? 'success' : 'warning'} label={bridge.usable_by_qemu ? 'QEMU ready' : 'Diagnostics required'} />
-              <Chip
-                size="small"
-                color={dhcp?.running ? 'success' : dhcp?.enabled ? 'primary' : 'default'}
-                label={dhcp?.running ? 'DHCP running' : dhcp?.enabled ? 'DHCP enabled' : 'DHCP off'}
-              />
-              {dhcp?.nat_enabled && (
-                <Chip
-                  size="small"
-                  color={dhcp.nat_running ? 'success' : 'primary'}
-                  label={dhcp.nat_running ? 'NAT running' : 'NAT enabled'}
-                />
-              )}
-              {dhcp?.dns_enabled && (
-                <Chip
-                  size="small"
-                  color={dhcp.dns_running ? 'success' : 'primary'}
-                  label={dhcp.dns_running ? 'DNS running' : 'DNS enabled'}
-                />
-              )}
-            </Stack>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              MTU {bridge.mtu} · {bridge.hardware_address || 'no hardware address'} · {(bridge.addresses ?? []).join(', ') || 'no addresses'}
-            </Typography>
-          </Box>
-          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', alignContent: 'flex-start' }}>
-            <Button size="small" disabled={disabled} onClick={() => void onApply({ type: bridge.is_up ? 'NETWORK_CHANGE_TYPE_SET_BRIDGE_DOWN' : 'NETWORK_CHANGE_TYPE_SET_BRIDGE_UP', bridge_name: bridge.name })}>
-              Bring {bridge.is_up ? 'down' : 'up'}
-            </Button>
-            <Button size="small" startIcon={<CableRounded />} disabled={disabled || !canAttach} onClick={onAttach}>Attach interface</Button>
-            <Button size="small" disabled={configurationDisabled} onClick={onConfigureDHCP}>Network services</Button>
-            <Button size="small" color="error" startIcon={<DeleteOutlineRounded />} disabled={disabled || members.length > 0 || workloads.length > 0 || dhcp?.enabled} onClick={deleteBridge}>Delete</Button>
+    <TableRow hover>
+        <TableCell sx={{ verticalAlign: 'top', minWidth: 210 }}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            <HubRounded color="primary" fontSize="small" />
+            <Typography sx={{ fontWeight: 650 }}>{bridge.name}</Typography>
           </Stack>
-        </Stack>
-
-        <Divider sx={{ my: 2.5 }} />
-        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={3}>
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>Member interfaces</Typography>
-            {members.length === 0 && <Typography variant="body2" color="text.secondary">No member interfaces.</Typography>}
-            <Stack spacing={1}>
-              {members.map((member) => (
-                <Stack key={member} direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Box>
-                    <Chip size="small" label={member} />
-                    <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>unmanaged or dynamically assigned interface</Typography>
-                  </Box>
-                  <Button size="small" color="warning" startIcon={<LinkOffRounded />} disabled={disabled} onClick={() => void onApply({ type: 'NETWORK_CHANGE_TYPE_DETACH_INTERFACE', bridge_name: bridge.name, interface_name: member })}>Detach</Button>
-                </Stack>
-              ))}
-            </Stack>
-          </Box>
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>Managed network services</Typography>
-            {!dhcp?.enabled && <Typography variant="body2" color="text.secondary">Disabled for this bridge.</Typography>}
-            {dhcp?.enabled && (
-              <Stack spacing={0.5}>
-                <Typography variant="body2">Range: <Box component="code" sx={{ fontFamily: 'monospace' }}>{dhcp.cidr}</Box></Typography>
-                <Typography variant="body2">Bridge address: <Box component="code" sx={{ fontFamily: 'monospace' }}>{dhcp.server_address}</Box></Typography>
-                <Typography variant="body2">Lease pool: <Box component="code" sx={{ fontFamily: 'monospace' }}>{dhcp.pool_start}–{dhcp.pool_end}</Box></Typography>
-                <Typography variant="body2" color="text.secondary">{dhcp.active_leases} active lease{dhcp.active_leases === 1 ? '' : 's'}</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Routing: {dhcp.nat_enabled ? (dhcp.nat_running ? 'NAT active' : 'NAT starts with the first workload') : 'local bridge only'}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  DNS: {dhcp.dns_enabled ? (dhcp.dns_running ? 'active' : 'starts with the first workload') : 'not advertised'}
-                </Typography>
-                {dhcp.dns_enabled && (
-                  <Typography variant="body2">Forwarders: {(dhcp.dns_forwarders ?? []).map((forwarder) => (
-                    <Box key={forwarder} component="code" sx={{ fontFamily: 'monospace', mr: 1 }}>{forwarder}</Box>
-                  ))}</Typography>
-                )}
-                {dhcp.auto_dns && <Typography variant="body2">Auto DNS zone: <Box component="code" sx={{ fontFamily: 'monospace' }}>{dhcp.dns_suffix}</Box></Typography>}
-                {dhcp.last_error && <Alert severity="error" sx={{ mt: 1 }}>{dhcp.last_error}</Alert>}
-              </Stack>
-            )}
-          </Box>
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>Managed workloads</Typography>
-            {workloads.length === 0 && <Typography variant="body2" color="text.secondary">No App Runner VMs or containers are assigned.</Typography>}
-            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
-              {workloads.map((workload) => (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>MTU {bridge.mtu}</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{bridge.hardware_address || 'No hardware address'}</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{(bridge.addresses ?? []).join(', ') || 'No addresses'}</Typography>
+        </TableCell>
+        <TableCell sx={{ verticalAlign: 'top' }}>
+          <Stack spacing={0.75} sx={{ alignItems: 'flex-start' }}>
+            <Chip size="small" color={bridge.is_up ? 'success' : 'default'} label={bridge.is_up ? 'Up' : 'Down'} />
+            {issues.map((diagnostic) => (
+              <Tooltip key={diagnostic.key} title={diagnostic.detail}>
                 <Chip
-                  key={`${workload.workload_type}-${workload.id}`}
-                  component={workload.workload_type === 'virtual_machine' ? Link : 'div'}
-                  to={workload.workload_type === 'virtual_machine' ? '/compute/virtual-machines' : undefined}
-                  clickable={workload.workload_type === 'virtual_machine'}
-                  color={workload.running ? 'success' : 'default'}
-                  label={`${workload.name} · ${workload.workload_type.replace('_', ' ')}`}
+                  size="small"
+                  color={diagnostic.status === 'DIAGNOSTIC_STATUS_FAIL' ? 'error' : 'warning'}
+                  icon={diagnostic.status === 'DIAGNOSTIC_STATUS_FAIL' ? <ErrorOutlineRounded /> : <WarningAmberRounded />}
+                  label={diagnostic.label}
                 />
-              ))}
+              </Tooltip>
+            ))}
+            {!bridge.usable_by_qemu && issues.length === 0 && (
+              <Chip size="small" color="warning" icon={<WarningAmberRounded />} label="Diagnostics required" />
+            )}
+          </Stack>
+        </TableCell>
+        <TableCell sx={{ verticalAlign: 'top', minWidth: 190 }}>
+          {members.length === 0 && <Typography variant="body2" color="text.secondary">None</Typography>}
+          <Stack spacing={0.75}>
+            {members.map((member) => (
+              <Stack key={member} direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                <Chip size="small" label={member} />
+                <Tooltip title={`Detach ${member}`}>
+                  <span>
+                    <Button
+                      size="small"
+                      color="warning"
+                      aria-label={`Detach ${member} from ${bridge.name}`}
+                      disabled={disabled}
+                      onClick={() => void onApply({ type: 'NETWORK_CHANGE_TYPE_DETACH_INTERFACE', bridge_name: bridge.name, interface_name: member })}
+                      sx={{ minWidth: 30, p: 0.25 }}
+                    >
+                      <LinkOffRounded fontSize="small" />
+                    </Button>
+                  </span>
+                </Tooltip>
+              </Stack>
+            ))}
+          </Stack>
+        </TableCell>
+        <TableCell sx={{ verticalAlign: 'top', minWidth: 190 }}>
+          {!dhcp?.enabled && <Chip size="small" label="Disabled" />}
+          {dhcp?.enabled && (
+            <Stack spacing={0.75} sx={{ alignItems: 'flex-start' }}>
+              <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+                <Chip size="small" color={dhcp.running ? 'success' : 'primary'} label={dhcp.running ? 'DHCP running' : 'DHCP enabled'} />
+                {dhcp.nat_enabled && <Chip size="small" color={dhcp.nat_running ? 'success' : 'primary'} label={dhcp.nat_running ? 'NAT running' : 'NAT enabled'} />}
+                {dhcp.dns_enabled && <Chip size="small" color={dhcp.dns_running ? 'success' : 'primary'} label={dhcp.dns_running ? 'DNS running' : 'DNS enabled'} />}
+              </Stack>
+              <Typography variant="caption" color="text.secondary">{dhcp.cidr} · {dhcp.active_leases} active lease{dhcp.active_leases === 1 ? '' : 's'}</Typography>
+              {dhcp.last_error && <Typography variant="caption" color="error">{dhcp.last_error}</Typography>}
             </Stack>
-          </Box>
-        </Stack>
-
-        <Box sx={{ mt: 2.5 }}><DiagnosticList diagnostics={bridge.diagnostics ?? []} compact /></Box>
-      </CardContent>
-    </Card>
-  )
-}
-
-function DiagnosticList({ diagnostics, compact = false }: { diagnostics: NetworkDiagnostic[]; compact?: boolean }) {
-  if (diagnostics.length === 0) return <Typography color="text.secondary">No diagnostics reported.</Typography>
-  return (
-    <Stack spacing={1}>
-      {diagnostics.map((diagnostic) => {
-        const severity = diagnostic.status === 'DIAGNOSTIC_STATUS_FAIL' ? 'error' : diagnostic.status === 'DIAGNOSTIC_STATUS_WARNING' ? 'warning' : diagnostic.status === 'DIAGNOSTIC_STATUS_PASS' ? 'success' : 'info'
-        const icon = severity === 'error' ? <ErrorOutlineRounded /> : severity === 'warning' ? <WarningAmberRounded /> : severity === 'success' ? <CheckCircleRounded /> : undefined
-        return (
-          <Alert key={diagnostic.key} severity={severity} icon={icon} variant={compact ? 'outlined' : 'standard'}>
-            <AlertTitle>{diagnostic.label}</AlertTitle>
-            <DiagnosticText text={diagnostic.detail} />
-            {diagnostic.remediation && <Box sx={{ mt: 1 }}><DiagnosticText text={diagnostic.remediation} /></Box>}
-          </Alert>
-        )
-      })}
-    </Stack>
+          )}
+        </TableCell>
+        <TableCell sx={{ verticalAlign: 'top', minWidth: 180 }}>
+          {workloads.length === 0 && <Typography variant="body2" color="text.secondary">None</Typography>}
+          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+            {workloads.map((workload) => (
+              <Chip
+                key={`${workload.workload_type}-${workload.id}`}
+                size="small"
+                component={workload.workload_type === 'virtual_machine' ? Link : 'div'}
+                to={workload.workload_type === 'virtual_machine' ? '/compute/virtual-machines' : undefined}
+                clickable={workload.workload_type === 'virtual_machine'}
+                color={workload.running ? 'success' : 'default'}
+                label={workload.name}
+              />
+            ))}
+          </Stack>
+        </TableCell>
+        <TableCell align="right" sx={{ verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+          <ButtonGroup size="small" variant="outlined" aria-label={`Actions for bridge ${bridge.name}`}>
+            <Button
+              aria-label={`Bring ${bridge.name} ${bridge.is_up ? 'down' : 'up'}`}
+              disabled={disabled}
+              onClick={() => void onApply({ type: bridge.is_up ? 'NETWORK_CHANGE_TYPE_SET_BRIDGE_DOWN' : 'NETWORK_CHANGE_TYPE_SET_BRIDGE_UP', bridge_name: bridge.name })}
+            >
+              <Tooltip title={`Bring ${bridge.name} ${bridge.is_up ? 'down' : 'up'}`}><span>{bridge.is_up ? <ArrowDownwardRounded /> : <ArrowUpwardRounded />}</span></Tooltip>
+            </Button>
+            <Button aria-label={`Attach interface to ${bridge.name}`} disabled={disabled || !canAttach} onClick={onAttach}>
+              <Tooltip title="Attach interface"><span><CableRounded /></span></Tooltip>
+            </Button>
+            <Button aria-label={`Configure network services for ${bridge.name}`} disabled={configurationDisabled} onClick={onConfigureDHCP}>
+              <Tooltip title="Network services"><span><SettingsEthernetRounded /></span></Tooltip>
+            </Button>
+            <Button aria-label={`Delete bridge ${bridge.name}`} color="error" disabled={disabled || members.length > 0 || workloads.length > 0 || dhcp?.enabled} onClick={deleteBridge}>
+              <Tooltip title="Delete bridge"><span><DeleteOutlineRounded /></span></Tooltip>
+            </Button>
+          </ButtonGroup>
+        </TableCell>
+    </TableRow>
   )
 }
 
