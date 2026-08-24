@@ -43,6 +43,7 @@ type fakeHypervisor struct {
 	nextPID      int
 	gracefulStop bool
 	forcedStop   bool
+	reset        bool
 	onExit       func(int, error)
 	changedCDROM string
 	changedISO   string
@@ -78,7 +79,10 @@ func (h *fakeHypervisor) ForceStop(vm virtualMachine) error {
 	return nil
 }
 
-func (h *fakeHypervisor) Reset(virtualMachine) error { return nil }
+func (h *fakeHypervisor) Reset(virtualMachine) error {
+	h.reset = true
+	return nil
+}
 
 func (h *fakeHypervisor) ChangeCDROMMedia(_ virtualMachine, cdromID, isoPath string) error {
 	h.changedCDROM = cdromID
@@ -152,6 +156,31 @@ func TestVMManagerLifecycle(t *testing.T) {
 	}
 	if _, err := manager.Get(vm.ID); !errors.Is(err, errVMNotFound) {
 		t.Fatalf("deleted VM is still present: %v", err)
+	}
+}
+
+func TestVMManagerRebootsOnlyRunningVMs(t *testing.T) {
+	manager, hypervisor, _ := newTestVMManager(t)
+	vm, err := manager.Create(context.Background(), createVMOptions{
+		Name: "reboot-vm", CPUs: 2, MemoryMiB: 2048, DiskGiB: 20,
+		ISOName: "installer.iso", NetworkMode: networkModeNAT,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Reboot(vm.ID); !errors.Is(err, errVMNotRunning) {
+		t.Fatalf("rebooting a stopped VM returned %v", err)
+	}
+	vm, err = manager.Start(vm.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vm, err = manager.Reboot(vm.ID)
+	if err != nil {
+		t.Fatalf("Reboot returned an error: %v", err)
+	}
+	if !hypervisor.reset || vm.Status != vmStatusRunning {
+		t.Fatalf("running VM was not reset correctly: %#v", vm)
 	}
 }
 

@@ -1,25 +1,30 @@
-import { useEffect, useRef, useState } from 'react'
-import { Alert, Box, Button, Chip, CircularProgress, Stack, Typography } from '@mui/material'
-import { KeyboardRounded, PlayArrowRounded, RefreshRounded } from '@mui/icons-material'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { Alert, Box, Button, Chip, CircularProgress, ListItemIcon, ListItemText, Menu, MenuItem, Stack, Typography } from '@mui/material'
+import { ArrowDropDownRounded, KeyboardRounded, PlayArrowRounded, PowerOffRounded, PowerSettingsNewRounded, RefreshRounded, RestartAltRounded } from '@mui/icons-material'
 import { Link, useParams } from 'react-router-dom'
 import RFB from '@novnc/novnc'
 
-import { getVM, startVM, type VirtualMachine } from './api'
+import { getVM, rebootVM, startVM, stopVM, type VirtualMachine } from './api'
 import { canAccessVMConsole } from './vmConsoleAccess'
 
 export default function ConsolePage() {
   const { id = '' } = useParams()
   const target = useRef<HTMLDivElement | null>(null)
   const rfb = useRef<RFB | null>(null)
+  const expectedDisconnect = useRef(false)
   const [vm, setVM] = useState<VirtualMachine | null>(null)
   const [connection, setConnection] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [error, setError] = useState('')
   const [starting, setStarting] = useState(false)
+  const [powerMenuAnchor, setPowerMenuAnchor] = useState<HTMLElement | null>(null)
+  const [powerBusy, setPowerBusy] = useState<'shutdown' | 'force-off' | 'reboot' | null>(null)
+  const consoleAvailable = vm ? canAccessVMConsole(vm.status) : false
 
   const start = async () => {
     setStarting(true)
     setError('')
     try {
+      expectedDisconnect.current = false
       setConnection('connecting')
       setVM(await startVM(id))
     } catch (requestError) {
@@ -36,17 +41,30 @@ export default function ConsolePage() {
   }, [id])
 
   useEffect(() => {
-    if (!vm || !canAccessVMConsole(vm.status) || !target.current) return
+    if (vm?.status !== 'VM_STATUS_STOPPING') return
+    const timer = window.setInterval(() => {
+      void getVM(id).then(setVM).catch((requestError: unknown) => {
+        setError(requestError instanceof Error ? requestError.message : 'Unable to refresh the virtual machine status')
+      })
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [id, vm?.status])
+
+  useEffect(() => {
+    if (!vm || !consoleAvailable || !target.current) return
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const client = new RFB(target.current, `${protocol}//${window.location.host}${vm.console_path}`, { shared: true })
     client.scaleViewport = true
     client.resizeSession = false
     client.focusOnClick = true
-    const connected = () => setConnection('connected')
+    const connected = () => {
+      expectedDisconnect.current = false
+      setConnection('connected')
+    }
     const disconnected = (event: Event) => {
       const clean = (event as CustomEvent<{ clean: boolean }>).detail?.clean
       setConnection('disconnected')
-      if (!clean) setError('The console connection ended unexpectedly.')
+      if (!clean && !expectedDisconnect.current) setError('The console connection ended unexpectedly.')
     }
     client.addEventListener('connect', connected)
     client.addEventListener('disconnect', disconnected)
@@ -57,7 +75,33 @@ export default function ConsolePage() {
       client.disconnect()
       rfb.current = null
     }
-  }, [vm])
+  }, [consoleAvailable, vm?.console_path])
+
+  const openPowerMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    setPowerMenuAnchor(event.currentTarget)
+  }
+
+  const runPowerAction = async (action: 'shutdown' | 'force-off' | 'reboot') => {
+    setPowerMenuAnchor(null)
+    if (action === 'force-off' && !window.confirm(`Force ${vm?.name ?? 'this virtual machine'} off? Unsaved guest data may be lost.`)) return
+    if (action === 'reboot' && !window.confirm(`Reboot ${vm?.name ?? 'this virtual machine'} now?`)) return
+    setPowerBusy(action)
+    setError('')
+    expectedDisconnect.current = true
+    try {
+      if (action === 'shutdown') setVM(await stopVM(id))
+      if (action === 'force-off') setVM(await stopVM(id, true))
+      if (action === 'reboot') {
+        setVM(await rebootVM(id))
+        window.setTimeout(() => { expectedDisconnect.current = false }, 5000)
+      }
+    } catch (requestError) {
+      expectedDisconnect.current = false
+      setError(requestError instanceof Error ? requestError.message : 'The power operation failed')
+    } finally {
+      setPowerBusy(null)
+    }
+  }
 
   if (error && !vm) return <Alert severity="error">{error}</Alert>
   if (!vm) return <Box sx={{ display: 'grid', placeItems: 'center', minHeight: 320 }}><CircularProgress /></Box>
@@ -98,6 +142,33 @@ export default function ConsolePage() {
           <Button variant="outlined" startIcon={<KeyboardRounded />} onClick={() => rfb.current?.sendCtrlAltDel()} disabled={connection !== 'connected'}>
             Ctrl+Alt+Del
           </Button>
+          <Button
+            variant="outlined"
+            color="inherit"
+            startIcon={<PowerSettingsNewRounded />}
+            endIcon={<ArrowDropDownRounded />}
+            onClick={openPowerMenu}
+            disabled={powerBusy !== null}
+            aria-controls={powerMenuAnchor ? 'console-power-menu' : undefined}
+            aria-haspopup="menu"
+            aria-expanded={powerMenuAnchor ? 'true' : undefined}
+          >
+            {powerBusy ? 'Working…' : 'Power'}
+          </Button>
+          <Menu id="console-power-menu" anchorEl={powerMenuAnchor} open={Boolean(powerMenuAnchor)} onClose={() => setPowerMenuAnchor(null)}>
+            <MenuItem onClick={() => void runPowerAction('shutdown')} disabled={vm.status !== 'VM_STATUS_RUNNING'}>
+              <ListItemIcon><PowerSettingsNewRounded fontSize="small" /></ListItemIcon>
+              <ListItemText primary="Shut down" secondary="Request a graceful shutdown" />
+            </MenuItem>
+            <MenuItem onClick={() => void runPowerAction('reboot')} disabled={vm.status !== 'VM_STATUS_RUNNING'}>
+              <ListItemIcon><RestartAltRounded fontSize="small" /></ListItemIcon>
+              <ListItemText primary="Reboot" secondary="Reset the running virtual machine" />
+            </MenuItem>
+            <MenuItem onClick={() => void runPowerAction('force-off')} sx={{ color: 'error.main' }}>
+              <ListItemIcon sx={{ color: 'error.main' }}><PowerOffRounded fontSize="small" /></ListItemIcon>
+              <ListItemText primary="Force off" secondary="Power off immediately" />
+            </MenuItem>
+          </Menu>
           <Button component={Link} to="/compute/virtual-machines" startIcon={<RefreshRounded />}>VM list</Button>
         </Stack>
       </Stack>

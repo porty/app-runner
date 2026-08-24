@@ -349,6 +349,11 @@ export async function stopVM(id: string, force = false): Promise<VirtualMachine>
   return response.virtual_machine
 }
 
+export async function rebootVM(id: string): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('RebootVM', { id })
+  return response.virtual_machine
+}
+
 export async function updateVM(request: UpdateVMRequest): Promise<VirtualMachine> {
   const response = await callTwirp<{ virtual_machine: VirtualMachine }>('UpdateVM', request)
   return response.virtual_machine
