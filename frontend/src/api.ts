@@ -95,6 +95,13 @@ export interface VMCloudInitConfiguration {
   user_data: string
 }
 
+export interface CloudInitTemplate {
+  name: string
+  user_data: string
+  created_at: string
+  updated_at: string
+}
+
 export interface HostStatus {
   qemu_available: boolean
   kvm_available: boolean
@@ -411,6 +418,25 @@ export async function configureVMIPMI(configuration: VMIPMIConfiguration): Promi
 export async function configureVMCloudInit(configuration: VMCloudInitConfiguration): Promise<VirtualMachine> {
   const response = await callTwirp<{ virtual_machine: VirtualMachine }>('ConfigureVMCloudInit', configuration)
   return response.virtual_machine
+}
+
+export async function listCloudInitTemplates(): Promise<CloudInitTemplate[]> {
+  const response = await callTwirp<{ templates?: CloudInitTemplate[] }>('ListCloudInitTemplates', {})
+  return response.templates ?? []
+}
+
+export async function createCloudInitTemplate(name: string, userData: string): Promise<CloudInitTemplate> {
+  const response = await callTwirp<{ template: CloudInitTemplate }>('CreateCloudInitTemplate', { name, user_data: userData })
+  return response.template
+}
+
+export async function updateCloudInitTemplate(name: string, newName: string, userData: string): Promise<CloudInitTemplate> {
+  const response = await callTwirp<{ template: CloudInitTemplate }>('UpdateCloudInitTemplate', { name, new_name: newName, user_data: userData })
+  return response.template
+}
+
+export async function deleteCloudInitTemplate(name: string): Promise<void> {
+  await callTwirp('DeleteCloudInitTemplate', { name })
 }
 
 export async function deleteVM(id: string): Promise<void> {

@@ -10,8 +10,8 @@ import {
 import { Link } from 'react-router-dom'
 
 import {
-  cloneVM, createVM, deleteVM, getNetworkingStatus, listISOs, listVMs, startVM, stopVM,
-  type CreateVMRequest, type ISOImage, type NetworkingStatus, type VirtualMachine, type VMStatus,
+  cloneVM, createCloudInitTemplate, createVM, deleteVM, getNetworkingStatus, listCloudInitTemplates, listISOs, listVMs, startVM, stopVM,
+  type CloudInitTemplate, type CreateVMRequest, type ISOImage, type NetworkingStatus, type VirtualMachine, type VMStatus,
 } from './api'
 import { canAccessVMConsole } from './vmConsoleAccess'
 
@@ -38,6 +38,10 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
   const [error, setError] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [createRequest, setCreateRequest] = useState<CreateVMRequest>(defaultCreateRequest)
+  const [cloudInitTemplates, setCloudInitTemplates] = useState<CloudInitTemplate[]>([])
+  const [selectedCloudInitTemplate, setSelectedCloudInitTemplate] = useState('')
+  const [saveCloudInitTemplate, setSaveCloudInitTemplate] = useState(false)
+  const [newCloudInitTemplateName, setNewCloudInitTemplateName] = useState('')
   const [cloneSource, setCloneSource] = useState<VirtualMachine | null>(null)
   const [cloneName, setCloneName] = useState('')
   const createName = createRequest.name.trim()
@@ -46,6 +50,9 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
   const cloneNameExists = virtualMachines.some((vm) => vm.name.toLowerCase() === trimmedCloneName.toLowerCase())
   const cloneNameValid = dnsLabelPattern.test(trimmedCloneName) && !cloneNameExists
   const cloneBusy = cloneSource !== null && busyID === cloneSource.id
+  const trimmedTemplateName = newCloudInitTemplateName.trim()
+  const cloudInitTemplateNameExists = cloudInitTemplates.some((template) => template.name.toLowerCase() === trimmedTemplateName.toLowerCase())
+  const cloudInitTemplateNameValid = trimmedTemplateName.length > 0 && trimmedTemplateName.length <= 80 && !cloudInitTemplateNameExists
 
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true)
@@ -93,14 +100,43 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
     setBusyID('create')
     setError('')
     try {
+      if (createRequest.cloud_init_enabled && saveCloudInitTemplate) {
+        const savedTemplate = await createCloudInitTemplate(trimmedTemplateName, createRequest.cloud_init_user_data)
+        setCloudInitTemplates((current) => [...current, savedTemplate].sort((left, right) => left.name.localeCompare(right.name)))
+        setSelectedCloudInitTemplate(savedTemplate.name)
+        setSaveCloudInitTemplate(false)
+        setNewCloudInitTemplateName('')
+      }
       await createVM(createRequest)
       setCreateOpen(false)
       setCreateRequest({ ...defaultCreateRequest, iso_name: images[0]?.name ?? '' })
+      setSelectedCloudInitTemplate('')
+      setSaveCloudInitTemplate(false)
+      setNewCloudInitTemplateName('')
       await refresh()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to create the virtual machine')
     } finally {
       setBusyID('')
+    }
+  }
+
+  const openCreate = async () => {
+    setCreateOpen(true)
+    setError('')
+    try {
+      setCloudInitTemplates(await listCloudInitTemplates())
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Cloud Init templates could not be loaded')
+    }
+  }
+
+  const loadCloudInitTemplate = (name: string) => {
+    setSelectedCloudInitTemplate(name)
+    if (!name) return
+    const template = cloudInitTemplates.find((candidate) => candidate.name === name)
+    if (template) {
+      setCreateRequest((current) => ({ ...current, cloud_init_enabled: true, cloud_init_user_data: template.user_data }))
     }
   }
 
@@ -138,7 +174,7 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
           <Typography variant="h4">Virtual machines</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.75 }}>Create and manage local QEMU/KVM workloads.</Typography>
         </Box>
-        <Button variant="contained" startIcon={<AddRounded />} onClick={() => setCreateOpen(true)} disabled={images.length === 0 || loading} sx={{ alignSelf: { xs: 'stretch', sm: 'center' } }}>
+        <Button variant="contained" startIcon={<AddRounded />} onClick={() => void openCreate()} disabled={images.length === 0 || loading} sx={{ alignSelf: { xs: 'stretch', sm: 'center' } }}>
           Create virtual machine
         </Button>
       </Stack>
@@ -205,16 +241,36 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
               label="Enable Cloud Init"
             />
             {createRequest.cloud_init_enabled && (
-              <TextField
-                label="user-data"
-                multiline
-                minRows={8}
-                value={createRequest.cloud_init_user_data}
-                onChange={(event) => setCreateRequest({ ...createRequest, cloud_init_user_data: event.target.value })}
-                placeholder={'#cloud-config\nusers:\n  - name: app'}
-                helperText="Written verbatim to user-data on a cidata NoCloud ISO. Minimal meta-data is generated automatically."
-                slotProps={{ htmlInput: { maxLength: 1048576, spellCheck: false } }}
-              />
+              <Stack spacing={2}>
+                <TextField select label="Load user-data template" value={selectedCloudInitTemplate} onChange={(event) => loadCloudInitTemplate(event.target.value)} helperText="Templates are copied into this VM and can be customised here.">
+                  <MenuItem value="">Custom / blank</MenuItem>
+                  {cloudInitTemplates.map((template) => <MenuItem key={template.name} value={template.name}>{template.name}</MenuItem>)}
+                </TextField>
+                <TextField
+                  label="user-data"
+                  multiline
+                  minRows={8}
+                  value={createRequest.cloud_init_user_data}
+                  onChange={(event) => setCreateRequest({ ...createRequest, cloud_init_user_data: event.target.value })}
+                  placeholder={'#cloud-config\nusers:\n  - name: app'}
+                  helperText="Written verbatim to user-data on a cidata NoCloud ISO. Minimal meta-data is generated automatically."
+                  slotProps={{ htmlInput: { maxLength: 1048576, spellCheck: false } }}
+                />
+                <FormControlLabel
+                  control={<Switch checked={saveCloudInitTemplate} onChange={(event) => setSaveCloudInitTemplate(event.target.checked)} />}
+                  label="Save this user-data as a new template"
+                />
+                {saveCloudInitTemplate && (
+                  <TextField
+                    label="New template name"
+                    value={newCloudInitTemplateName}
+                    onChange={(event) => setNewCloudInitTemplateName(event.target.value)}
+                    error={cloudInitTemplateNameExists || newCloudInitTemplateName.length > 80}
+                    helperText={cloudInitTemplateNameExists ? 'A template with this name already exists.' : 'The template remains independent of the new VM.'}
+                    slotProps={{ htmlInput: { maxLength: 80 } }}
+                  />
+                )}
+              </Stack>
             )}
             <TextField select label="Network mode" value={createRequest.network_mode} onChange={(event) => setCreateRequest({ ...createRequest, network_mode: event.target.value as CreateVMRequest['network_mode'] })}><MenuItem value="NETWORK_MODE_NAT">User-mode NAT</MenuItem><MenuItem value="NETWORK_MODE_BRIDGE">Host bridge</MenuItem></TextField>
             {createRequest.network_mode === 'NETWORK_MODE_BRIDGE' && (
@@ -225,7 +281,7 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
             )}
           </Stack>
         </DialogContent>
-        <DialogActions><Button onClick={() => setCreateOpen(false)}>Cancel</Button><Button variant="contained" onClick={() => void submitCreate()} disabled={busyID === 'create' || !createNameValid || !createRequest.iso_name || (createRequest.network_mode === 'NETWORK_MODE_BRIDGE' && !createRequest.bridge_name)}>{busyID === 'create' ? 'Creating…' : 'Create'}</Button></DialogActions>
+        <DialogActions><Button onClick={() => setCreateOpen(false)}>Cancel</Button><Button variant="contained" onClick={() => void submitCreate()} disabled={busyID === 'create' || !createNameValid || !createRequest.iso_name || (createRequest.network_mode === 'NETWORK_MODE_BRIDGE' && !createRequest.bridge_name) || (createRequest.cloud_init_enabled && saveCloudInitTemplate && !cloudInitTemplateNameValid)}>{busyID === 'create' ? 'Creating…' : 'Create'}</Button></DialogActions>
       </Dialog>
 
       <Dialog open={Boolean(cloneSource)} onClose={cloneBusy ? undefined : () => setCloneSource(null)} fullWidth maxWidth="sm">

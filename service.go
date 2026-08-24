@@ -15,6 +15,7 @@ type appRunnerService struct {
 	manager      *vmManager
 	networking   *networkManager
 	storage      *storageService
+	templates    *cloudInitTemplateManager
 	capabilities func() hostCapabilities
 	now          func() time.Time
 }
@@ -255,6 +256,49 @@ func (s *appRunnerService) ConfigureVMCloudInit(ctx context.Context, request *ap
 	return &apprunnerv1.ConfigureVMCloudInitResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
 }
 
+func (s *appRunnerService) ListCloudInitTemplates(context.Context, *apprunnerv1.ListCloudInitTemplatesRequest) (*apprunnerv1.ListCloudInitTemplatesResponse, error) {
+	if s.templates == nil {
+		return nil, twirp.InternalError("cloud-init templates are not configured")
+	}
+	response := &apprunnerv1.ListCloudInitTemplatesResponse{}
+	for _, template := range s.templates.List() {
+		response.Templates = append(response.Templates, cloudInitTemplateToProto(template))
+	}
+	return response, nil
+}
+
+func (s *appRunnerService) CreateCloudInitTemplate(_ context.Context, request *apprunnerv1.CreateCloudInitTemplateRequest) (*apprunnerv1.CreateCloudInitTemplateResponse, error) {
+	if s.templates == nil {
+		return nil, twirp.InternalError("cloud-init templates are not configured")
+	}
+	template, err := s.templates.Create(request.GetName(), request.GetUserData())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.CreateCloudInitTemplateResponse{Template: cloudInitTemplateToProto(template)}, nil
+}
+
+func (s *appRunnerService) UpdateCloudInitTemplate(_ context.Context, request *apprunnerv1.UpdateCloudInitTemplateRequest) (*apprunnerv1.UpdateCloudInitTemplateResponse, error) {
+	if s.templates == nil {
+		return nil, twirp.InternalError("cloud-init templates are not configured")
+	}
+	template, err := s.templates.Update(request.GetName(), request.GetNewName(), request.GetUserData())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.UpdateCloudInitTemplateResponse{Template: cloudInitTemplateToProto(template)}, nil
+}
+
+func (s *appRunnerService) DeleteCloudInitTemplate(_ context.Context, request *apprunnerv1.DeleteCloudInitTemplateRequest) (*apprunnerv1.DeleteCloudInitTemplateResponse, error) {
+	if s.templates == nil {
+		return nil, twirp.InternalError("cloud-init templates are not configured")
+	}
+	if err := s.templates.Delete(request.GetName()); err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.DeleteCloudInitTemplateResponse{}, nil
+}
+
 func (s *appRunnerService) ConfigureVMIPMI(_ context.Context, request *apprunnerv1.ConfigureVMIPMIRequest) (*apprunnerv1.ConfigureVMIPMIResponse, error) {
 	if err := s.requireManager(); err != nil {
 		return nil, err
@@ -403,6 +447,13 @@ func virtualMachineToProto(vm virtualMachine) *apprunnerv1.VirtualMachine {
 	return result
 }
 
+func cloudInitTemplateToProto(template cloudInitTemplate) *apprunnerv1.CloudInitTemplate {
+	return &apprunnerv1.CloudInitTemplate{
+		Name: template.Name, UserData: template.UserData,
+		CreatedAt: template.CreatedAt.Format(time.RFC3339), UpdatedAt: template.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
 func networkModeFromProto(mode apprunnerv1.NetworkMode) (networkMode, error) {
 	switch mode {
 	case apprunnerv1.NetworkMode_NETWORK_MODE_NAT:
@@ -421,14 +472,16 @@ func rpcError(err error) error {
 		return twirp.InvalidArgumentError(invalidField.field, invalidField.message)
 	case errors.Is(err, errVMNotFound):
 		return twirp.NotFoundError(err.Error())
-	case errors.Is(err, errVMNameExists):
+	case errors.Is(err, errCloudInitTemplateNotFound):
+		return twirp.NotFoundError(err.Error())
+	case errors.Is(err, errVMNameExists), errors.Is(err, errCloudInitTemplateExists):
 		return twirp.NewError(twirp.AlreadyExists, err.Error())
 	case errors.Is(err, errVMAlreadyRunning), errors.Is(err, errVMNotRunning), errors.Is(err, errBridgeUnavailable),
 		errors.Is(err, errHostUnavailable), errors.Is(err, errDeleteRunningVM), errors.Is(err, errDeviceRunningVM),
 		errors.Is(err, errCloneRunningVM):
 		return twirp.NewError(twirp.FailedPrecondition, err.Error())
 	default:
-		return twirp.InternalError(fmt.Sprintf("virtual machine operation failed: %v", err))
+		return twirp.InternalError(fmt.Sprintf("operation failed: %v", err))
 	}
 }
 

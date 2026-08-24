@@ -33,6 +33,10 @@ service AppRunnerService {
   rpc ConfirmNetworkChange(ConfirmNetworkChangeRequest) returns (ConfirmNetworkChangeResponse);
   rpc RevertNetworkChange(RevertNetworkChangeRequest) returns (RevertNetworkChangeResponse);
   rpc ConfigureBridgeDHCP(ConfigureBridgeDHCPRequest) returns (ConfigureBridgeDHCPResponse);
+  rpc ListCloudInitTemplates(ListCloudInitTemplatesRequest) returns (ListCloudInitTemplatesResponse);
+  rpc CreateCloudInitTemplate(CreateCloudInitTemplateRequest) returns (CreateCloudInitTemplateResponse);
+  rpc UpdateCloudInitTemplate(UpdateCloudInitTemplateRequest) returns (UpdateCloudInitTemplateResponse);
+  rpc DeleteCloudInitTemplate(DeleteCloudInitTemplateRequest) returns (DeleteCloudInitTemplateResponse);
 }
 
 message PingRequest {}
@@ -486,3 +490,41 @@ message ConfigureBridgeDHCPRequest {
 message ConfigureBridgeDHCPResponse {
   NetworkingStatus status = 1;
 }
+
+message CloudInitTemplate {
+  string name = 1;
+  string user_data = 2;
+  string created_at = 3;
+  string updated_at = 4;
+}
+
+message ListCloudInitTemplatesRequest {}
+
+message ListCloudInitTemplatesResponse {
+  repeated CloudInitTemplate templates = 1;
+}
+
+message CreateCloudInitTemplateRequest {
+  string name = 1;
+  string user_data = 2;
+}
+
+message CreateCloudInitTemplateResponse {
+  CloudInitTemplate template = 1;
+}
+
+message UpdateCloudInitTemplateRequest {
+  string name = 1;
+  string new_name = 2;
+  string user_data = 3;
+}
+
+message UpdateCloudInitTemplateResponse {
+  CloudInitTemplate template = 1;
+}
+
+message DeleteCloudInitTemplateRequest {
+  string name = 1;
+}
+
+message DeleteCloudInitTemplateResponse {}

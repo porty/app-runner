@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMCloudInit, configureVMIPMI, createVM, downloadStorageFile, echo, getNetworkingStatus, listStorage, listVMs, ping, rebootVM, uploadStorageFiles } from './api'
+import { applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMCloudInit, configureVMIPMI, createCloudInitTemplate, createVM, deleteCloudInitTemplate, downloadStorageFile, echo, getNetworkingStatus, listCloudInitTemplates, listStorage, listVMs, ping, rebootVM, updateCloudInitTemplate, uploadStorageFiles } from './api'
 
 describe('Twirp API client', () => {
   afterEach(() => {
@@ -250,6 +250,28 @@ describe('Twirp API client', () => {
       '/twirp/apprunner.v1.AppRunnerService/ConfigureVMCloudInit',
       expect.objectContaining({ body: JSON.stringify(configuration) }),
     )
+  })
+
+  it('manages Cloud Init templates through Twirp', async () => {
+    const template = { name: 'Ubuntu', user_data: '#cloud-config\n', created_at: '2026-08-24T00:00:00Z', updated_at: '2026-08-24T00:00:00Z' }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ templates: [template] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ template }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ template: { ...template, name: 'Ubuntu server' } }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listCloudInitTemplates()).resolves.toEqual([template])
+    await expect(createCloudInitTemplate('Ubuntu', template.user_data)).resolves.toEqual(template)
+    await expect(updateCloudInitTemplate('Ubuntu', 'Ubuntu server', template.user_data)).resolves.toEqual({ ...template, name: 'Ubuntu server' })
+    await expect(deleteCloudInitTemplate('Ubuntu server')).resolves.toBeUndefined()
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/twirp/apprunner.v1.AppRunnerService/ListCloudInitTemplates',
+      '/twirp/apprunner.v1.AppRunnerService/CreateCloudInitTemplate',
+      '/twirp/apprunner.v1.AppRunnerService/UpdateCloudInitTemplate',
+      '/twirp/apprunner.v1.AppRunnerService/DeleteCloudInitTemplate',
+    ])
   })
 
   it('loads the recursive storage roots', async () => {

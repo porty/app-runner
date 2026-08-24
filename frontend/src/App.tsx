@@ -28,6 +28,7 @@ import {
   Brightness7Rounded,
   ChevronLeftRounded,
   ChevronRightRounded,
+  CloudSyncRounded,
   CloudQueueRounded,
   DashboardRounded,
   ExpandLessRounded,
@@ -43,6 +44,7 @@ import {
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 
 import { echo, ping, type PingResponse } from './api'
+import CloudInitPage from './CloudInitPage'
 import HostWarnings from './HostWarnings'
 import NetworkingPage from './NetworkingPage'
 import StoragePage from './StoragePage'
@@ -90,6 +92,7 @@ const navigation: NavigationGroup[] = [
     icon: <SettingsRounded />,
     children: [
       { label: 'Storage', path: '/configuration/storage', icon: <StorageRounded /> },
+      { label: 'Cloud Init', path: '/configuration/cloud-init', icon: <CloudSyncRounded /> },
       { label: 'Networking', path: '/configuration/networking', icon: <LanRounded /> },
       { label: 'Preferences', path: '/configuration/preferences', icon: <TuneRounded /> },
     ],
@@ -420,6 +423,7 @@ export default function App({ mode, onToggleMode, refreshSpeed, onRefreshSpeedCh
             />
             <Route path="/compute/containers" element={<PlaceholderPage title="Containers" description="Manage Docker, Podman, and system containers." />} />
             <Route path="/configuration/storage" element={<StoragePage />} />
+            <Route path="/configuration/cloud-init" element={<CloudInitPage />} />
             <Route path="/configuration/networking" element={<NetworkingPage refreshInterval={refreshIntervals[refreshSpeed]} />} />
             <Route path="/configuration/preferences" element={<PlaceholderPage title="Preferences" description="Tune the App Runner experience." />} />
             <Route path="*" element={<Navigate to="/" replace />} />

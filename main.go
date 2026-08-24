@@ -35,6 +35,10 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
+	templates, err := newCloudInitTemplateManager(newJSONCloudInitTemplateStore(settings.DiskDir))
+	if err != nil {
+		fatal(err)
+	}
 	networkProvider := newLinuxNetworkProvider()
 	manager.bridgeCapability = networkProvider.BridgeCapability
 	nat, err := newNATManager(settings.DiskDir)
@@ -83,8 +87,10 @@ func main() {
 		}
 	}
 	server := &http.Server{
-		Addr:    settings.Listen,
-		Handler: newHTTPHandler(productionFrontend(), appRuntime{manager: manager, networking: networking, storage: newStorageService(settings), capabilities: capabilities}),
+		Addr: settings.Listen,
+		Handler: newHTTPHandler(productionFrontend(), appRuntime{
+			manager: manager, networking: networking, storage: newStorageService(settings), templates: templates, capabilities: capabilities,
+		}),
 	}
 
 	slog.Info("App Runner listening", "address", settings.Listen, "iso_dir", settings.ISODir, "disk_dir", settings.DiskDir)

@@ -15,6 +15,7 @@ type appRuntime struct {
 	manager      *vmManager
 	networking   *networkManager
 	storage      *storageService
+	templates    *cloudInitTemplateManager
 	capabilities func() hostCapabilities
 }
 
@@ -26,6 +27,7 @@ func newHTTPHandler(frontend fs.FS, runtimes ...appRuntime) http.Handler {
 	mux := http.NewServeMux()
 	service := newAppRunnerService(runtime.manager, runtime.capabilities, runtime.networking)
 	service.storage = runtime.storage
+	service.templates = runtime.templates
 	rpcServer := apprunnerv1.NewAppRunnerServiceServer(service)
 	mux.Handle(rpcServer.PathPrefix(), rpcServer)
 	if runtime.storage != nil {
