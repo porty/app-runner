@@ -254,7 +254,7 @@ export default function CreateVirtualMachinePage() {
                     <MenuItem value="">Custom / blank</MenuItem>
                     {cloudInitTemplates.map((template) => <MenuItem key={template.name} value={template.name}>{template.name}</MenuItem>)}
                   </TextField>
-                  <TextField label="user-data" multiline minRows={12} value={request.cloud_init_user_data} onChange={(event) => setRequest({ ...request, cloud_init_user_data: event.target.value })} placeholder={'#cloud-config\nusers:\n  - name: app'} helperText="Written verbatim. Maximum size: 1 MiB." slotProps={{ htmlInput: { maxLength: 1048576, spellCheck: false } }} />
+                  <TextField label="user-data" multiline minRows={12} value={request.cloud_init_user_data} onChange={(event) => setRequest({ ...request, cloud_init_user_data: event.target.value })} placeholder={'#cloud-config\nusers:\n  - name: app'} helperText="Written verbatim. Maximum size: 1 MiB." sx={{ '& .MuiInputBase-input': { fontFamily: 'monospace' } }} slotProps={{ htmlInput: { maxLength: 1048576, spellCheck: false } }} />
                   <FormControlLabel control={<Switch checked={saveCloudInitTemplate} onChange={(event) => setSaveCloudInitTemplate(event.target.checked)} />} label="Save this user-data as a new template" />
                   {saveCloudInitTemplate && (
                     <TextField label="New template name" value={newCloudInitTemplateName} onChange={(event) => setNewCloudInitTemplateName(event.target.value)} error={templateNameExists || newCloudInitTemplateName.length > 80} helperText={templateNameExists ? 'A template with this name already exists.' : 'The template remains independent of the new VM.'} slotProps={{ htmlInput: { maxLength: 80 } }} />
