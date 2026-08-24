@@ -42,7 +42,7 @@ Launch and manage QEMU/KVM virtual machines from the web interface.
 - snapshots affected link state, bridge membership, addresses, and routes before a mutation
 - allows one pending network mutation at a time and automatically restores its snapshot unless confirmed from the frontend within 15 seconds
 - persists pending rollback data and restores it immediately if App Runner restarts before confirmation
-- accepts network mutation RPCs only from loopback clients and requires root or CAP_NET_ADMIN
+- requires root or CAP_NET_ADMIN for network mutation RPCs
 - does not invoke `sudo` and does not write persistent NetworkManager, systemd-networkd, Netplan, or distribution network configuration
 - optionally configures an embedded, in-process DHCPv4 server for each bridge using a persisted IPv4 CIDR
 - assigns the first usable address to a DHCP-enabled bridge and begins dynamic leases at host offset 50, leaving lower addresses available for static assignments

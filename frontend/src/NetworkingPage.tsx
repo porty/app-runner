@@ -90,7 +90,6 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
     if (showLoading) setLoading(true)
     try {
       setStatus(await getNetworkingStatus())
-      setError('')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to inspect host networking')
     } finally {
@@ -116,6 +115,22 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
       await refresh()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'The network change failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const restoreMissingBridge = async (bridgeName: string) => {
+    setBusy(true)
+    setError('')
+    try {
+      // A restored bridge has no members or addresses, so it cannot interrupt
+      // the current connection. Confirm it immediately instead of requiring
+      // the generic rollback flow.
+      const pending = await applyNetworkChange({ type: 'NETWORK_CHANGE_TYPE_CREATE_BRIDGE', bridge_name: bridgeName })
+      setStatus(await confirmNetworkChange(pending.id))
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : `Unable to restore bridge ${bridgeName}`)
     } finally {
       setBusy(false)
     }
@@ -231,6 +246,7 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
                   configurationDisabled={mutationsDisabled}
                   canAttach={attachableInterfaces.length > 0}
                   onApply={apply}
+                  onRestore={() => void restoreMissingBridge(bridge.name)}
                   onAttach={() => {
                     setAttachBridge(bridge.name)
                     setAttachInterface(attachableInterfaces[0]?.name ?? '')
@@ -431,12 +447,13 @@ function IdentitySummary({ status }: { status: NetworkingStatus }) {
   )
 }
 
-function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply, onAttach, onConfigureDHCP }: {
+function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply, onRestore, onAttach, onConfigureDHCP }: {
   bridge: NetworkBridge
   disabled: boolean
   configurationDisabled: boolean
   canAttach: boolean
   onApply: (change: NetworkChangeRequest) => Promise<void>
+  onRestore: () => void
   onAttach: () => void
   onConfigureDHCP: () => void
 }) {
@@ -445,6 +462,7 @@ function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply
   const dhcp = bridge.dhcp
   const issues = (bridge.diagnostics ?? []).filter((diagnostic) =>
     diagnostic.status === 'DIAGNOSTIC_STATUS_FAIL' || diagnostic.status === 'DIAGNOSTIC_STATUS_WARNING')
+  const bridgeMissing = (bridge.diagnostics ?? []).some((diagnostic) => diagnostic.key === 'bridge_missing')
   const deleteBridge = () => {
     if (!window.confirm(`Delete bridge ${bridge.name}? The change will still require confirmation.`)) return
     void onApply({ type: 'NETWORK_CHANGE_TYPE_DELETE_BRIDGE', bridge_name: bridge.name })
@@ -535,6 +553,15 @@ function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply
           </Stack>
         </TableCell>
         <TableCell align="right" sx={{ verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+          {bridgeMissing && (
+            <Tooltip title={`Create the missing ${bridge.name} bridge on this host`}>
+              <span>
+                <Button variant="contained" size="small" disabled={disabled} onClick={onRestore} sx={{ mr: 1 }}>
+                  Restore bridge
+                </Button>
+              </span>
+            </Tooltip>
+          )}
           <ButtonGroup size="small" variant="outlined" aria-label={`Actions for bridge ${bridge.name}`}>
             <Button
               aria-label={`Bring ${bridge.name} ${bridge.is_up ? 'down' : 'up'}`}
