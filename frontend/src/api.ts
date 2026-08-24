@@ -223,9 +223,55 @@ export interface NetworkChangeRequest {
   migrate_addresses?: boolean
 }
 
+export type StorageRootName = 'iso' | 'disk'
+
+export interface StorageNode {
+  name: string
+  path: string
+  kind: 'file' | 'directory'
+  size_bytes?: number
+  modified_at?: string
+  children?: StorageNode[]
+}
+
+export interface StorageRoot {
+  name: StorageRootName
+  entries: StorageNode[]
+}
+
+export interface StorageURLDownloadRequest {
+  root: StorageRootName
+  directory: string
+  url: string
+  filename?: string
+}
+
+interface StorageProtoNode {
+  name: string
+  path: string
+  kind: 'STORAGE_ENTRY_KIND_FILE' | 'STORAGE_ENTRY_KIND_DIRECTORY' | 'STORAGE_ENTRY_KIND_UNSPECIFIED'
+  size_bytes?: string
+  modified_at?: string
+  children?: StorageProtoNode[]
+}
+
 interface TwirpErrorBody {
   code?: string
   msg?: string
+}
+
+async function storageResponse<Result>(response: Response): Promise<Result> {
+  if (!response.ok) {
+    let message = response.statusText || 'The storage request failed'
+    try {
+      const body = (await response.json()) as { error?: string }
+      message = body.error ?? message
+    } catch {
+      // Preserve the HTTP status as a useful fallback for non-JSON errors.
+    }
+    throw new Error(message)
+  }
+  return (await response.json()) as Result
 }
 
 async function callTwirp<Response>(
@@ -285,6 +331,11 @@ export async function getVM(id: string): Promise<VirtualMachine> {
 
 export async function createVM(request: CreateVMRequest): Promise<VirtualMachine> {
   const response = await callTwirp<{ virtual_machine: VirtualMachine }>('CreateVM', request)
+  return response.virtual_machine
+}
+
+export async function cloneVM(id: string, name: string): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('CloneVM', { id, name })
   return response.virtual_machine
 }
 
@@ -365,4 +416,44 @@ export async function revertNetworkChange(id: string): Promise<NetworkingStatus>
 export async function configureBridgeDHCP(configuration: BridgeDHCPConfiguration): Promise<NetworkingStatus> {
   const response = await callTwirp<{ status: NetworkingStatus }>('ConfigureBridgeDHCP', configuration)
   return response.status
+}
+
+export async function listStorage(): Promise<StorageRoot[]> {
+  const response = await callTwirp<{ roots?: Array<{ name: StorageRootName; entries?: StorageProtoNode[] }> }>('ListStorage', {})
+  return (response.roots ?? []).map((root) => ({
+    name: root.name,
+    entries: (root.entries ?? []).map(storageNodeFromProto),
+  }))
+}
+
+export async function uploadStorageFiles(
+  root: StorageRootName,
+  directory: string,
+  files: File[],
+): Promise<StorageNode[]> {
+  const body = new FormData()
+  body.append('root', root)
+  body.append('directory', directory)
+  files.forEach((file) => body.append('files', file))
+  const response = await storageResponse<{ uploaded?: StorageNode[] }>(await fetch('/api/storage/upload', {
+    method: 'POST',
+    body,
+  }))
+  return response.uploaded ?? []
+}
+
+export async function downloadStorageFile(request: StorageURLDownloadRequest): Promise<StorageNode> {
+  const response = await callTwirp<{ file: StorageProtoNode }>('DownloadStorageFile', request)
+  return storageNodeFromProto(response.file)
+}
+
+function storageNodeFromProto(node: StorageProtoNode): StorageNode {
+  return {
+    name: node.name,
+    path: node.path,
+    kind: node.kind === 'STORAGE_ENTRY_KIND_DIRECTORY' ? 'directory' : 'file',
+    size_bytes: Number(node.size_bytes ?? 0),
+    modified_at: node.modified_at,
+    children: node.children?.map(storageNodeFromProto),
+  }
 }

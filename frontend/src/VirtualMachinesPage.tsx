@@ -4,13 +4,13 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography,
 } from '@mui/material'
 import {
-  AddRounded, DeleteOutlineRounded, DesktopWindowsRounded, PlayArrowRounded,
+  AddRounded, ContentCopyRounded, DeleteOutlineRounded, DesktopWindowsRounded, PlayArrowRounded,
   PowerSettingsNewRounded, SettingsRounded, StopRounded,
 } from '@mui/icons-material'
 import { Link } from 'react-router-dom'
 
 import {
-  createVM, deleteVM, getNetworkingStatus, listISOs, listVMs, startVM, stopVM,
+  cloneVM, createVM, deleteVM, getNetworkingStatus, listISOs, listVMs, startVM, stopVM,
   type CreateVMRequest, type ISOImage, type NetworkingStatus, type VirtualMachine, type VMStatus,
 } from './api'
 import { canAccessVMConsole } from './vmConsoleAccess'
@@ -37,8 +37,14 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
   const [error, setError] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [createRequest, setCreateRequest] = useState<CreateVMRequest>(defaultCreateRequest)
+  const [cloneSource, setCloneSource] = useState<VirtualMachine | null>(null)
+  const [cloneName, setCloneName] = useState('')
   const createName = createRequest.name.trim()
   const createNameValid = dnsLabelPattern.test(createName)
+  const trimmedCloneName = cloneName.trim()
+  const cloneNameExists = virtualMachines.some((vm) => vm.name.toLowerCase() === trimmedCloneName.toLowerCase())
+  const cloneNameValid = dnsLabelPattern.test(trimmedCloneName) && !cloneNameExists
+  const cloneBusy = cloneSource !== null && busyID === cloneSource.id
 
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true)
@@ -102,6 +108,28 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
     await runOperation(vm.id, () => deleteVM(vm.id))
   }
 
+  const openClone = (vm: VirtualMachine) => {
+    setCloneSource(vm)
+    setCloneName(suggestCloneName(vm.name, virtualMachines))
+    setError('')
+  }
+
+  const submitClone = async () => {
+    if (!cloneSource) return
+    setBusyID(cloneSource.id)
+    setError('')
+    try {
+      await cloneVM(cloneSource.id, trimmedCloneName)
+      setCloneSource(null)
+      setCloneName('')
+      await refresh()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to clone the virtual machine')
+    } finally {
+      setBusyID('')
+    }
+  }
+
   return (
     <Box>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', mb: 3.5 }}>
@@ -145,6 +173,7 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
                     <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
                       <Button component={Link} to={`/compute/virtual-machines/${vm.id}/settings`} size="small" startIcon={<SettingsRounded />} disabled={busy}>Settings</Button>
                       {canAccessVMConsole(vm.status) && <Button component={Link} to={`/compute/virtual-machines/${vm.id}/console`} size="small" startIcon={<DesktopWindowsRounded />}>Console</Button>}
+                      {vm.status === 'VM_STATUS_STOPPED' && <Button size="small" startIcon={<ContentCopyRounded />} disabled={busy} onClick={() => openClone(vm)}>Clone</Button>}
                       {!running && !stopping && <Button size="small" startIcon={<PlayArrowRounded />} disabled={busy} onClick={() => void runOperation(vm.id, () => startVM(vm.id))}>Start</Button>}
                       {running && <Button size="small" startIcon={<PowerSettingsNewRounded />} disabled={busy} onClick={() => void runOperation(vm.id, () => stopVM(vm.id))}>Shut down</Button>}
                       {(running || stopping) && <Button size="small" color="error" startIcon={<StopRounded />} disabled={busy} onClick={() => void runOperation(vm.id, () => stopVM(vm.id, true))}>Force stop</Button>}
@@ -181,8 +210,47 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
         </DialogContent>
         <DialogActions><Button onClick={() => setCreateOpen(false)}>Cancel</Button><Button variant="contained" onClick={() => void submitCreate()} disabled={busyID === 'create' || !createNameValid || !createRequest.iso_name || (createRequest.network_mode === 'NETWORK_MODE_BRIDGE' && !createRequest.bridge_name)}>{busyID === 'create' ? 'Creating…' : 'Create'}</Button></DialogActions>
       </Dialog>
+
+      <Dialog open={Boolean(cloneSource)} onClose={cloneBusy ? undefined : () => setCloneSource(null)} fullWidth maxWidth="sm">
+        <DialogTitle>Clone {cloneSource?.name}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2.25} sx={{ mt: 1 }}>
+            <Alert severity="info">
+              All virtual disks will be fully copied. The clone receives a new MAC address and starts with IPMI disabled. Guest hostnames, machine IDs, SSH keys, and static IP settings remain unchanged inside the copied disks.
+            </Alert>
+            <TextField
+              label="New virtual machine name"
+              autoFocus
+              value={cloneName}
+              onChange={(event) => setCloneName(event.target.value)}
+              error={trimmedCloneName.length > 0 && !cloneNameValid}
+              helperText={
+                cloneNameExists
+                  ? 'A virtual machine with this name already exists.'
+                  : '1–63 letters, numbers, or interior hyphens; this name is also used by Auto DNS'
+              }
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCloneSource(null)} disabled={cloneBusy}>Cancel</Button>
+          <Button variant="contained" onClick={() => void submitClone()} disabled={cloneBusy || !cloneNameValid}>
+            {cloneBusy ? 'Cloning…' : 'Clone'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
+}
+
+function suggestCloneName(sourceName: string, virtualMachines: VirtualMachine[]): string {
+  const names = new Set(virtualMachines.map((vm) => vm.name.toLowerCase()))
+  for (let suffix = 1; suffix < 1000; suffix += 1) {
+    const ending = suffix === 1 ? '-copy' : `-copy-${suffix}`
+    const candidate = `${sourceName.slice(0, 63 - ending.length)}${ending}`
+    if (!names.has(candidate.toLowerCase())) return candidate
+  }
+  return ''
 }
 
 function formatMemory(memoryMiB: number): string {

@@ -45,6 +45,7 @@ import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import { echo, ping, type PingResponse } from './api'
 import HostWarnings from './HostWarnings'
 import NetworkingPage from './NetworkingPage'
+import StoragePage from './StoragePage'
 import VirtualMachineSettingsPage from './VirtualMachineSettingsPage'
 import VirtualMachinesPage from './VirtualMachinesPage'
 import { refreshIntervals, type RefreshSpeed } from './refreshSettings'
@@ -418,7 +419,7 @@ export default function App({ mode, onToggleMode, refreshSpeed, onRefreshSpeedCh
               }
             />
             <Route path="/compute/containers" element={<PlaceholderPage title="Containers" description="Manage Docker, Podman, and system containers." />} />
-            <Route path="/configuration/storage" element={<PlaceholderPage title="Storage" description="Configure image and workload storage." />} />
+            <Route path="/configuration/storage" element={<StoragePage />} />
             <Route path="/configuration/networking" element={<NetworkingPage refreshInterval={refreshIntervals[refreshSpeed]} />} />
             <Route path="/configuration/preferences" element={<PlaceholderPage title="Preferences" description="Tune the App Runner experience." />} />
             <Route path="*" element={<Navigate to="/" replace />} />

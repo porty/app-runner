@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"os"
@@ -43,6 +44,7 @@ var (
 	errHostUnavailable   = errors.New("required host virtualisation support is unavailable")
 	errDeleteRunningVM   = errors.New("stop the virtual machine before deleting it")
 	errDeviceRunningVM   = errors.New("stop the virtual machine before changing its device configuration")
+	errCloneRunningVM    = errors.New("stop the virtual machine before cloning it")
 )
 
 type fieldError struct {
@@ -298,6 +300,102 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 		return virtualMachine{}, err
 	}
 	return vm, nil
+}
+
+func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine, error) {
+	name = strings.TrimSpace(name)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.reconcileLocked(); err != nil {
+		return virtualMachine{}, err
+	}
+	index := m.indexByID(id)
+	if index == -1 {
+		return virtualMachine{}, errVMNotFound
+	}
+	source := m.vms[index]
+	if source.Status != vmStatusStopped {
+		return virtualMachine{}, errCloneRunningVM
+	}
+	if err := validateVMIdentityAndResources(name, source.Description, source.CPUs, source.MemoryMiB); err != nil {
+		return virtualMachine{}, err
+	}
+	for _, existing := range m.vms {
+		if strings.EqualFold(existing.Name, name) {
+			return virtualMachine{}, errVMNameExists
+		}
+	}
+
+	cloneID, err := m.newID()
+	if err != nil {
+		return virtualMachine{}, fmt.Errorf("generate cloned virtual machine ID: %w", err)
+	}
+	if m.indexByID(cloneID) != -1 {
+		return virtualMachine{}, errors.New("generated cloned virtual machine ID already exists")
+	}
+	cloneMAC := vmMACAddress(cloneID)
+	for _, existing := range m.vms {
+		if strings.EqualFold(existing.MACAddress, cloneMAC) {
+			return virtualMachine{}, errors.New("generated cloned virtual machine MAC address already exists")
+		}
+	}
+
+	clone := virtualMachine{
+		ID:          cloneID,
+		Name:        name,
+		Description: source.Description,
+		CPUs:        source.CPUs,
+		MemoryMiB:   source.MemoryMiB,
+		DiskGiB:     source.DiskGiB,
+		ISOName:     source.ISOName,
+		NetworkMode: source.NetworkMode,
+		BridgeName:  source.BridgeName,
+		MACAddress:  cloneMAC,
+		Status:      vmStatusStopped,
+		CreatedAt:   m.now().UTC(),
+		Disks:       make([]vmDisk, 0, len(source.Disks)),
+		CDROMs:      make([]vmCDROM, 0, len(source.CDROMs)),
+	}
+	for _, sourceDisk := range source.Disks {
+		clonedDisk := sourceDisk
+		if !sourceDisk.System {
+			clonedDisk.ID, err = randomID()
+			if err != nil {
+				return virtualMachine{}, fmt.Errorf("generate cloned disk ID: %w", err)
+			}
+		}
+		clone.Disks = append(clone.Disks, clonedDisk)
+	}
+	for _, sourceCDROM := range source.CDROMs {
+		cdromID, err := randomID()
+		if err != nil {
+			return virtualMachine{}, fmt.Errorf("generate cloned CD-ROM ID: %w", err)
+		}
+		clone.CDROMs = append(clone.CDROMs, vmCDROM{ID: cdromID, ISOName: sourceCDROM.ISOName})
+	}
+
+	createdPaths := make([]string, 0, len(clone.Disks))
+	for diskIndex, sourceDisk := range source.Disks {
+		destinationDisk := clone.Disks[diskIndex]
+		destinationPath := m.vmDiskPath(clone.ID, destinationDisk)
+		if err := copyVMFile(ctx, m.vmDiskPath(source.ID, sourceDisk), destinationPath); err != nil {
+			for _, path := range createdPaths {
+				_ = removeIfExists(path)
+			}
+			return virtualMachine{}, fmt.Errorf("copy disk %s: %w", sourceDisk.ID, err)
+		}
+		createdPaths = append(createdPaths, destinationPath)
+	}
+
+	m.vms = append(m.vms, clone)
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms = m.vms[:len(m.vms)-1]
+		for _, path := range createdPaths {
+			_ = removeIfExists(path)
+		}
+		return virtualMachine{}, err
+	}
+	return clone, nil
 }
 
 func (m *vmManager) Start(id string) (virtualMachine, error) {
@@ -977,4 +1075,47 @@ func removeIfExists(path string) error {
 		return nil
 	}
 	return err
+}
+
+func copyVMFile(ctx context.Context, sourcePath, destinationPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	info, err := source.Stat()
+	if err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(destinationPath), ".app-runner-clone-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	// Keeping both operands as *os.File lets Go use copy_file_range where available,
+	// preserving sparse QCOW2 regions without creating a QCOW2 backing-file link.
+	if _, err := io.Copy(temporary, source); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Chmod(info.Mode().Perm()); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Link(temporaryPath, destinationPath)
 }

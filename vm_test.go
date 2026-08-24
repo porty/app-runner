@@ -155,6 +155,118 @@ func TestVMManagerLifecycle(t *testing.T) {
 	}
 }
 
+func TestVMManagerClonesStoppedVMWithIndependentIdentityAndDisks(t *testing.T) {
+	manager, _, settings := newTestVMManager(t)
+	if err := os.WriteFile(filepath.Join(settings.ISODir, "tools.iso"), []byte("tools"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source, err := manager.Create(context.Background(), createVMOptions{
+		Name: "source-vm", CPUs: 4, MemoryMiB: 4096, DiskGiB: 20,
+		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err = manager.Update(source.ID, source.Name, "Build template", source.CPUs, source.MemoryMiB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err = manager.AddDisk(context.Background(), source.ID, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err = manager.AddCDROM(source.ID, "tools.iso")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manager.vmDiskPath(source.ID, source.Disks[0]), []byte("system source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manager.vmDiskPath(source.ID, source.Disks[1]), []byte("data source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager.mu.Lock()
+	manager.vms[manager.indexByID(source.ID)].IPMI = vmIPMIConfig{Enabled: true, Address: "192.0.2.10", Username: "admin", Password: "secret"}
+	manager.mu.Unlock()
+	manager.newID = func() (string, error) { return "clone-id", nil }
+	manager.now = func() time.Time { return time.Date(2026, 8, 20, 2, 3, 4, 0, time.UTC) }
+
+	clone, err := manager.Clone(context.Background(), source.ID, "source-vm-copy")
+	if err != nil {
+		t.Fatalf("Clone returned an error: %v", err)
+	}
+	if clone.ID != "clone-id" || clone.Name != "source-vm-copy" || clone.Status != vmStatusStopped {
+		t.Fatalf("unexpected cloned VM identity: %#v", clone)
+	}
+	if clone.MACAddress == source.MACAddress || clone.MACAddress != vmMACAddress(clone.ID) {
+		t.Fatalf("clone did not receive a new MAC address: source=%s clone=%s", source.MACAddress, clone.MACAddress)
+	}
+	if clone.CreatedAt.Equal(source.CreatedAt) || clone.Description != source.Description || clone.CPUs != source.CPUs || clone.MemoryMiB != source.MemoryMiB {
+		t.Fatalf("clone definition was not copied with a new timestamp: %#v", clone)
+	}
+	if clone.NetworkMode != source.NetworkMode || clone.BridgeName != source.BridgeName || clone.IPMI.Enabled {
+		t.Fatalf("clone network identity was not reset correctly: %#v", clone)
+	}
+	if len(clone.Disks) != len(source.Disks) || clone.Disks[0].ID != "system" || clone.Disks[1].ID == source.Disks[1].ID {
+		t.Fatalf("clone disk definitions are incorrect: source=%#v clone=%#v", source.Disks, clone.Disks)
+	}
+	if len(clone.CDROMs) != len(source.CDROMs) || clone.CDROMs[0].ID == source.CDROMs[0].ID || clone.CDROMs[1].ISOName != "tools.iso" {
+		t.Fatalf("clone CD-ROM definitions are incorrect: source=%#v clone=%#v", source.CDROMs, clone.CDROMs)
+	}
+	for index, expected := range []string{"system source", "data source"} {
+		contents, err := os.ReadFile(manager.vmDiskPath(clone.ID, clone.Disks[index]))
+		if err != nil || string(contents) != expected {
+			t.Fatalf("cloned disk %d = %q, %v; want %q", index, contents, err, expected)
+		}
+	}
+	if err := os.WriteFile(manager.vmDiskPath(clone.ID, clone.Disks[0]), []byte("changed clone"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sourceContents, err := os.ReadFile(manager.vmDiskPath(source.ID, source.Disks[0]))
+	if err != nil || string(sourceContents) != "system source" {
+		t.Fatalf("clone disk is not independent of its source: %q, %v", sourceContents, err)
+	}
+	if _, err := manager.Clone(context.Background(), source.ID, "SOURCE-VM-COPY"); !errors.Is(err, errVMNameExists) {
+		t.Fatalf("duplicate clone name returned %v", err)
+	}
+	if _, err := manager.Start(source.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Clone(context.Background(), source.ID, "running-copy"); !errors.Is(err, errCloneRunningVM) {
+		t.Fatalf("cloning a running VM returned %v", err)
+	}
+}
+
+func TestVMManagerRemovesPartialCloneWhenDiskCopyFails(t *testing.T) {
+	manager, _, settings := newTestVMManager(t)
+	source, err := manager.Create(context.Background(), createVMOptions{
+		Name: "source-vm", CPUs: 2, MemoryMiB: 2048, DiskGiB: 20,
+		ISOName: "installer.iso", NetworkMode: networkModeNAT,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err = manager.AddDisk(context.Background(), source.ID, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(manager.vmDiskPath(source.ID, source.Disks[1])); err != nil {
+		t.Fatal(err)
+	}
+	manager.newID = func() (string, error) { return "clone-id", nil }
+
+	if _, err := manager.Clone(context.Background(), source.ID, "source-copy"); err == nil {
+		t.Fatal("clone unexpectedly succeeded with a missing source disk")
+	}
+	if _, err := os.Stat(filepath.Join(settings.DiskDir, "clone-id.qcow2")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial system disk was not cleaned up: %v", err)
+	}
+	vms, err := manager.List()
+	if err != nil || len(vms) != 1 {
+		t.Fatalf("partial clone metadata was retained: %#v, %v", vms, err)
+	}
+}
+
 func TestVMManagerUpdatesSettingsAndDevices(t *testing.T) {
 	manager, hypervisor, settings := newTestVMManager(t)
 	if err := os.WriteFile(filepath.Join(settings.ISODir, "tools.iso"), []byte("iso"), 0o600); err != nil {

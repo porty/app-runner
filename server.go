@@ -14,6 +14,7 @@ import (
 type appRuntime struct {
 	manager      *vmManager
 	networking   *networkManager
+	storage      *storageService
 	capabilities func() hostCapabilities
 }
 
@@ -23,8 +24,15 @@ func newHTTPHandler(frontend fs.FS, runtimes ...appRuntime) http.Handler {
 		runtime = runtimes[0]
 	}
 	mux := http.NewServeMux()
-	rpcServer := apprunnerv1.NewAppRunnerServiceServer(newAppRunnerService(runtime.manager, runtime.capabilities, runtime.networking))
+	service := newAppRunnerService(runtime.manager, runtime.capabilities, runtime.networking)
+	service.storage = runtime.storage
+	rpcServer := apprunnerv1.NewAppRunnerServiceServer(service)
 	mux.Handle(rpcServer.PathPrefix(), rpcServer)
+	if runtime.storage != nil {
+		// Large browser uploads stay multipart HTTP; storage control operations use Twirp.
+		mux.Handle("/api/storage", runtime.storage)
+		mux.Handle("/api/storage/", runtime.storage)
+	}
 	if runtime.manager != nil {
 		mux.Handle("/console/", consoleProxyHandler(runtime.manager))
 	}
