@@ -34,6 +34,9 @@ service AppRunnerService {
   rpc ConfirmNetworkChange(ConfirmNetworkChangeRequest) returns (ConfirmNetworkChangeResponse);
   rpc RevertNetworkChange(RevertNetworkChangeRequest) returns (RevertNetworkChangeResponse);
   rpc ConfigureBridgeDHCP(ConfigureBridgeDHCPRequest) returns (ConfigureBridgeDHCPResponse);
+  rpc ClearBridgeDHCPLeases(ClearBridgeDHCPLeasesRequest) returns (ClearBridgeDHCPLeasesResponse);
+  rpc DeleteBridgeDHCPLease(DeleteBridgeDHCPLeaseRequest) returns (DeleteBridgeDHCPLeaseResponse);
+  rpc SetBridgeDHCPStaticLease(SetBridgeDHCPStaticLeaseRequest) returns (SetBridgeDHCPStaticLeaseResponse);
   rpc ListCloudInitTemplates(ListCloudInitTemplatesRequest) returns (ListCloudInitTemplatesResponse);
   rpc CreateCloudInitTemplate(CreateCloudInitTemplateRequest) returns (CreateCloudInitTemplateResponse);
   rpc UpdateCloudInitTemplate(UpdateCloudInitTemplateRequest) returns (UpdateCloudInitTemplateResponse);
@@ -447,6 +450,8 @@ message DHCPLease {
   string hardware_address = 1;
   string address = 2;
   string expires_at = 3;
+  string vm_name = 4;
+  bool is_static = 5;
 }
 
 message PendingNetworkChange {
@@ -510,6 +515,33 @@ message ConfigureBridgeDHCPRequest {
 }
 
 message ConfigureBridgeDHCPResponse {
+  NetworkingStatus status = 1;
+}
+
+message ClearBridgeDHCPLeasesRequest {
+  string bridge_name = 1;
+}
+
+message ClearBridgeDHCPLeasesResponse {
+  NetworkingStatus status = 1;
+}
+
+message DeleteBridgeDHCPLeaseRequest {
+  string bridge_name = 1;
+  string hardware_address = 2;
+}
+
+message DeleteBridgeDHCPLeaseResponse {
+  NetworkingStatus status = 1;
+}
+
+message SetBridgeDHCPStaticLeaseRequest {
+  string bridge_name = 1;
+  string hardware_address = 2;
+  string address = 3;
+}
+
+message SetBridgeDHCPStaticLeaseResponse {
   NetworkingStatus status = 1;
 }
 

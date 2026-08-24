@@ -244,6 +244,32 @@ func TestDHCPManagerConsolidatesDuplicateHardwareAddressesOnLoad(t *testing.T) {
 	}
 }
 
+func TestDHCPManagerMovesLeaseToStaticAddress(t *testing.T) {
+	manager, err := newDHCPManager(t.TempDir(), &fakeDHCPBridgeProvider{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR, false, bridgeDNSConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	manager.state.Leases["br0"] = map[string]dhcpLease{
+		"id:guest": {ClientKey: "id:guest", HardwareAddress: "52:54:00:44:81:f7", Address: "192.168.100.50", ExpiresAt: time.Now().Add(time.Hour)},
+	}
+	if err := manager.SetStaticLease("br0", "52:54:00:44:81:f7", "192.168.100.10"); err != nil {
+		t.Fatal(err)
+	}
+	status := manager.Status("br0")
+	if len(status.Leases) != 1 || !status.Leases[0].Static || status.Leases[0].Address != "192.168.100.10" {
+		t.Fatalf("static reservation was not retained: %#v", status.Leases)
+	}
+	if err := manager.ClearDynamicLeases("br0"); err != nil {
+		t.Fatal(err)
+	}
+	if len(manager.state.Leases["br0"]) != 1 {
+		t.Fatalf("clearing dynamic leases removed the static reservation: %#v", manager.state.Leases)
+	}
+}
+
 func TestDHCPManagerStartsOnceAndStopsAfterLastVM(t *testing.T) {
 	provider := &fakeDHCPBridgeProvider{}
 	manager, err := newDHCPManager(t.TempDir(), provider, nil, nil)

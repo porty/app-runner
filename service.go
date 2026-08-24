@@ -420,6 +420,50 @@ func (s *appRunnerService) ConfigureBridgeDHCP(ctx context.Context, request *app
 	return &apprunnerv1.ConfigureBridgeDHCPResponse{Status: networkingStatusToProto(status)}, nil
 }
 
+func (s *appRunnerService) ClearBridgeDHCPLeases(ctx context.Context, request *apprunnerv1.ClearBridgeDHCPLeasesRequest) (*apprunnerv1.ClearBridgeDHCPLeasesResponse, error) {
+	status, err := s.updateBridgeDHCPLeases(request.GetBridgeName(), func() error {
+		return s.networking.ClearBridgeDHCPLeases(request.GetBridgeName())
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &apprunnerv1.ClearBridgeDHCPLeasesResponse{Status: networkingStatusToProto(status)}, nil
+}
+
+func (s *appRunnerService) DeleteBridgeDHCPLease(ctx context.Context, request *apprunnerv1.DeleteBridgeDHCPLeaseRequest) (*apprunnerv1.DeleteBridgeDHCPLeaseResponse, error) {
+	status, err := s.updateBridgeDHCPLeases(request.GetBridgeName(), func() error {
+		return s.networking.DeleteBridgeDHCPLease(request.GetBridgeName(), request.GetHardwareAddress())
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &apprunnerv1.DeleteBridgeDHCPLeaseResponse{Status: networkingStatusToProto(status)}, nil
+}
+
+func (s *appRunnerService) SetBridgeDHCPStaticLease(ctx context.Context, request *apprunnerv1.SetBridgeDHCPStaticLeaseRequest) (*apprunnerv1.SetBridgeDHCPStaticLeaseResponse, error) {
+	status, err := s.updateBridgeDHCPLeases(request.GetBridgeName(), func() error {
+		return s.networking.SetBridgeDHCPStaticLease(request.GetBridgeName(), request.GetHardwareAddress(), request.GetAddress())
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &apprunnerv1.SetBridgeDHCPStaticLeaseResponse{Status: networkingStatusToProto(status)}, nil
+}
+
+func (s *appRunnerService) updateBridgeDHCPLeases(bridge string, update func() error) (networkingStatus, error) {
+	if s.networking == nil {
+		return networkingStatus{}, twirp.InternalError("network manager is not configured")
+	}
+	if err := update(); err != nil {
+		return networkingStatus{}, twirp.NewError(twirp.FailedPrecondition, err.Error())
+	}
+	status, err := s.networking.Status()
+	if err != nil {
+		return networkingStatus{}, rpcError(err)
+	}
+	return status, nil
+}
+
 func (s *appRunnerService) requireManager() error {
 	if s.manager == nil {
 		return twirp.InternalError("virtual machine manager is not configured")
@@ -547,6 +591,7 @@ func networkingStatusToProto(status networkingStatus) *apprunnerv1.NetworkingSta
 		for _, lease := range bridge.DHCP.Leases {
 			mapped.Dhcp.Leases = append(mapped.Dhcp.Leases, &apprunnerv1.DHCPLease{
 				HardwareAddress: lease.HardwareAddress, Address: lease.Address, ExpiresAt: lease.ExpiresAt.UTC().Format(time.RFC3339),
+				VmName: lease.VMName, IsStatic: lease.Static,
 			})
 		}
 		response.Bridges = append(response.Bridges, mapped)

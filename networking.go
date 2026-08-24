@@ -222,6 +222,14 @@ func (m *networkManager) Status() (networkingStatus, error) {
 		})
 		if m.dhcp != nil {
 			status.Bridges[index].DHCP = m.dhcp.Status(status.Bridges[index].Name)
+			for leaseIndex := range status.Bridges[index].DHCP.Leases {
+				for _, vm := range vms {
+					if strings.EqualFold(vm.MACAddress, status.Bridges[index].DHCP.Leases[leaseIndex].HardwareAddress) {
+						status.Bridges[index].DHCP.Leases[leaseIndex].VMName = vm.Name
+						break
+					}
+				}
+			}
 		}
 	}
 	m.mu.Lock()
@@ -231,6 +239,27 @@ func (m *networkManager) Status() (networkingStatus, error) {
 	}
 	m.mu.Unlock()
 	return status, nil
+}
+
+func (m *networkManager) ClearBridgeDHCPLeases(bridge string) error {
+	if m.dhcp == nil {
+		return errors.New("DHCP manager is not configured")
+	}
+	return m.dhcp.ClearDynamicLeases(bridge)
+}
+
+func (m *networkManager) DeleteBridgeDHCPLease(bridge, hardwareAddress string) error {
+	if m.dhcp == nil {
+		return errors.New("DHCP manager is not configured")
+	}
+	return m.dhcp.DeleteLease(bridge, hardwareAddress)
+}
+
+func (m *networkManager) SetBridgeDHCPStaticLease(bridge, hardwareAddress, address string) error {
+	if m.dhcp == nil {
+		return errors.New("DHCP manager is not configured")
+	}
+	return m.dhcp.SetStaticLease(bridge, hardwareAddress, address)
 }
 
 func (m *networkManager) ConfigureBridgeSettings(bridge, description string, enabled bool, cidr string, natEnabled bool, dnsConfig bridgeDNSConfig) error {

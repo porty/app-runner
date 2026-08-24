@@ -45,6 +45,7 @@ import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 
 import { echo, ping, type PingResponse } from './api'
 import CloudInitPage from './CloudInitPage'
+import BridgeSettingsPage from './BridgeSettingsPage'
 import CreateVirtualMachinePage from './CreateVirtualMachinePage'
 import HostWarnings from './HostWarnings'
 import NetworkingPage from './NetworkingPage'
@@ -427,6 +428,7 @@ export default function App({ mode, onToggleMode, refreshSpeed, onRefreshSpeedCh
             <Route path="/configuration/storage" element={<StoragePage />} />
             <Route path="/configuration/cloud-init" element={<CloudInitPage />} />
             <Route path="/configuration/networking" element={<NetworkingPage refreshInterval={refreshIntervals[refreshSpeed]} />} />
+            <Route path="/configuration/networking/bridges/:bridgeName" element={<BridgeSettingsPage refreshInterval={refreshIntervals[refreshSpeed]} />} />
             <Route path="/configuration/preferences" element={<PlaceholderPage title="Preferences" description="Tune the App Runner experience." />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

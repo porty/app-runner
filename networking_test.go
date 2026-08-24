@@ -219,6 +219,34 @@ func TestNetworkingStatusIncludesBridgeDHCPConfiguration(t *testing.T) {
 	}
 }
 
+func TestNetworkingStatusLabelsDHCPLeasesWithVMNames(t *testing.T) {
+	vms, _, settings := newTestVMManager(t)
+	vms.vms = append(vms.vms, virtualMachine{
+		ID: "vm-id", Name: "web-01", NetworkMode: networkModeBridge, BridgeName: "br-lab", MACAddress: "52:54:00:44:81:f7",
+	})
+	dhcp, err := newDHCPManager(settings.DiskDir, &fakeDHCPBridgeProvider{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dhcp.Configure("br-lab", true, defaultBridgeDHCPCIDR, false, bridgeDNSConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	dhcp.state.Leases["br-lab"] = map[string]dhcpLease{
+		"id:guest": {ClientKey: "id:guest", HardwareAddress: "52:54:00:44:81:f7", Address: "192.168.100.50", ExpiresAt: time.Now().Add(time.Hour)},
+	}
+	manager, err := newNetworkManager(&fakeNetworkProvider{status: networkingStatus{Bridges: []networkBridgeInfo{{Name: "br-lab"}}}}, vms, settings.DiskDir, dhcp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := manager.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Bridges[0].DHCP.Leases) != 1 || status.Bridges[0].DHCP.Leases[0].VMName != "web-01" {
+		t.Fatalf("DHCP lease did not include the VM name: %#v", status.Bridges[0].DHCP.Leases)
+	}
+}
+
 func TestNetworkingRejectsAutoDNSWhenLegacyVMNameIsInvalid(t *testing.T) {
 	vms, _, settings := newTestVMManager(t)
 	vms.vms = append(vms.vms, virtualMachine{
