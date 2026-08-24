@@ -544,6 +544,11 @@ func networkingStatusToProto(status networkingStatus) *apprunnerv1.NetworkingSta
 				Id: workload.ID, Name: workload.Name, WorkloadType: workload.Type, Running: workload.Running,
 			})
 		}
+		for _, lease := range bridge.DHCP.Leases {
+			mapped.Dhcp.Leases = append(mapped.Dhcp.Leases, &apprunnerv1.DHCPLease{
+				HardwareAddress: lease.HardwareAddress, Address: lease.Address, ExpiresAt: lease.ExpiresAt.UTC().Format(time.RFC3339),
+			})
+		}
 		response.Bridges = append(response.Bridges, mapped)
 	}
 	return response

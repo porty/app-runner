@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +61,7 @@ type bridgeDHCPStatus struct {
 	AutoDNS       bool
 	DNSSuffix     string
 	DNSRunning    bool
+	Leases        []dhcpLease
 }
 
 type dhcpRange struct {
@@ -262,8 +264,12 @@ func (m *dhcpManager) Status(bridge string) bridgeDHCPStatus {
 	for _, lease := range m.state.Leases[bridge] {
 		if lease.ExpiresAt.After(now) {
 			status.ActiveLeases++
+			status.Leases = append(status.Leases, lease)
 		}
 	}
+	sort.Slice(status.Leases, func(i, j int) bool {
+		return status.Leases[i].HardwareAddress < status.Leases[j].HardwareAddress
+	})
 	return status
 }
 
@@ -633,6 +639,7 @@ func (m *dhcpManager) acquireLease(bridge string, network dhcpRange, key, hardwa
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := m.now()
+	hardwareAddress = strings.ToLower(hardwareAddress)
 	leases := m.state.Leases[bridge]
 	if leases == nil {
 		leases = make(map[string]dhcpLease)
@@ -642,6 +649,16 @@ func (m *dhcpManager) acquireLease(bridge string, network dhcpRange, key, hardwa
 		address, err := netip.ParseAddr(lease.Address)
 		if err != nil || !lease.ExpiresAt.After(now) || !addressInDHCPPool(network, address) {
 			delete(leases, client)
+		}
+	}
+	if existing, found := leases[key]; found && strings.EqualFold(existing.HardwareAddress, hardwareAddress) {
+		return m.renewHardwareLeaseLocked(leases, key, hardwareAddress, requested, strictRequested, now)
+	}
+	if _, found := leases[key]; !found {
+		for _, lease := range leases {
+			if strings.EqualFold(lease.HardwareAddress, hardwareAddress) {
+				return m.renewHardwareLeaseLocked(leases, key, hardwareAddress, requested, strictRequested, now)
+			}
 		}
 	}
 	if existing, found := leases[key]; found {
@@ -692,6 +709,50 @@ func (m *dhcpManager) acquireLease(bridge string, network dhcpRange, key, hardwa
 	return address, nil
 }
 
+func (m *dhcpManager) renewHardwareLeaseLocked(leases map[string]dhcpLease, key, hardwareAddress string, requested netip.Addr, strictRequested bool, now time.Time) (netip.Addr, error) {
+	selectedKey := ""
+	selected := dhcpLease{}
+	for client, lease := range leases {
+		if !strings.EqualFold(lease.HardwareAddress, hardwareAddress) {
+			continue
+		}
+		address, err := netip.ParseAddr(lease.Address)
+		if err != nil {
+			continue
+		}
+		if requested.IsValid() && address == requested {
+			selectedKey, selected = client, lease
+			break
+		}
+		if selectedKey == "" || (client == key && selectedKey != key) || (selectedKey != key && lease.ExpiresAt.After(selected.ExpiresAt)) {
+			selectedKey, selected = client, lease
+		}
+	}
+	address, err := netip.ParseAddr(selected.Address)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("parse existing DHCP lease address: %w", err)
+	}
+	if strictRequested && requested.IsValid() && requested != address {
+		return netip.Addr{}, fmt.Errorf("requested address %s does not match the existing lease %s", requested, address)
+	}
+	for client, lease := range leases {
+		if client != selectedKey && strings.EqualFold(lease.HardwareAddress, hardwareAddress) {
+			delete(leases, client)
+		}
+	}
+	if selectedKey != key {
+		delete(leases, selectedKey)
+	}
+	selected.ClientKey = key
+	selected.HardwareAddress = hardwareAddress
+	selected.ExpiresAt = now.Add(dhcpLeaseDuration)
+	leases[key] = selected
+	if err := m.saveLocked(); err != nil {
+		return netip.Addr{}, err
+	}
+	return address, nil
+}
+
 func (m *dhcpManager) releaseLease(bridge, key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -721,7 +782,42 @@ func (m *dhcpManager) load() error {
 	if m.state.Leases == nil {
 		m.state.Leases = make(map[string]map[string]dhcpLease)
 	}
+	changed := false
+	for bridge, leases := range m.state.Leases {
+		for client, lease := range leases {
+			if lease.HardwareAddress == "" {
+				continue
+			}
+			lease.HardwareAddress = strings.ToLower(lease.HardwareAddress)
+			if canonicalClient, found := canonicalLeaseClient(leases, lease.HardwareAddress); found && canonicalClient != client {
+				delete(leases, client)
+				changed = true
+				continue
+			}
+			leases[client] = lease
+		}
+		m.state.Leases[bridge] = leases
+	}
+	if changed {
+		if err := m.saveLocked(); err != nil {
+			return fmt.Errorf("persist consolidated DHCP leases: %w", err)
+		}
+	}
 	return nil
+}
+
+func canonicalLeaseClient(leases map[string]dhcpLease, hardwareAddress string) (string, bool) {
+	var selectedKey string
+	var selected dhcpLease
+	for client, lease := range leases {
+		if !strings.EqualFold(lease.HardwareAddress, hardwareAddress) {
+			continue
+		}
+		if selectedKey == "" || lease.ExpiresAt.After(selected.ExpiresAt) || (lease.ExpiresAt.Equal(selected.ExpiresAt) && client < selectedKey) {
+			selectedKey, selected = client, lease
+		}
+	}
+	return selectedKey, selectedKey != ""
 }
 
 func (m *dhcpManager) saveLocked() error {

@@ -216,6 +216,13 @@ export interface BridgeDHCPStatus {
   auto_dns: boolean
   dns_suffix?: string
   dns_running: boolean
+  leases?: DHCPLease[]
+}
+
+export interface DHCPLease {
+  hardware_address: string
+  address: string
+  expires_at: string
 }
 
 export interface BridgeDHCPConfiguration {

@@ -172,6 +172,78 @@ func TestDHCPManagerPersistsLeasesAndHonoursRequestedAddresses(t *testing.T) {
 	}
 }
 
+func TestDHCPStatusListsOnlyActiveLeases(t *testing.T) {
+	manager, err := newDHCPManager(t.TempDir(), &fakeDHCPBridgeProvider{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
+	manager.now = func() time.Time { return now }
+	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR, false, bridgeDNSConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	manager.state.Leases["br0"] = map[string]dhcpLease{
+		"active":  {HardwareAddress: "52:54:00:00:00:02", Address: "192.168.100.51", ExpiresAt: now.Add(time.Hour)},
+		"expired": {HardwareAddress: "52:54:00:00:00:01", Address: "192.168.100.50", ExpiresAt: now.Add(-time.Hour)},
+	}
+
+	status := manager.Status("br0")
+	if status.ActiveLeases != 1 || len(status.Leases) != 1 || status.Leases[0].Address != "192.168.100.51" {
+		t.Fatalf("unexpected active leases: %#v", status)
+	}
+}
+
+func TestDHCPManagerConsolidatesLeasesForTheSameHardwareAddress(t *testing.T) {
+	manager, err := newDHCPManager(t.TempDir(), &fakeDHCPBridgeProvider{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
+	manager.now = func() time.Time { return now }
+	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR, false, bridgeDNSConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	manager.state.Leases["br0"] = map[string]dhcpLease{
+		"old-id": {ClientKey: "old-id", HardwareAddress: "52:54:00:44:81:f7", Address: "192.168.100.55", ExpiresAt: now.Add(time.Hour)},
+		"new-id": {ClientKey: "new-id", HardwareAddress: "52:54:00:44:81:f7", Address: "192.168.100.56", ExpiresAt: now.Add(2 * time.Hour)},
+	}
+	network, _ := parseDHCPRange(defaultBridgeDHCPCIDR)
+
+	address, err := manager.acquireLease("br0", network, "newest-id", "52:54:00:44:81:f7", netip.MustParseAddr("192.168.100.56"), true)
+	if err != nil || address.String() != "192.168.100.56" {
+		t.Fatalf("unexpected lease: %s, %v", address, err)
+	}
+	leases := manager.state.Leases["br0"]
+	if len(leases) != 1 || leases["newest-id"].Address != "192.168.100.56" {
+		t.Fatalf("duplicate MAC leases were not consolidated: %#v", leases)
+	}
+}
+
+func TestDHCPManagerConsolidatesDuplicateHardwareAddressesOnLoad(t *testing.T) {
+	directory := t.TempDir()
+	manager, err := newDHCPManager(directory, &fakeDHCPBridgeProvider{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
+	manager.state.Leases["br0"] = map[string]dhcpLease{
+		"older": {ClientKey: "older", HardwareAddress: "52:54:00:44:81:f7", Address: "192.168.100.55", ExpiresAt: now.Add(time.Hour)},
+		"newer": {ClientKey: "newer", HardwareAddress: "52:54:00:44:81:f7", Address: "192.168.100.56", ExpiresAt: now.Add(2 * time.Hour)},
+	}
+	if err := manager.saveLocked(); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := newDHCPManager(directory, &fakeDHCPBridgeProvider{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leases := reloaded.state.Leases["br0"]
+	if len(leases) != 1 || leases["newer"].Address != "192.168.100.56" {
+		t.Fatalf("duplicate MAC leases were not consolidated on load: %#v", leases)
+	}
+}
+
 func TestDHCPManagerStartsOnceAndStopsAfterLastVM(t *testing.T) {
 	provider := &fakeDHCPBridgeProvider{}
 	manager, err := newDHCPManager(t.TempDir(), provider, nil, nil)
