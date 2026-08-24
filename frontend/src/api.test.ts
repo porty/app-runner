@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMIPMI, createVM, downloadStorageFile, echo, getNetworkingStatus, listStorage, listVMs, ping, uploadStorageFiles } from './api'
+import { applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMIPMI, createVM, downloadStorageFile, echo, getNetworkingStatus, listStorage, listVMs, ping, rebootVM, uploadStorageFiles } from './api'
 
 describe('Twirp API client', () => {
   afterEach(() => {
@@ -110,6 +110,20 @@ describe('Twirp API client', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/twirp/apprunner.v1.AppRunnerService/CloneVM',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ id: 'vm-id', name: 'Development-copy' }) }),
+    )
+  })
+
+  it('reboots a VM through Twirp', async () => {
+    const virtualMachine = { id: 'vm-id', name: 'Development', status: 'VM_STATUS_RUNNING' as const }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ virtual_machine: virtualMachine }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(rebootVM('vm-id')).resolves.toEqual(virtualMachine)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/twirp/apprunner.v1.AppRunnerService/RebootVM',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ id: 'vm-id' }) }),
     )
   })
 

@@ -868,16 +868,27 @@ func (m *vmManager) SetIPMIBootFlags(id string, device uint8, persistent bool) e
 }
 
 func (m *vmManager) Reset(id string) error {
+	_, err := m.Reboot(id)
+	return err
+}
+
+func (m *vmManager) Reboot(id string) (virtualMachine, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.reconcileLocked(); err != nil {
+		return virtualMachine{}, err
+	}
 	index := m.indexByID(id)
 	if index == -1 {
-		return errVMNotFound
+		return virtualMachine{}, errVMNotFound
 	}
 	if m.vms[index].Status != vmStatusRunning {
-		return errVMNotRunning
+		return virtualMachine{}, errVMNotRunning
 	}
-	return m.hypervisor.Reset(m.vms[index])
+	if err := m.hypervisor.Reset(m.vms[index]); err != nil {
+		return virtualMachine{}, fmt.Errorf("reboot virtual machine: %w", err)
+	}
+	return m.vms[index], nil
 }
 
 func (m *vmManager) ListISOs() ([]isoImage, error) {

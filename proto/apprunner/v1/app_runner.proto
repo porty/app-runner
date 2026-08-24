@@ -17,6 +17,7 @@ service AppRunnerService {
   rpc CloneVM(CloneVMRequest) returns (CloneVMResponse);
   rpc StartVM(StartVMRequest) returns (StartVMResponse);
   rpc StopVM(StopVMRequest) returns (StopVMResponse);
+  rpc RebootVM(RebootVMRequest) returns (RebootVMResponse);
   rpc UpdateVM(UpdateVMRequest) returns (UpdateVMResponse);
   rpc UpdateVMNetwork(UpdateVMNetworkRequest) returns (UpdateVMNetworkResponse);
   rpc AddVMDisk(AddVMDiskRequest) returns (AddVMDiskResponse);
@@ -216,6 +217,14 @@ message StopVMRequest {
 }
 
 message StopVMResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message RebootVMRequest {
+  string id = 1;
+}
+
+message RebootVMResponse {
   VirtualMachine virtual_machine = 1;
 }
 

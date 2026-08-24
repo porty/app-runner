@@ -149,6 +149,17 @@ func (s *appRunnerService) StopVM(_ context.Context, request *apprunnerv1.StopVM
 	return &apprunnerv1.StopVMResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
 }
 
+func (s *appRunnerService) RebootVM(_ context.Context, request *apprunnerv1.RebootVMRequest) (*apprunnerv1.RebootVMResponse, error) {
+	if err := s.requireManager(); err != nil {
+		return nil, err
+	}
+	vm, err := s.manager.Reboot(request.GetId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.RebootVMResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+}
+
 func (s *appRunnerService) UpdateVM(_ context.Context, request *apprunnerv1.UpdateVMRequest) (*apprunnerv1.UpdateVMResponse, error) {
 	if err := s.requireManager(); err != nil {
 		return nil, err
