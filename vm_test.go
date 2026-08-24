@@ -48,6 +48,7 @@ type fakeHypervisor struct {
 	onExit       func(int, error)
 	changedCDROM string
 	changedISO   string
+	linkedSource string
 }
 
 func newFakeHypervisor() *fakeHypervisor {
@@ -56,6 +57,11 @@ func newFakeHypervisor() *fakeHypervisor {
 
 func (h *fakeHypervisor) CreateDisk(_ context.Context, path string, _ uint32) error {
 	return os.WriteFile(path, []byte("qcow2"), 0o600)
+}
+
+func (h *fakeHypervisor) CreateLinkedDisk(_ context.Context, path, backingPath string, _ uint32) error {
+	h.linkedSource = backingPath
+	return os.WriteFile(path, []byte("linked qcow2"), 0o600)
 }
 
 func (h *fakeHypervisor) Start(_ virtualMachine, onExit func(int, error)) (int, error) {
@@ -157,6 +163,77 @@ func TestVMManagerLifecycle(t *testing.T) {
 	}
 	if _, err := manager.Get(vm.ID); !errors.Is(err, errVMNotFound) {
 		t.Fatalf("deleted VM is still present: %v", err)
+	}
+}
+
+func TestVMManagerCreatesCloudImageVMAsLinkedUEFIDisk(t *testing.T) {
+	manager, hypervisor, settings := newTestVMManager(t)
+	cloudImageDirectory := filepath.Join(settings.ISODir, "cloud")
+	if err := os.MkdirAll(cloudImageDirectory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	cloudImagePath := filepath.Join(cloudImageDirectory, "ubuntu.img")
+	if err := os.WriteFile(cloudImagePath, []byte("backing qcow2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager.settings.UEFICodePath = filepath.Join(settings.DiskDir, "OVMF_CODE.fd")
+	manager.settings.UEFIVarsPath = filepath.Join(settings.DiskDir, "OVMF_VARS.fd")
+	if err := os.WriteFile(manager.settings.UEFICodePath, []byte("code"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manager.settings.UEFIVarsPath, []byte("vars"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	vm, err := manager.Create(context.Background(), createVMOptions{
+		Name: "ubuntu-cloud", CPUs: 2, MemoryMiB: 2048, DiskGiB: 20,
+		SourceImage: "cloud/ubuntu.img", NetworkMode: networkModeNAT,
+		CloudInit: vmCloudInit{Enabled: true, UserData: "#cloud-config\n"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hypervisor.linkedSource != cloudImagePath {
+		t.Fatalf("linked backing path = %q, want %q", hypervisor.linkedSource, cloudImagePath)
+	}
+	if vm.SourceImage != "cloud/ubuntu.img" || vm.Firmware != vmFirmwareUEFI || vm.ISOName != "" || len(vm.CDROMs) != 0 {
+		t.Fatalf("unexpected cloud-image VM: %#v", vm)
+	}
+	contents, err := os.ReadFile(manager.uefiVarsPath(vm.ID))
+	if err != nil || string(contents) != "vars" {
+		t.Fatalf("UEFI variable store = %q, %v", contents, err)
+	}
+	if _, err := manager.Start(vm.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Stop(vm.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Delete(vm.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(manager.uefiVarsPath(vm.ID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted VM retained UEFI variables: %v", err)
+	}
+}
+
+func TestVMManagerListsNestedCloudDiskImages(t *testing.T) {
+	manager, _, settings := newTestVMManager(t)
+	directory := filepath.Join(settings.ISODir, "ubuntu")
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{"server.img": "img", "server.qcow2": "qcow2", "notes.txt": "ignored"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	images, err := manager.ListDiskImages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(images) != 2 || images[0].Name != "ubuntu/server.img" || images[1].Name != "ubuntu/server.qcow2" {
+		t.Fatalf("unexpected disk images: %#v", images)
 	}
 }
 

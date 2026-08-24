@@ -33,6 +33,37 @@ func (q *qemuHypervisor) CreateDisk(ctx context.Context, path string, sizeGiB ui
 	return nil
 }
 
+func (q *qemuHypervisor) CreateLinkedDisk(ctx context.Context, path, backingPath string, sizeGiB uint32) error {
+	infoCommand := exec.CommandContext(ctx, q.settings.QEMUImgBinary, "info", "--output=json", backingPath)
+	output, err := infoCommand.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("inspect cloud image with %s: %s: %w", q.settings.QEMUImgBinary, string(output), err)
+	}
+	var info struct {
+		Format      string `json:"format"`
+		VirtualSize uint64 `json:"virtual-size"`
+	}
+	if err := json.Unmarshal(output, &info); err != nil {
+		return fmt.Errorf("decode cloud image information: %w", err)
+	}
+	if info.Format != "qcow2" {
+		return fmt.Errorf("cloud image format is %q; qcow2 is required", info.Format)
+	}
+	requestedSize := uint64(sizeGiB) << 30
+	if requestedSize < info.VirtualSize {
+		minimumGiB := (info.VirtualSize + (1 << 30) - 1) >> 30
+		return fmt.Errorf("requested disk size is smaller than the cloud image; use at least %d GiB", minimumGiB)
+	}
+	command := exec.CommandContext(ctx, q.settings.QEMUImgBinary,
+		"create", "-f", "qcow2", "-F", "qcow2", "-b", backingPath, path, fmt.Sprintf("%dG", sizeGiB),
+	)
+	output, err = command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("create linked qcow2 disk: %s: %w", string(output), err)
+	}
+	return nil
+}
+
 func (q *qemuHypervisor) Start(vm virtualMachine, onExit func(int, error)) (int, error) {
 	for _, socket := range []string{q.qmpSocketPath(vm.ID), q.vncSocketPath(vm.ID)} {
 		if err := removeIfExists(socket); err != nil {
@@ -112,6 +143,12 @@ func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
 		"-device", "qemu-xhci,id=usb",
 		"-device", "usb-kbd,bus=usb.0",
 		"-device", "usb-tablet,bus=usb.0",
+	}
+	if vm.Firmware == vmFirmwareUEFI {
+		arguments = append(arguments,
+			"-drive", "if=pflash,format=raw,unit=0,readonly=on,file="+q.settings.UEFICodePath,
+			"-drive", "if=pflash,format=raw,unit=1,file="+filepath.Join(q.settings.DiskDir, vm.ID+"-uefi-vars.fd"),
+		)
 	}
 	for diskIndex, disk := range effectiveVMDisks(vm) {
 		driveID := "disk" + strconv.Itoa(diskIndex)

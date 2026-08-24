@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMCloudInit, configureVMIPMI, createCloudInitTemplate, createVM, deleteCloudInitTemplate, downloadStorageFile, echo, getNetworkingStatus, listCloudInitTemplates, listStorage, listVMs, ping, rebootVM, updateCloudInitTemplate, uploadStorageFiles } from './api'
+import { applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMCloudInit, configureVMIPMI, createCloudInitTemplate, createVM, deleteCloudInitTemplate, downloadStorageFile, echo, getNetworkingStatus, listCloudInitTemplates, listDiskImages, listStorage, listVMs, ping, rebootVM, updateCloudInitTemplate, uploadStorageFiles } from './api'
 
 describe('Twirp API client', () => {
   afterEach(() => {
@@ -84,6 +84,7 @@ describe('Twirp API client', () => {
         network_mode: 'NETWORK_MODE_NAT',
         cloud_init_enabled: true,
         cloud_init_user_data: '#cloud-config\npackages: [curl]\n',
+        source_image: '',
       }),
     ).resolves.toEqual(virtualMachine)
     expect(fetchMock).toHaveBeenCalledWith(
@@ -98,6 +99,7 @@ describe('Twirp API client', () => {
           network_mode: 'NETWORK_MODE_NAT',
           cloud_init_enabled: true,
           cloud_init_user_data: '#cloud-config\npackages: [curl]\n',
+          source_image: '',
         }),
       }),
     )
@@ -272,6 +274,20 @@ describe('Twirp API client', () => {
       '/twirp/apprunner.v1.AppRunnerService/UpdateCloudInitTemplate',
       '/twirp/apprunner.v1.AppRunnerService/DeleteCloudInitTemplate',
     ])
+  })
+
+  it('lists cloud disk images through Twirp', async () => {
+    const images = [{ name: 'ubuntu/resolute.img', size_bytes: '1073741824' }]
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ images }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listDiskImages()).resolves.toEqual(images)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/twirp/apprunner.v1.AppRunnerService/ListDiskImages',
+      expect.objectContaining({ body: '{}' }),
+    )
   })
 
   it('loads the recursive storage roots', async () => {

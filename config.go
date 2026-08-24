@@ -21,9 +21,12 @@ type config struct {
 	QEMUBinary    string `json:"qemu_binary"`
 	QEMUImgBinary string `json:"qemu_img_binary"`
 	XorrisoBinary string `json:"xorriso_binary"`
+	UEFICodePath  string `json:"uefi_code_path"`
+	UEFIVarsPath  string `json:"uefi_vars_path"`
 }
 
 func defaultConfig(workingDirectory string) config {
+	uefiCodePath, uefiVarsPath := defaultUEFIFirmwarePaths()
 	return config{
 		Listen:        "127.0.0.1:8080",
 		ISODir:        filepath.Join(workingDirectory, "iso"),
@@ -32,7 +35,28 @@ func defaultConfig(workingDirectory string) config {
 		QEMUBinary:    "qemu-system-x86_64",
 		QEMUImgBinary: "qemu-img",
 		XorrisoBinary: "xorriso",
+		UEFICodePath:  uefiCodePath,
+		UEFIVarsPath:  uefiVarsPath,
 	}
+}
+
+func defaultUEFIFirmwarePaths() (string, string) {
+	candidates := [][2]string{
+		{"/usr/share/edk2/x64/OVMF_CODE.4m.fd", "/usr/share/edk2/x64/OVMF_VARS.4m.fd"},
+		{"/usr/share/OVMF/OVMF_CODE_4M.fd", "/usr/share/OVMF/OVMF_VARS_4M.fd"},
+		{"/usr/share/OVMF/OVMF_CODE.fd", "/usr/share/OVMF/OVMF_VARS.fd"},
+	}
+	for _, candidate := range candidates {
+		if regularFile(candidate[0]) && regularFile(candidate[1]) {
+			return candidate[0], candidate[1]
+		}
+	}
+	return candidates[0][0], candidates[0][1]
+}
+
+func regularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
 }
 
 func loadConfig(args []string, workingDirectory string) (config, error) {
@@ -58,6 +82,8 @@ func loadConfig(args []string, workingDirectory string) (config, error) {
 	flags.StringVar(&settings.QEMUBinary, "qemu", settings.QEMUBinary, "QEMU system binary")
 	flags.StringVar(&settings.QEMUImgBinary, "qemu-img", settings.QEMUImgBinary, "qemu-img binary")
 	flags.StringVar(&settings.XorrisoBinary, "xorriso", settings.XorrisoBinary, "xorriso binary used to build cloud-init ISO images")
+	flags.StringVar(&settings.UEFICodePath, "uefi-code", settings.UEFICodePath, "read-only OVMF UEFI code image")
+	flags.StringVar(&settings.UEFIVarsPath, "uefi-vars", settings.UEFIVarsPath, "OVMF UEFI variable store template")
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -67,6 +93,8 @@ func loadConfig(args []string, workingDirectory string) (config, error) {
 
 	settings.ISODir = absoluteFrom(workingDirectory, settings.ISODir)
 	settings.DiskDir = absoluteFrom(workingDirectory, settings.DiskDir)
+	settings.UEFICodePath = absoluteFrom(workingDirectory, settings.UEFICodePath)
+	settings.UEFIVarsPath = absoluteFrom(workingDirectory, settings.UEFIVarsPath)
 	if strings.TrimSpace(settings.BridgeName) == "" {
 		return config{}, errors.New("bridge name cannot be empty")
 	}

@@ -21,11 +21,16 @@ import (
 
 type vmStatus string
 
+type vmFirmware string
+
 const (
 	vmStatusStopped  vmStatus = "stopped"
 	vmStatusRunning  vmStatus = "running"
 	vmStatusStopping vmStatus = "stopping"
 	vmStatusError    vmStatus = "error"
+
+	vmFirmwareBIOS vmFirmware = "bios"
+	vmFirmwareUEFI vmFirmware = "uefi"
 )
 
 type networkMode string
@@ -77,6 +82,8 @@ type virtualMachine struct {
 	Disks       []vmDisk     `json:"disks,omitempty"`
 	CDROMs      []vmCDROM    `json:"cdroms,omitempty"`
 	CloudInit   vmCloudInit  `json:"cloud_init,omitempty"`
+	SourceImage string       `json:"source_image,omitempty"`
+	Firmware    vmFirmware   `json:"firmware,omitempty"`
 }
 
 type vmDisk struct {
@@ -120,9 +127,15 @@ type createVMOptions struct {
 	NetworkMode networkMode
 	BridgeName  string
 	CloudInit   vmCloudInit
+	SourceImage string
 }
 
 type isoImage struct {
+	Name      string
+	SizeBytes uint64
+}
+
+type diskImage struct {
 	Name      string
 	SizeBytes uint64
 }
@@ -137,6 +150,7 @@ type hostCapabilities struct {
 
 type hypervisor interface {
 	CreateDisk(context.Context, string, uint32) error
+	CreateLinkedDisk(context.Context, string, string, uint32) error
 	Start(virtualMachine, func(int, error)) (int, error)
 	IsRunning(int) bool
 	GracefulStop(virtualMachine) error
@@ -266,6 +280,11 @@ func (m *vmManager) Get(id string) (virtualMachine, error) {
 
 func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtualMachine, error) {
 	options.Name = strings.TrimSpace(options.Name)
+	options.ISOName = strings.TrimSpace(options.ISOName)
+	options.SourceImage = strings.TrimSpace(options.SourceImage)
+	if options.SourceImage != "" {
+		options.SourceImage = filepath.ToSlash(filepath.Clean(filepath.FromSlash(options.SourceImage)))
+	}
 	if err := m.validateCreateOptions(options); err != nil {
 		return virtualMachine{}, err
 	}
@@ -303,14 +322,38 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 		Disks:       []vmDisk{{ID: "system", SizeGiB: options.DiskGiB, System: true}},
 		CDROMs:      []vmCDROM{{ID: "cdrom0", ISOName: options.ISOName}},
 		CloudInit:   options.CloudInit,
+		SourceImage: options.SourceImage,
+		Firmware:    vmFirmwareBIOS,
+	}
+	if vm.SourceImage != "" {
+		vm.ISOName = ""
+		vm.CDROMs = nil
+		vm.Firmware = vmFirmwareUEFI
 	}
 	diskPath := m.diskPath(vm.ID)
-	if err := m.hypervisor.CreateDisk(ctx, diskPath, vm.DiskGiB); err != nil {
-		return virtualMachine{}, fmt.Errorf("create system disk: %w", err)
+	var createDiskErr error
+	if vm.SourceImage != "" {
+		sourcePath, err := m.resolveISOStorageFile(vm.SourceImage, ".img", ".qcow2")
+		if err != nil {
+			return virtualMachine{}, &fieldError{field: "source_image", message: err.Error()}
+		}
+		createDiskErr = m.hypervisor.CreateLinkedDisk(ctx, diskPath, sourcePath, vm.DiskGiB)
+	} else {
+		createDiskErr = m.hypervisor.CreateDisk(ctx, diskPath, vm.DiskGiB)
+	}
+	if createDiskErr != nil {
+		return virtualMachine{}, fmt.Errorf("create system disk: %w", createDiskErr)
+	}
+	if vm.Firmware == vmFirmwareUEFI {
+		if err := copyVMFile(ctx, m.settings.UEFIVarsPath, m.uefiVarsPath(vm.ID)); err != nil {
+			_ = removeIfExists(diskPath)
+			return virtualMachine{}, fmt.Errorf("create UEFI variable store: %w", err)
+		}
 	}
 	if vm.CloudInit.Enabled {
 		if err := m.buildCloudInitISO(ctx, m.cloudInitISOPath(vm.ID), cloudInitOptions(vm)); err != nil {
 			_ = removeIfExists(diskPath)
+			_ = removeIfExists(m.uefiVarsPath(vm.ID))
 			return virtualMachine{}, err
 		}
 	}
@@ -318,6 +361,7 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 	if err := m.store.Save(m.vms); err != nil {
 		_ = os.Remove(diskPath)
 		_ = removeIfExists(m.cloudInitISOPath(vm.ID))
+		_ = removeIfExists(m.uefiVarsPath(vm.ID))
 		m.vms = m.vms[:len(m.vms)-1]
 		return virtualMachine{}, err
 	}
@@ -378,6 +422,8 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 		Disks:       make([]vmDisk, 0, len(source.Disks)),
 		CDROMs:      make([]vmCDROM, 0, len(source.CDROMs)),
 		CloudInit:   source.CloudInit,
+		SourceImage: source.SourceImage,
+		Firmware:    source.Firmware,
 	}
 	for _, sourceDisk := range source.Disks {
 		clonedDisk := sourceDisk
@@ -418,6 +464,16 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 			return virtualMachine{}, err
 		}
 		createdPaths = append(createdPaths, cloudInitPath)
+	}
+	if clone.Firmware == vmFirmwareUEFI {
+		uefiVarsPath := m.uefiVarsPath(clone.ID)
+		if err := copyVMFile(ctx, m.uefiVarsPath(source.ID), uefiVarsPath); err != nil {
+			for _, path := range createdPaths {
+				_ = removeIfExists(path)
+			}
+			return virtualMachine{}, fmt.Errorf("clone UEFI variable store: %w", err)
+		}
+		createdPaths = append(createdPaths, uefiVarsPath)
 	}
 
 	m.vms = append(m.vms, clone)
@@ -474,6 +530,21 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 	if vm.CloudInit.Enabled {
 		if _, err := os.Stat(m.cloudInitISOPath(vm.ID)); err != nil {
 			return virtualMachine{}, fmt.Errorf("cloud-init ISO is unavailable: %w", err)
+		}
+	}
+	if vm.SourceImage != "" {
+		if _, err := m.resolveISOStorageFile(vm.SourceImage, ".img", ".qcow2"); err != nil {
+			return virtualMachine{}, fmt.Errorf("cloud image is unavailable: %w", err)
+		}
+	}
+	if vm.Firmware == vmFirmwareUEFI {
+		for label, path := range map[string]string{
+			"UEFI code image":     m.settings.UEFICodePath,
+			"UEFI variable store": m.uefiVarsPath(vm.ID),
+		} {
+			if !regularFile(path) {
+				return virtualMachine{}, fmt.Errorf("%s is unavailable: %s", label, path)
+			}
 		}
 	}
 	if m.networkLifecycle != nil {
@@ -577,6 +648,9 @@ func (m *vmManager) Delete(id string) error {
 	}
 	if err := removeIfExists(m.cloudInitISOPath(vm.ID)); err != nil {
 		return fmt.Errorf("remove cloud-init ISO: %w", err)
+	}
+	if err := removeIfExists(m.uefiVarsPath(vm.ID)); err != nil {
+		return fmt.Errorf("remove UEFI variable store: %w", err)
 	}
 	m.vms = append(m.vms[:index], m.vms[index+1:]...)
 	return m.store.Save(m.vms)
@@ -984,23 +1058,56 @@ func (m *vmManager) Reboot(id string) (virtualMachine, error) {
 }
 
 func (m *vmManager) ListISOs() ([]isoImage, error) {
-	entries, err := os.ReadDir(m.settings.ISODir)
+	entries, err := m.listISOStorageImages(".iso")
 	if err != nil {
 		return nil, err
 	}
 	images := make([]isoImage, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".iso") {
-			continue
+		images = append(images, isoImage{Name: entry.Name, SizeBytes: entry.SizeBytes})
+	}
+	sort.Slice(images, func(left, right int) bool {
+		return strings.ToLower(images[left].Name) < strings.ToLower(images[right].Name)
+	})
+	return images, nil
+}
+
+func (m *vmManager) ListDiskImages() ([]diskImage, error) {
+	return m.listISOStorageImages(".img", ".qcow2")
+}
+
+func (m *vmManager) listISOStorageImages(extensions ...string) ([]diskImage, error) {
+	allowed := make(map[string]struct{}, len(extensions))
+	for _, extension := range extensions {
+		allowed[strings.ToLower(extension)] = struct{}{}
+	}
+	images := make([]diskImage, 0)
+	err := filepath.WalkDir(m.settings.ISODir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		info, err := os.Stat(filepath.Join(m.settings.ISODir, entry.Name()))
+		if entry.IsDir() {
+			return nil
+		}
+		if _, ok := allowed[strings.ToLower(filepath.Ext(entry.Name()))]; !ok {
+			return nil
+		}
+		info, err := os.Stat(path)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if !info.Mode().IsRegular() {
-			continue
+			return nil
 		}
-		images = append(images, isoImage{Name: entry.Name(), SizeBytes: uint64(info.Size())})
+		relativePath, err := filepath.Rel(m.settings.ISODir, path)
+		if err != nil {
+			return err
+		}
+		images = append(images, diskImage{Name: filepath.ToSlash(relativePath), SizeBytes: uint64(info.Size())})
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.Slice(images, func(left, right int) bool {
 		return strings.ToLower(images[left].Name) < strings.ToLower(images[right].Name)
@@ -1080,6 +1187,18 @@ func (m *vmManager) validateCreateOptions(options createVMOptions) error {
 			return &fieldError{field: "bridge_name", message: err.Error()}
 		}
 	}
+	if options.SourceImage != "" && options.ISOName != "" {
+		return &fieldError{field: "source_image", message: "cannot be combined with an installation ISO"}
+	}
+	if options.SourceImage != "" {
+		if _, err := m.resolveISOStorageFile(options.SourceImage, ".img", ".qcow2"); err != nil {
+			return &fieldError{field: "source_image", message: err.Error()}
+		}
+		if !regularFile(m.settings.UEFICodePath) || !regularFile(m.settings.UEFIVarsPath) {
+			return &fieldError{field: "source_image", message: "UEFI firmware is unavailable; configure uefi_code_path and uefi_vars_path"}
+		}
+		return validateCloudInit(options.CloudInit)
+	}
 	if options.ISOName == "" {
 		return &fieldError{field: "iso_name", message: "an installation ISO is required"}
 	}
@@ -1122,14 +1241,43 @@ func (m *vmManager) validateOptionalISO(isoName string) error {
 	if isoName == "" {
 		return nil
 	}
-	if filepath.Base(isoName) != isoName || !strings.EqualFold(filepath.Ext(isoName), ".iso") {
-		return &fieldError{field: "iso_name", message: "must name an ISO file in the configured ISO directory"}
-	}
-	info, err := os.Stat(m.isoPath(isoName))
-	if err != nil || !info.Mode().IsRegular() {
-		return &fieldError{field: "iso_name", message: "the selected ISO does not exist"}
+	if _, err := m.resolveISOStorageFile(isoName, ".iso"); err != nil {
+		return &fieldError{field: "iso_name", message: err.Error()}
 	}
 	return nil
+}
+
+func (m *vmManager) resolveISOStorageFile(name string, extensions ...string) (string, error) {
+	cleanName := filepath.Clean(filepath.FromSlash(strings.TrimSpace(name)))
+	if cleanName == "." || filepath.IsAbs(cleanName) || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(filepath.Separator)) {
+		return "", errors.New("must name a file inside the configured ISO directory")
+	}
+	allowed := false
+	for _, extension := range extensions {
+		if strings.EqualFold(filepath.Ext(cleanName), extension) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return "", fmt.Errorf("must use one of these file extensions: %s", strings.Join(extensions, ", "))
+	}
+	root, err := filepath.EvalSymlinks(m.settings.ISODir)
+	if err != nil {
+		return "", fmt.Errorf("resolve ISO storage: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Join(root, cleanName))
+	if err != nil {
+		return "", errors.New("the selected source image does not exist")
+	}
+	relativePath, err := filepath.Rel(root, resolved)
+	if err != nil || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return "", errors.New("must name a file inside the configured ISO directory")
+	}
+	if !regularFile(resolved) {
+		return "", errors.New("the selected source image is not a regular file")
+	}
+	return resolved, nil
 }
 
 func vmIsActive(vm virtualMachine) bool {
@@ -1170,6 +1318,10 @@ func (m *vmManager) vncSocketPath(id string) string {
 
 func (m *vmManager) cloudInitISOPath(id string) string {
 	return filepath.Join(m.settings.DiskDir, id+"-cloud-init.iso")
+}
+
+func (m *vmManager) uefiVarsPath(id string) string {
+	return filepath.Join(m.settings.DiskDir, id+"-uefi-vars.fd")
 }
 
 func cloudInitOptions(vm virtualMachine) cloudInitISOOptions {

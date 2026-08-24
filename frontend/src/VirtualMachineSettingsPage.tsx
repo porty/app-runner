@@ -240,7 +240,9 @@ export default function VirtualMachineSettingsPage() {
                     <Stack key={disk.id} direction="row" spacing={1} sx={{ alignItems: 'center', justifyContent: 'space-between', border: 1, borderColor: 'divider', borderRadius: 1.5, p: 1.25 }}>
                       <Box>
                         <Typography variant="body2" sx={{ fontWeight: 650 }}>{disk.system ? 'System disk' : 'Data disk'}</Typography>
-                        <Typography variant="caption" color="text.secondary">{disk.size_gib} GiB · qcow2</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {disk.size_gib} GiB · qcow2{disk.system && vm.source_image ? ` · linked to iso/${vm.source_image} · ${vm.firmware || 'uefi'}` : ''}
+                        </Typography>
                       </Box>
                       {!disk.system && <Button size="small" color="error" startIcon={<DeleteOutlineRounded />} disabled={active || busy} onClick={() => {
                         if (window.confirm(`Remove this ${disk.size_gib} GiB disk? Its data will be permanently deleted.`)) void runDeviceOperation(() => removeVMDisk(vm.id, disk.id))

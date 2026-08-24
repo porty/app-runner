@@ -25,6 +25,9 @@ func TestLoadConfigUsesDefaultsAndCLIOverrides(t *testing.T) {
 	if settings.XorrisoBinary != "xorriso" {
 		t.Fatalf("unexpected xorriso binary: %q", settings.XorrisoBinary)
 	}
+	if settings.UEFICodePath == "" || settings.UEFIVarsPath == "" {
+		t.Fatalf("UEFI firmware defaults are incomplete: code=%q vars=%q", settings.UEFICodePath, settings.UEFIVarsPath)
+	}
 }
 
 func TestLoadConfigAppliesFileBeforeCLI(t *testing.T) {
