@@ -440,6 +440,13 @@ message BridgeDHCPStatus {
   bool auto_dns = 13;
   string dns_suffix = 14;
   bool dns_running = 15;
+  repeated DHCPLease leases = 16;
+}
+
+message DHCPLease {
+  string hardware_address = 1;
+  string address = 2;
+  string expires_at = 3;
 }
 
 message PendingNetworkChange {

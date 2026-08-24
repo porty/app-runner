@@ -8,6 +8,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  IconButton,
   Stack,
   Table,
   TableBody,
@@ -16,6 +17,7 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import {
@@ -30,7 +32,7 @@ import {
 } from '@mui/icons-material'
 import { Link } from 'react-router-dom'
 
-import { cloneVM, deleteVM, listVMs, startVM, stopVM, type VirtualMachine, type VMStatus } from './api'
+import { cloneVM, deleteVM, getNetworkingStatus, listVMs, startVM, stopVM, type NetworkingStatus, type VirtualMachine, type VMStatus } from './api'
 import { canAccessVMConsole } from './vmConsoleAccess'
 
 const dnsLabelPattern = /^(?=.{1,63}$)[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/
@@ -44,6 +46,7 @@ const statusDetails: Record<VMStatus, { label: string; color: 'default' | 'succe
 
 export default function VirtualMachinesPage({ refreshInterval }: { refreshInterval: number | null }) {
   const [virtualMachines, setVirtualMachines] = useState<VirtualMachine[]>([])
+  const [networking, setNetworking] = useState<NetworkingStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [busyID, setBusyID] = useState('')
   const [error, setError] = useState('')
@@ -57,7 +60,9 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true)
     try {
-      setVirtualMachines(await listVMs())
+      const [machines, networkingStatus] = await Promise.all([listVMs(), getNetworkingStatus().catch(() => null)])
+      setVirtualMachines(machines)
+      setNetworking(networkingStatus)
       setError('')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to load virtual machines')
@@ -113,6 +118,21 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
     }
   }
 
+  const copyIPAddress = async (address: string) => {
+    try {
+      await navigator.clipboard.writeText(address)
+    } catch (copyError) {
+      setError(copyError instanceof Error ? `Unable to copy IP address: ${copyError.message}` : 'Unable to copy IP address')
+    }
+  }
+
+  const addressesByMAC = new Map<string, string>()
+  for (const bridge of networking?.bridges ?? []) {
+    for (const lease of bridge.dhcp?.leases ?? []) {
+      addressesByMAC.set(lease.hardware_address.toLowerCase(), lease.address)
+    }
+  }
+
   return (
     <Box>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', mb: 3.5 }}>
@@ -136,6 +156,7 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
               const stopping = vm.status === 'VM_STATUS_STOPPING'
               const busy = busyID === vm.id
               const status = statusDetails[vm.status] ?? statusDetails.VM_STATUS_UNSPECIFIED
+              const ipAddress = addressesByMAC.get(vm.mac_address.toLowerCase())
               return (
                 <TableRow key={vm.id} hover>
                   <TableCell>
@@ -148,6 +169,10 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
                   <TableCell>
                     <Typography variant="body2">{vm.network_mode === 'NETWORK_MODE_BRIDGE' ? `Bridge (${vm.bridge_name || 'missing'})` : 'NAT'}</Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{vm.mac_address}</Typography>
+                    {ipAddress && <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center', mt: 0.25 }}>
+                      <Typography variant="caption" sx={{ fontFamily: 'monospace', fontVariantNumeric: 'tabular-nums', width: '15ch', whiteSpace: 'nowrap' }}>{ipAddress}</Typography>
+                      <Tooltip title="Copy IP address"><IconButton size="small" aria-label={`Copy IP address ${ipAddress}`} onClick={() => void copyIPAddress(ipAddress)}><ContentCopyRounded fontSize="inherit" /></IconButton></Tooltip>
+                    </Stack>}
                     {vm.ipmi?.enabled && <Typography variant="caption" sx={{ display: 'block' }} color={vm.ipmi.running ? 'success.main' : 'error.main'}>IPMI {vm.ipmi.address}:{vm.ipmi.port || 623}{vm.ipmi.running ? '' : ` · ${vm.ipmi.last_error || 'not listening'}`}</Typography>}
                   </TableCell>
                   <TableCell>{vm.source_image ? `Cloud image: ${vm.source_image}` : (vm.cdroms ?? []).map((cdrom) => cdrom.iso_name || 'Ejected').join(', ') || vm.iso_name || 'No CD-ROM'}</TableCell>

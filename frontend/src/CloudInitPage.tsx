@@ -197,6 +197,7 @@ export default function CloudInitPage() {
               onChange={(event) => setDraftUserData(event.target.value)}
               placeholder={'#cloud-config\npackages:\n  - curl'}
               helperText="Written verbatim to the VM’s NoCloud ISO. Maximum size: 1 MiB."
+              sx={{ '& .MuiInputBase-input': { fontFamily: 'monospace' } }}
               slotProps={{ htmlInput: { maxLength: 1048576, spellCheck: false } }}
             />
             <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
