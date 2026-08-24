@@ -31,6 +31,7 @@ import {
   configureVMIPMI,
   getNetworkingStatus,
   getVM,
+  listCloudInitTemplates,
   listISOs,
   listVMs,
   removeVMCDROM,
@@ -39,6 +40,7 @@ import {
   updateVMCDROM,
   updateVMNetwork,
   type ISOImage,
+  type CloudInitTemplate,
   type NetworkingStatus,
   type UpdateVMNetworkRequest,
   type UpdateVMRequest,
@@ -62,6 +64,8 @@ export default function VirtualMachineSettingsPage() {
   const [network, setNetwork] = useState<UpdateVMNetworkRequest | null>(null)
   const [ipmi, setIPMI] = useState<VMIPMIConfiguration | null>(null)
   const [cloudInit, setCloudInit] = useState<VMCloudInitConfiguration | null>(null)
+  const [cloudInitTemplates, setCloudInitTemplates] = useState<CloudInitTemplate[]>([])
+  const [selectedCloudInitTemplate, setSelectedCloudInitTemplate] = useState('')
   const [tab, setTab] = useState<SettingsTab>('general')
   const [newDiskGiB, setNewDiskGiB] = useState(20)
   const [newCDROMISO, setNewCDROMISO] = useState('')
@@ -72,8 +76,8 @@ export default function VirtualMachineSettingsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [loadedVM, loadedImages, loadedNetworking, loadedVMs] = await Promise.all([
-        getVM(id), listISOs(), getNetworkingStatus(), listVMs(),
+      const [loadedVM, loadedImages, loadedNetworking, loadedVMs, loadedTemplates] = await Promise.all([
+        getVM(id), listISOs(), getNetworkingStatus(), listVMs(), listCloudInitTemplates(),
       ])
       const bridges = loadedNetworking.bridges ?? []
       const ipmiBridge = loadedVM.ipmi?.bridge_name || bridges.find((bridge) => bridge.dhcp?.enabled)?.name || bridges[0]?.name || ''
@@ -81,6 +85,8 @@ export default function VirtualMachineSettingsPage() {
       setImages(loadedImages)
       setNetworking(loadedNetworking)
       setVirtualMachines(loadedVMs)
+      setCloudInitTemplates(loadedTemplates)
+      setSelectedCloudInitTemplate('')
       setGeneral({
         id: loadedVM.id,
         name: loadedVM.name,
@@ -289,6 +295,22 @@ export default function VirtualMachineSettingsPage() {
                 control={<Switch checked={cloudInit.enabled} disabled={active || busy} onChange={(event) => setCloudInit({ ...cloudInit, enabled: event.target.checked })} />}
                 label="Enable Cloud Init"
               />
+              <TextField
+                select
+                label="Load user-data template"
+                value={selectedCloudInitTemplate}
+                disabled={active || busy}
+                onChange={(event) => {
+                  const name = event.target.value
+                  setSelectedCloudInitTemplate(name)
+                  const template = cloudInitTemplates.find((candidate) => candidate.name === name)
+                  if (template) setCloudInit({ ...cloudInit, enabled: true, user_data: template.user_data })
+                }}
+                helperText="Loading a template copies its contents into this VM."
+              >
+                <MenuItem value="">Choose a template</MenuItem>
+                {cloudInitTemplates.map((template) => <MenuItem key={template.name} value={template.name}>{template.name}</MenuItem>)}
+              </TextField>
               <TextField
                 label="user-data"
                 multiline
