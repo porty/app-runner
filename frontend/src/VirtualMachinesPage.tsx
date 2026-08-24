@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack,
+  Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, MenuItem, Stack, Switch,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography,
 } from '@mui/material'
 import {
@@ -18,6 +18,7 @@ import { canAccessVMConsole } from './vmConsoleAccess'
 const defaultCreateRequest: CreateVMRequest = {
   name: '', cpus: 2, memory_mib: 2048, disk_gib: 20, iso_name: '',
   network_mode: 'NETWORK_MODE_NAT', bridge_name: '',
+  cloud_init_enabled: false, cloud_init_user_data: '',
 }
 const dnsLabelPattern = /^(?=.{1,63}$)[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/
 const statusDetails: Record<VMStatus, { label: string; color: 'default' | 'success' | 'warning' | 'error' }> = {
@@ -199,6 +200,22 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
               <TextField fullWidth type="number" label="Disk (GiB)" slotProps={{ htmlInput: { min: 1 } }} value={createRequest.disk_gib} onChange={(event) => setCreateRequest({ ...createRequest, disk_gib: Number(event.target.value) })} />
             </Stack>
             <TextField select label="Installation ISO" value={createRequest.iso_name} onChange={(event) => setCreateRequest({ ...createRequest, iso_name: event.target.value })}>{images.map((image) => <MenuItem key={image.name} value={image.name}>{image.name} · {formatBytes(image.size_bytes)}</MenuItem>)}</TextField>
+            <FormControlLabel
+              control={<Switch checked={createRequest.cloud_init_enabled} onChange={(event) => setCreateRequest({ ...createRequest, cloud_init_enabled: event.target.checked })} />}
+              label="Enable Cloud Init"
+            />
+            {createRequest.cloud_init_enabled && (
+              <TextField
+                label="user-data"
+                multiline
+                minRows={8}
+                value={createRequest.cloud_init_user_data}
+                onChange={(event) => setCreateRequest({ ...createRequest, cloud_init_user_data: event.target.value })}
+                placeholder={'#cloud-config\nusers:\n  - name: app'}
+                helperText="Written verbatim to user-data on a cidata NoCloud ISO. Minimal meta-data is generated automatically."
+                slotProps={{ htmlInput: { maxLength: 1048576, spellCheck: false } }}
+              />
+            )}
             <TextField select label="Network mode" value={createRequest.network_mode} onChange={(event) => setCreateRequest({ ...createRequest, network_mode: event.target.value as CreateVMRequest['network_mode'] })}><MenuItem value="NETWORK_MODE_NAT">User-mode NAT</MenuItem><MenuItem value="NETWORK_MODE_BRIDGE">Host bridge</MenuItem></TextField>
             {createRequest.network_mode === 'NETWORK_MODE_BRIDGE' && (
               <TextField select label="Bridge" value={createRequest.bridge_name ?? ''} onChange={(event) => setCreateRequest({ ...createRequest, bridge_name: event.target.value })} helperText={

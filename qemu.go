@@ -136,6 +136,12 @@ func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
 			arguments = append(arguments, "-device", "scsi-cd,id="+deviceID+",bus=scsi0.0")
 		}
 	}
+	if vm.CloudInit.Enabled {
+		arguments = append(arguments,
+			"-drive", "file="+filepath.Join(q.settings.DiskDir, vm.ID+"-cloud-init.iso")+",if=none,id=cloudinit,media=cdrom,readonly=on",
+			"-device", "scsi-cd,drive=cloudinit,bus=scsi0.0,id=cloudinitdev",
+		)
+	}
 	arguments = append(arguments, "-boot", "order="+q.bootOrder(vm)+",menu=on")
 	if vm.NetworkMode == networkModeBridge {
 		networkDevice := "virtio-net-pci,netdev=net0"

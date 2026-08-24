@@ -76,6 +76,7 @@ type virtualMachine struct {
 	IPMIError   string       `json:"-"`
 	Disks       []vmDisk     `json:"disks,omitempty"`
 	CDROMs      []vmCDROM    `json:"cdroms,omitempty"`
+	CloudInit   vmCloudInit  `json:"cloud_init,omitempty"`
 }
 
 type vmDisk struct {
@@ -87,6 +88,11 @@ type vmDisk struct {
 type vmCDROM struct {
 	ID      string `json:"id"`
 	ISOName string `json:"iso_name,omitempty"`
+}
+
+type vmCloudInit struct {
+	Enabled  bool   `json:"enabled,omitempty"`
+	UserData string `json:"user_data,omitempty"`
 }
 
 type vmIPMIConfig struct {
@@ -113,6 +119,7 @@ type createVMOptions struct {
 	ISOName     string
 	NetworkMode networkMode
 	BridgeName  string
+	CloudInit   vmCloudInit
 }
 
 type isoImage struct {
@@ -149,17 +156,18 @@ type vmNetworkLifecycle interface {
 }
 
 type vmManager struct {
-	mu               sync.Mutex
-	settings         config
-	store            virtualMachineStore
-	hypervisor       hypervisor
-	capabilities     func() hostCapabilities
-	bridgeCapability func(string) (bool, string)
-	networkLifecycle vmNetworkLifecycle
-	ipmi             vmIPMIController
-	now              func() time.Time
-	newID            func() (string, error)
-	vms              []virtualMachine
+	mu                sync.Mutex
+	settings          config
+	store             virtualMachineStore
+	hypervisor        hypervisor
+	capabilities      func() hostCapabilities
+	bridgeCapability  func(string) (bool, string)
+	networkLifecycle  vmNetworkLifecycle
+	ipmi              vmIPMIController
+	now               func() time.Time
+	newID             func() (string, error)
+	buildCloudInitISO cloudInitISOBuilder
+	vms               []virtualMachine
 }
 
 func newVMManager(settings config, store virtualMachineStore, hypervisor hypervisor, capabilities func() hostCapabilities) (*vmManager, error) {
@@ -174,7 +182,10 @@ func newVMManager(settings config, store virtualMachineStore, hypervisor hypervi
 		capabilities: capabilities,
 		now:          time.Now,
 		newID:        randomID,
-		vms:          vms,
+		buildCloudInitISO: func(ctx context.Context, destination string, options cloudInitISOOptions) error {
+			return createCloudInitISO(ctx, settings.XorrisoBinary, destination, options)
+		},
+		vms: vms,
 	}
 	manager.bridgeCapability = func(name string) (bool, string) {
 		status := capabilities()
@@ -258,6 +269,9 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 	if err := m.validateCreateOptions(options); err != nil {
 		return virtualMachine{}, err
 	}
+	if !options.CloudInit.Enabled {
+		options.CloudInit = vmCloudInit{}
+	}
 	if options.NetworkMode == networkModeNAT {
 		options.BridgeName = ""
 	}
@@ -288,14 +302,22 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 		CreatedAt:   m.now().UTC(),
 		Disks:       []vmDisk{{ID: "system", SizeGiB: options.DiskGiB, System: true}},
 		CDROMs:      []vmCDROM{{ID: "cdrom0", ISOName: options.ISOName}},
+		CloudInit:   options.CloudInit,
 	}
 	diskPath := m.diskPath(vm.ID)
 	if err := m.hypervisor.CreateDisk(ctx, diskPath, vm.DiskGiB); err != nil {
 		return virtualMachine{}, fmt.Errorf("create system disk: %w", err)
 	}
+	if vm.CloudInit.Enabled {
+		if err := m.buildCloudInitISO(ctx, m.cloudInitISOPath(vm.ID), cloudInitOptions(vm)); err != nil {
+			_ = removeIfExists(diskPath)
+			return virtualMachine{}, err
+		}
+	}
 	m.vms = append(m.vms, vm)
 	if err := m.store.Save(m.vms); err != nil {
 		_ = os.Remove(diskPath)
+		_ = removeIfExists(m.cloudInitISOPath(vm.ID))
 		m.vms = m.vms[:len(m.vms)-1]
 		return virtualMachine{}, err
 	}
@@ -355,6 +377,7 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 		CreatedAt:   m.now().UTC(),
 		Disks:       make([]vmDisk, 0, len(source.Disks)),
 		CDROMs:      make([]vmCDROM, 0, len(source.CDROMs)),
+		CloudInit:   source.CloudInit,
 	}
 	for _, sourceDisk := range source.Disks {
 		clonedDisk := sourceDisk
@@ -385,6 +408,16 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 			return virtualMachine{}, fmt.Errorf("copy disk %s: %w", sourceDisk.ID, err)
 		}
 		createdPaths = append(createdPaths, destinationPath)
+	}
+	if clone.CloudInit.Enabled {
+		cloudInitPath := m.cloudInitISOPath(clone.ID)
+		if err := m.buildCloudInitISO(ctx, cloudInitPath, cloudInitOptions(clone)); err != nil {
+			for _, path := range createdPaths {
+				_ = removeIfExists(path)
+			}
+			return virtualMachine{}, err
+		}
+		createdPaths = append(createdPaths, cloudInitPath)
 	}
 
 	m.vms = append(m.vms, clone)
@@ -436,6 +469,11 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 		}
 		if _, err := os.Stat(m.isoPath(cdrom.ISOName)); err != nil {
 			return virtualMachine{}, fmt.Errorf("CD-ROM ISO %s is unavailable: %w", cdrom.ISOName, err)
+		}
+	}
+	if vm.CloudInit.Enabled {
+		if _, err := os.Stat(m.cloudInitISOPath(vm.ID)); err != nil {
+			return virtualMachine{}, fmt.Errorf("cloud-init ISO is unavailable: %w", err)
 		}
 	}
 	if m.networkLifecycle != nil {
@@ -537,6 +575,9 @@ func (m *vmManager) Delete(id string) error {
 			return err
 		}
 	}
+	if err := removeIfExists(m.cloudInitISOPath(vm.ID)); err != nil {
+		return fmt.Errorf("remove cloud-init ISO: %w", err)
+	}
 	m.vms = append(m.vms[:index], m.vms[index+1:]...)
 	return m.store.Save(m.vms)
 }
@@ -566,11 +607,62 @@ func (m *vmManager) Update(id, name, description string, cpus, memoryMiB uint32)
 	m.vms[index].Description = description
 	m.vms[index].CPUs = cpus
 	m.vms[index].MemoryMiB = memoryMiB
+	commitCloudInit := func() {}
+	rollbackCloudInit := func() {}
+	if previous.Name != name && m.vms[index].CloudInit.Enabled {
+		var stageErr error
+		commitCloudInit, rollbackCloudInit, stageErr = m.stageCloudInitISO(context.Background(), m.vms[index])
+		if stageErr != nil {
+			m.vms[index] = previous
+			return virtualMachine{}, stageErr
+		}
+	}
 	if err := m.store.Save(m.vms); err != nil {
+		rollbackCloudInit()
 		m.vms[index] = previous
 		return virtualMachine{}, err
 	}
+	commitCloudInit()
 	return m.vms[index], nil
+}
+
+func (m *vmManager) ConfigureCloudInit(ctx context.Context, id string, configuration vmCloudInit) (virtualMachine, error) {
+	if err := validateCloudInit(configuration); err != nil {
+		return virtualMachine{}, err
+	}
+	if !configuration.Enabled {
+		configuration = vmCloudInit{}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.reconcileLocked(); err != nil {
+		return virtualMachine{}, err
+	}
+	index := m.indexByID(id)
+	if index == -1 {
+		return virtualMachine{}, errVMNotFound
+	}
+	previous := m.vms[index]
+	if previous.CloudInit == configuration {
+		return previous, nil
+	}
+	if vmIsActive(previous) {
+		return virtualMachine{}, errDeviceRunningVM
+	}
+	candidate := previous
+	candidate.CloudInit = configuration
+	commit, rollback, err := m.stageCloudInitISO(ctx, candidate)
+	if err != nil {
+		return virtualMachine{}, err
+	}
+	m.vms[index] = candidate
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms[index] = previous
+		rollback()
+		return virtualMachine{}, err
+	}
+	commit()
+	return candidate, nil
 }
 
 func (m *vmManager) UpdateNetwork(id string, mode networkMode, bridgeName, macAddress string) (virtualMachine, error) {
@@ -991,7 +1083,17 @@ func (m *vmManager) validateCreateOptions(options createVMOptions) error {
 	if options.ISOName == "" {
 		return &fieldError{field: "iso_name", message: "an installation ISO is required"}
 	}
-	return m.validateOptionalISO(options.ISOName)
+	if err := m.validateOptionalISO(options.ISOName); err != nil {
+		return err
+	}
+	return validateCloudInit(options.CloudInit)
+}
+
+func validateCloudInit(configuration vmCloudInit) error {
+	if len(configuration.UserData) > maxCloudInitUserDataBytes {
+		return &fieldError{field: "cloud_init_user_data", message: "must not exceed 1 MiB"}
+	}
+	return nil
 }
 
 func validateVMIdentityAndResources(name, description string, cpus, memoryMiB uint32) error {
@@ -1064,6 +1166,58 @@ func (m *vmManager) qmpSocketPath(id string) string {
 
 func (m *vmManager) vncSocketPath(id string) string {
 	return filepath.Join(m.settings.DiskDir, id+".vnc.sock")
+}
+
+func (m *vmManager) cloudInitISOPath(id string) string {
+	return filepath.Join(m.settings.DiskDir, id+"-cloud-init.iso")
+}
+
+func cloudInitOptions(vm virtualMachine) cloudInitISOOptions {
+	return cloudInitISOOptions{InstanceID: vm.ID, Hostname: vm.Name, UserData: vm.CloudInit.UserData}
+}
+
+func (m *vmManager) stageCloudInitISO(ctx context.Context, vm virtualMachine) (commit func(), rollback func(), err error) {
+	path := m.cloudInitISOPath(vm.ID)
+	stagedPath := path + ".new"
+	backupPath := path + ".previous"
+	for _, stalePath := range []string{stagedPath, backupPath} {
+		if err := removeIfExists(stalePath); err != nil {
+			return nil, nil, err
+		}
+	}
+	if vm.CloudInit.Enabled {
+		if err := m.buildCloudInitISO(ctx, stagedPath, cloudInitOptions(vm)); err != nil {
+			return nil, nil, err
+		}
+	}
+	hadPrevious := false
+	if _, statErr := os.Stat(path); statErr == nil {
+		if err := os.Rename(path, backupPath); err != nil {
+			_ = removeIfExists(stagedPath)
+			return nil, nil, err
+		}
+		hadPrevious = true
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		_ = removeIfExists(stagedPath)
+		return nil, nil, statErr
+	}
+	if vm.CloudInit.Enabled {
+		if err := os.Rename(stagedPath, path); err != nil {
+			if hadPrevious {
+				_ = os.Rename(backupPath, path)
+			}
+			return nil, nil, err
+		}
+	}
+	commit = func() { _ = removeIfExists(backupPath) }
+	rollback = func() {
+		_ = removeIfExists(path)
+		if hadPrevious {
+			_ = os.Rename(backupPath, path)
+		}
+		_ = removeIfExists(stagedPath)
+	}
+	return commit, rollback, nil
 }
 
 func randomID() (string, error) {

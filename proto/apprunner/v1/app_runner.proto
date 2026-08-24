@@ -25,6 +25,7 @@ service AppRunnerService {
   rpc AddVMCDROM(AddVMCDROMRequest) returns (AddVMCDROMResponse);
   rpc UpdateVMCDROM(UpdateVMCDROMRequest) returns (UpdateVMCDROMResponse);
   rpc RemoveVMCDROM(RemoveVMCDROMRequest) returns (RemoveVMCDROMResponse);
+  rpc ConfigureVMCloudInit(ConfigureVMCloudInitRequest) returns (ConfigureVMCloudInitResponse);
   rpc ConfigureVMIPMI(ConfigureVMIPMIRequest) returns (ConfigureVMIPMIResponse);
   rpc DeleteVM(DeleteVMRequest) returns (DeleteVMResponse);
   rpc GetNetworkingStatus(GetNetworkingStatusRequest) returns (GetNetworkingStatusResponse);
@@ -81,6 +82,7 @@ message VirtualMachine {
   repeated VMDisk disks = 15;
   repeated VMCDROM cdroms = 16;
   string mac_address = 17;
+  VMCloudInit cloud_init = 18;
 }
 
 message VMDisk {
@@ -92,6 +94,11 @@ message VMDisk {
 message VMCDROM {
   string id = 1;
   string iso_name = 2;
+}
+
+message VMCloudInit {
+  bool enabled = 1;
+  string user_data = 2;
 }
 
 message VMIPMIStatus {
@@ -188,6 +195,8 @@ message CreateVMRequest {
   string iso_name = 5;
   NetworkMode network_mode = 6;
   string bridge_name = 7;
+  bool cloud_init_enabled = 8;
+  string cloud_init_user_data = 9;
 }
 
 message CreateVMResponse {
@@ -294,6 +303,16 @@ message RemoveVMCDROMRequest {
 }
 
 message RemoveVMCDROMResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message ConfigureVMCloudInitRequest {
+  string id = 1;
+  bool enabled = 2;
+  string user_data = 3;
+}
+
+message ConfigureVMCloudInitResponse {
   VirtualMachine virtual_machine = 1;
 }
 

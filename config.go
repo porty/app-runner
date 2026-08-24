@@ -20,6 +20,7 @@ type config struct {
 	BridgeName    string `json:"bridge_name"`
 	QEMUBinary    string `json:"qemu_binary"`
 	QEMUImgBinary string `json:"qemu_img_binary"`
+	XorrisoBinary string `json:"xorriso_binary"`
 }
 
 func defaultConfig(workingDirectory string) config {
@@ -30,6 +31,7 @@ func defaultConfig(workingDirectory string) config {
 		BridgeName:    "br0",
 		QEMUBinary:    "qemu-system-x86_64",
 		QEMUImgBinary: "qemu-img",
+		XorrisoBinary: "xorriso",
 	}
 }
 
@@ -55,6 +57,7 @@ func loadConfig(args []string, workingDirectory string) (config, error) {
 	flags.StringVar(&settings.BridgeName, "bridge", settings.BridgeName, "host bridge used by bridge networking")
 	flags.StringVar(&settings.QEMUBinary, "qemu", settings.QEMUBinary, "QEMU system binary")
 	flags.StringVar(&settings.QEMUImgBinary, "qemu-img", settings.QEMUImgBinary, "qemu-img binary")
+	flags.StringVar(&settings.XorrisoBinary, "xorriso", settings.XorrisoBinary, "xorriso binary used to build cloud-init ISO images")
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}

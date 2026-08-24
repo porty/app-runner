@@ -22,6 +22,9 @@ func TestLoadConfigUsesDefaultsAndCLIOverrides(t *testing.T) {
 	if settings.DiskDir != filepath.Join(workingDirectory, "disk") {
 		t.Fatalf("unexpected disk directory: %q", settings.DiskDir)
 	}
+	if settings.XorrisoBinary != "xorriso" {
+		t.Fatalf("unexpected xorriso binary: %q", settings.XorrisoBinary)
+	}
 }
 
 func TestLoadConfigAppliesFileBeforeCLI(t *testing.T) {
