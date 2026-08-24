@@ -93,7 +93,7 @@ function StorageEntry({ entry, root, depth }: { entry: StorageNode; root: Storag
   const [open, setOpen] = useState(false)
   const children = entry.children ?? []
   const canCreateVM = root === 'iso' && !directory && /\.(?:iso|img|qcow2)$/i.test(entry.name)
-  const createVMSearch = new URLSearchParams({ create: '1', source_root: root, source_path: entry.path }).toString()
+  const createVMSearch = new URLSearchParams({ tab: 'storage', source_root: root, source_path: entry.path }).toString()
 
   return (
     <>
@@ -128,7 +128,7 @@ function StorageEntry({ entry, root, depth }: { entry: StorageNode; root: Storag
         {canCreateVM && (
           <Button
             component={Link}
-            to={`/compute/virtual-machines?${createVMSearch}`}
+            to={`/compute/virtual-machines/new?${createVMSearch}`}
             size="small"
             startIcon={<AddRounded />}
             sx={{ ml: 2, flexShrink: 0 }}
