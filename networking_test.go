@@ -160,6 +160,41 @@ func TestNetworkingStatusMapsManagedVMsToTheirBridges(t *testing.T) {
 	}
 }
 
+func TestNetworkManagerRestoresMissingConfiguredBridge(t *testing.T) {
+	vms, _, settings := newTestVMManager(t)
+	if _, err := vms.Create(t.Context(), createVMOptions{
+		Name: "bridge-workload", CPUs: 1, MemoryMiB: 512, DiskGiB: 1,
+		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br-lab",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeNetworkProvider{}
+	manager, err := newNetworkManager(provider, vms, settings.DiskDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.newID = func() (string, error) { return "restore-bridge", nil }
+
+	status, err := manager.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Bridges) != 1 || len(status.Bridges[0].Diagnostics) != 1 || status.Bridges[0].Diagnostics[0].Key != "bridge_missing" {
+		t.Fatalf("missing bridge was not exposed for repair: %#v", status.Bridges)
+	}
+
+	pending, err := manager.Apply(t.Context(), networkChange{Type: networkChangeCreateBridge, BridgeName: "br-lab"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.applied) != 1 || provider.applied[0].Type != networkChangeCreateBridge || provider.applied[0].BridgeName != "br-lab" {
+		t.Fatalf("missing bridge was not created: %#v", provider.applied)
+	}
+	if err := manager.Confirm(pending.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNetworkingStatusIncludesBridgeDHCPConfiguration(t *testing.T) {
 	vms, _, settings := newTestVMManager(t)
 	bridgeProvider := &fakeDHCPBridgeProvider{}

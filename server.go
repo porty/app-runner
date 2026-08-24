@@ -1,11 +1,9 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
 	"path"
 	"strings"
@@ -37,32 +35,7 @@ func newHTTPHandler(frontend fs.FS, runtimes ...appRuntime) http.Handler {
 		mux.Handle("/", spaHandler(frontend))
 	}
 
-	return requestLogger(withClientAddress(mux))
-}
-
-type clientAddressContextKey struct{}
-
-func withClientAddress(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		host, _, err := net.SplitHostPort(request.RemoteAddr)
-		if err != nil {
-			host = request.RemoteAddr
-		}
-		address := net.ParseIP(host)
-		if address != nil && address.IsLoopback() {
-			forwardedFor := strings.TrimSpace(strings.Split(request.Header.Get("X-Forwarded-For"), ",")[0])
-			if forwardedAddress := net.ParseIP(forwardedFor); forwardedAddress != nil {
-				address = forwardedAddress
-			}
-		}
-		ctx := context.WithValue(request.Context(), clientAddressContextKey{}, address)
-		next.ServeHTTP(response, request.WithContext(ctx))
-	})
-}
-
-func isLoopbackRequest(ctx context.Context) bool {
-	address, _ := ctx.Value(clientAddressContextKey{}).(net.IP)
-	return address != nil && address.IsLoopback()
+	return requestLogger(mux)
 }
 
 func developmentInfo(response http.ResponseWriter, _ *http.Request) {

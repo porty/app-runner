@@ -257,9 +257,6 @@ func (s *appRunnerService) ApplyNetworkChange(ctx context.Context, request *appr
 	if s.networking == nil {
 		return nil, twirp.InternalError("network manager is not configured")
 	}
-	if !isLoopbackRequest(ctx) {
-		return nil, twirp.NewError(twirp.PermissionDenied, "network changes are accepted only from a browser connected through loopback")
-	}
 	changeType, err := networkChangeTypeFromProto(request.GetType())
 	if err != nil {
 		return nil, err
@@ -282,9 +279,6 @@ func (s *appRunnerService) ConfirmNetworkChange(ctx context.Context, request *ap
 	if s.networking == nil {
 		return nil, twirp.InternalError("network manager is not configured")
 	}
-	if !isLoopbackRequest(ctx) {
-		return nil, twirp.NewError(twirp.PermissionDenied, "network changes are accepted only from a browser connected through loopback")
-	}
 	if err := s.networking.Confirm(request.GetId()); err != nil {
 		return nil, twirp.NotFoundError(err.Error())
 	}
@@ -299,9 +293,6 @@ func (s *appRunnerService) RevertNetworkChange(ctx context.Context, request *app
 	if s.networking == nil {
 		return nil, twirp.InternalError("network manager is not configured")
 	}
-	if !isLoopbackRequest(ctx) {
-		return nil, twirp.NewError(twirp.PermissionDenied, "network changes are accepted only from a browser connected through loopback")
-	}
 	if err := s.networking.Revert(request.GetId()); err != nil {
 		return nil, twirp.NewError(twirp.FailedPrecondition, err.Error())
 	}
@@ -315,9 +306,6 @@ func (s *appRunnerService) RevertNetworkChange(ctx context.Context, request *app
 func (s *appRunnerService) ConfigureBridgeDHCP(ctx context.Context, request *apprunnerv1.ConfigureBridgeDHCPRequest) (*apprunnerv1.ConfigureBridgeDHCPResponse, error) {
 	if s.networking == nil {
 		return nil, twirp.InternalError("network manager is not configured")
-	}
-	if !isLoopbackRequest(ctx) {
-		return nil, twirp.NewError(twirp.PermissionDenied, "managed network service changes are accepted only from a browser connected through loopback")
 	}
 	if err := s.networking.ConfigureBridgeSettings(
 		request.GetBridgeName(), request.GetDescription(), request.GetEnabled(), request.GetCidr(), request.GetNatEnabled(),
