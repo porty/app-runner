@@ -14,4 +14,6 @@ The project is distributed as one executable containing both the management serv
 
 Cloud-init support uses `xorriso` to generate per-VM NoCloud ISO images. The binary defaults to `xorriso` and can be changed with the `xorriso_binary` configuration setting or `-xorriso` command-line flag. Reusable user-data templates are stored privately in `disk/cloud-init-templates.json`.
 
+QCow2 cloud images can currently be stored in `iso/` with an `.img` or `.qcow2` extension. VMs created from them use a linked qcow2 overlay and per-VM OVMF variable store, so the backing image must remain in place. Common OVMF locations are detected automatically; `uefi_code_path` and `uefi_vars_path` override them when needed.
+
 See [Architectural decisions](docs/architecture-decisions.md) for the constraints and tradeoffs that shape the project.

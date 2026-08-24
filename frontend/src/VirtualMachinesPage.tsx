@@ -7,11 +7,11 @@ import {
   AddRounded, ContentCopyRounded, DeleteOutlineRounded, DesktopWindowsRounded, PlayArrowRounded,
   PowerSettingsNewRounded, SettingsRounded, StopRounded,
 } from '@mui/icons-material'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import {
-  cloneVM, createCloudInitTemplate, createVM, deleteVM, getNetworkingStatus, listCloudInitTemplates, listISOs, listVMs, startVM, stopVM,
-  type CloudInitTemplate, type CreateVMRequest, type ISOImage, type NetworkingStatus, type VirtualMachine, type VMStatus,
+  cloneVM, createCloudInitTemplate, createVM, deleteVM, getNetworkingStatus, listCloudInitTemplates, listDiskImages, listISOs, listVMs, startVM, stopVM,
+  type CloudInitTemplate, type CreateVMRequest, type DiskImage, type ISOImage, type NetworkingStatus, type VirtualMachine, type VMStatus,
 } from './api'
 import { canAccessVMConsole } from './vmConsoleAccess'
 
@@ -19,6 +19,7 @@ const defaultCreateRequest: CreateVMRequest = {
   name: '', cpus: 2, memory_mib: 2048, disk_gib: 20, iso_name: '',
   network_mode: 'NETWORK_MODE_NAT', bridge_name: '',
   cloud_init_enabled: false, cloud_init_user_data: '',
+  source_image: '',
 }
 const dnsLabelPattern = /^(?=.{1,63}$)[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/
 const statusDetails: Record<VMStatus, { label: string; color: 'default' | 'success' | 'warning' | 'error' }> = {
@@ -30,14 +31,17 @@ const statusDetails: Record<VMStatus, { label: string; color: 'default' | 'succe
 }
 
 export default function VirtualMachinesPage({ refreshInterval }: { refreshInterval: number | null }) {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [virtualMachines, setVirtualMachines] = useState<VirtualMachine[]>([])
   const [images, setImages] = useState<ISOImage[]>([])
+  const [diskImages, setDiskImages] = useState<DiskImage[]>([])
   const [networking, setNetworking] = useState<NetworkingStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [busyID, setBusyID] = useState('')
   const [error, setError] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [createRequest, setCreateRequest] = useState<CreateVMRequest>(defaultCreateRequest)
+  const [creationSource, setCreationSource] = useState<'installer' | 'cloud-image'>('installer')
   const [cloudInitTemplates, setCloudInitTemplates] = useState<CloudInitTemplate[]>([])
   const [selectedCloudInitTemplate, setSelectedCloudInitTemplate] = useState('')
   const [saveCloudInitTemplate, setSaveCloudInitTemplate] = useState(false)
@@ -57,9 +61,10 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true)
     try {
-      const [vms, isos, networkStatus] = await Promise.all([listVMs(), listISOs(), getNetworkingStatus()])
+      const [vms, isos, cloudImages, networkStatus] = await Promise.all([listVMs(), listISOs(), listDiskImages(), getNetworkingStatus()])
       setVirtualMachines(vms)
       setImages(isos)
+      setDiskImages(cloudImages)
       setNetworking(networkStatus)
       const bridges = networkStatus.bridges ?? []
       const suggestedBridge = bridges.find((bridge) => bridge.usable_by_qemu)?.name ?? bridges[0]?.name ?? ''
@@ -82,6 +87,26 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
     const timer = window.setInterval(() => void refresh(), refreshInterval)
     return () => window.clearInterval(timer)
   }, [refresh, refreshInterval])
+
+  useEffect(() => {
+    if (loading || searchParams.get('create') !== '1') return
+    const sourceRoot = searchParams.get('source_root')
+    const sourcePath = searchParams.get('source_path') ?? ''
+    if (sourceRoot === 'iso' && sourcePath) {
+      const cloudImage = /\.(?:img|qcow2)$/i.test(sourcePath)
+      setCreationSource(cloudImage ? 'cloud-image' : 'installer')
+      setCreateRequest((current) => ({
+        ...current,
+        iso_name: cloudImage ? '' : sourcePath,
+        source_image: cloudImage ? sourcePath : '',
+        cloud_init_enabled: cloudImage || current.cloud_init_enabled,
+      }))
+      void openCreate()
+    }
+    setSearchParams({}, { replace: true })
+  // Deep links are consumed once after the source listings have loaded.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, searchParams, setSearchParams])
 
   const runOperation = async (id: string, operation: () => Promise<unknown>) => {
     setBusyID(id)
@@ -107,9 +132,14 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
         setSaveCloudInitTemplate(false)
         setNewCloudInitTemplateName('')
       }
-      await createVM(createRequest)
+      await createVM({
+        ...createRequest,
+        iso_name: creationSource === 'installer' ? createRequest.iso_name : '',
+        source_image: creationSource === 'cloud-image' ? createRequest.source_image : '',
+      })
       setCreateOpen(false)
       setCreateRequest({ ...defaultCreateRequest, iso_name: images[0]?.name ?? '' })
+      setCreationSource(images.length > 0 ? 'installer' : 'cloud-image')
       setSelectedCloudInitTemplate('')
       setSaveCloudInitTemplate(false)
       setNewCloudInitTemplateName('')
@@ -122,6 +152,10 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
   }
 
   const openCreate = async () => {
+    if (images.length === 0 && diskImages.length > 0 && !createRequest.source_image) {
+      setCreationSource('cloud-image')
+      setCreateRequest((current) => ({ ...current, iso_name: '', source_image: diskImages[0].name, cloud_init_enabled: true }))
+    }
     setCreateOpen(true)
     setError('')
     try {
@@ -129,6 +163,16 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Cloud Init templates could not be loaded')
     }
+  }
+
+  const selectCreationSource = (source: 'installer' | 'cloud-image') => {
+    setCreationSource(source)
+    setCreateRequest((current) => ({
+      ...current,
+      iso_name: source === 'installer' ? (current.iso_name || images[0]?.name || '') : '',
+      source_image: source === 'cloud-image' ? (current.source_image || diskImages[0]?.name || '') : '',
+      cloud_init_enabled: source === 'cloud-image' ? true : current.cloud_init_enabled,
+    }))
   }
 
   const loadCloudInitTemplate = (name: string) => {
@@ -174,17 +218,17 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
           <Typography variant="h4">Virtual machines</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.75 }}>Create and manage local QEMU/KVM workloads.</Typography>
         </Box>
-        <Button variant="contained" startIcon={<AddRounded />} onClick={() => void openCreate()} disabled={images.length === 0 || loading} sx={{ alignSelf: { xs: 'stretch', sm: 'center' } }}>
+        <Button variant="contained" startIcon={<AddRounded />} onClick={() => void openCreate()} disabled={(images.length === 0 && diskImages.length === 0) || loading} sx={{ alignSelf: { xs: 'stretch', sm: 'center' } }}>
           Create virtual machine
         </Button>
       </Stack>
 
       {error && <Alert severity="error" onClose={() => setError('')} sx={{ mb: 2.5 }}>{error}</Alert>}
-      {!loading && images.length === 0 && <Alert severity="info" sx={{ mb: 2.5 }}>Add an `.iso` file to the configured ISO directory before creating a virtual machine.</Alert>}
+      {!loading && images.length === 0 && diskImages.length === 0 && <Alert severity="info" sx={{ mb: 2.5 }}>Add an installer `.iso` or qcow2 `.img` / `.qcow2` cloud image to ISO storage before creating a virtual machine.</Alert>}
 
       <TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
         <Table>
-          <TableHead><TableRow><TableCell>Name</TableCell><TableCell>Status</TableCell><TableCell>Resources</TableCell><TableCell>Network</TableCell><TableCell>Installation media</TableCell><TableCell align="right">Actions</TableCell></TableRow></TableHead>
+          <TableHead><TableRow><TableCell>Name</TableCell><TableCell>Status</TableCell><TableCell>Resources</TableCell><TableCell>Network</TableCell><TableCell>Boot source</TableCell><TableCell align="right">Actions</TableCell></TableRow></TableHead>
           <TableBody>
             {virtualMachines.map((vm) => {
               const running = vm.status === 'VM_STATUS_RUNNING'
@@ -205,7 +249,7 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{vm.mac_address}</Typography>
                     {vm.ipmi?.enabled && <Typography variant="caption" sx={{ display: 'block' }} color={vm.ipmi.running ? 'success.main' : 'error.main'}>IPMI {vm.ipmi.address}:{vm.ipmi.port || 623}{vm.ipmi.running ? '' : ` · ${vm.ipmi.last_error || 'not listening'}`}</Typography>}
                   </TableCell>
-                  <TableCell>{(vm.cdroms ?? []).map((cdrom) => cdrom.iso_name || 'Ejected').join(', ') || vm.iso_name || 'No CD-ROM'}</TableCell>
+                  <TableCell>{vm.source_image ? `Cloud image: ${vm.source_image}` : (vm.cdroms ?? []).map((cdrom) => cdrom.iso_name || 'Ejected').join(', ') || vm.iso_name || 'No CD-ROM'}</TableCell>
                   <TableCell align="right">
                     <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
                       <Button component={Link} to={`/compute/virtual-machines/${vm.id}/settings`} size="small" startIcon={<SettingsRounded />} disabled={busy}>Settings</Button>
@@ -220,7 +264,7 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
                 </TableRow>
               )
             })}
-            {!loading && virtualMachines.length === 0 && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 8 }}><DesktopWindowsRounded color="disabled" sx={{ fontSize: 44 }} /><Typography variant="h6" sx={{ mt: 1 }}>No virtual machines yet</Typography><Typography color="text.secondary">Select an ISO and create your first workload.</Typography></TableCell></TableRow>}
+            {!loading && virtualMachines.length === 0 && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 8 }}><DesktopWindowsRounded color="disabled" sx={{ fontSize: 44 }} /><Typography variant="h6" sx={{ mt: 1 }}>No virtual machines yet</Typography><Typography color="text.secondary">Select an installer or cloud image to create your first workload.</Typography></TableCell></TableRow>}
           </TableBody>
         </Table>
       </TableContainer>
@@ -235,7 +279,17 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
               <TextField fullWidth type="number" label="Memory (MiB)" slotProps={{ htmlInput: { min: 256, step: 256 } }} value={createRequest.memory_mib} onChange={(event) => setCreateRequest({ ...createRequest, memory_mib: Number(event.target.value) })} />
               <TextField fullWidth type="number" label="Disk (GiB)" slotProps={{ htmlInput: { min: 1 } }} value={createRequest.disk_gib} onChange={(event) => setCreateRequest({ ...createRequest, disk_gib: Number(event.target.value) })} />
             </Stack>
-            <TextField select label="Installation ISO" value={createRequest.iso_name} onChange={(event) => setCreateRequest({ ...createRequest, iso_name: event.target.value })}>{images.map((image) => <MenuItem key={image.name} value={image.name}>{image.name} · {formatBytes(image.size_bytes)}</MenuItem>)}</TextField>
+            <TextField select label="Creation source" value={creationSource} onChange={(event) => selectCreationSource(event.target.value as 'installer' | 'cloud-image')}>
+              <MenuItem value="installer" disabled={images.length === 0}>Installation ISO</MenuItem>
+              <MenuItem value="cloud-image" disabled={diskImages.length === 0}>Cloud disk image (linked clone)</MenuItem>
+            </TextField>
+            {creationSource === 'installer' ? (
+              <TextField select label="Installation ISO" value={createRequest.iso_name} onChange={(event) => setCreateRequest({ ...createRequest, iso_name: event.target.value })}>{images.map((image) => <MenuItem key={image.name} value={image.name}>{image.name} · {formatBytes(image.size_bytes)}</MenuItem>)}</TextField>
+            ) : (
+              <TextField select label="Cloud disk image" value={createRequest.source_image} onChange={(event) => setCreateRequest({ ...createRequest, source_image: event.target.value })} helperText="Creates a qcow2 overlay backed by the selected image and boots it with UEFI. The backing image must remain in place.">
+                {diskImages.map((image) => <MenuItem key={image.name} value={image.name}>{image.name} · {formatBytes(image.size_bytes)}</MenuItem>)}
+              </TextField>
+            )}
             <FormControlLabel
               control={<Switch checked={createRequest.cloud_init_enabled} onChange={(event) => setCreateRequest({ ...createRequest, cloud_init_enabled: event.target.checked })} />}
               label="Enable Cloud Init"
@@ -281,7 +335,7 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
             )}
           </Stack>
         </DialogContent>
-        <DialogActions><Button onClick={() => setCreateOpen(false)}>Cancel</Button><Button variant="contained" onClick={() => void submitCreate()} disabled={busyID === 'create' || !createNameValid || !createRequest.iso_name || (createRequest.network_mode === 'NETWORK_MODE_BRIDGE' && !createRequest.bridge_name) || (createRequest.cloud_init_enabled && saveCloudInitTemplate && !cloudInitTemplateNameValid)}>{busyID === 'create' ? 'Creating…' : 'Create'}</Button></DialogActions>
+        <DialogActions><Button onClick={() => setCreateOpen(false)}>Cancel</Button><Button variant="contained" onClick={() => void submitCreate()} disabled={busyID === 'create' || !createNameValid || (creationSource === 'installer' ? !createRequest.iso_name : !createRequest.source_image) || (createRequest.network_mode === 'NETWORK_MODE_BRIDGE' && !createRequest.bridge_name) || (createRequest.cloud_init_enabled && saveCloudInitTemplate && !cloudInitTemplateNameValid)}>{busyID === 'create' ? 'Creating…' : 'Create'}</Button></DialogActions>
       </Dialog>
 
       <Dialog open={Boolean(cloneSource)} onClose={cloneBusy ? undefined : () => setCloneSource(null)} fullWidth maxWidth="sm">

@@ -37,6 +37,8 @@ export interface VirtualMachine {
   disks?: VMDisk[]
   cdroms?: VMCDROM[]
   cloud_init?: VMCloudInit
+  source_image?: string
+  firmware?: string
 }
 
 export interface VMDisk {
@@ -115,6 +117,11 @@ export interface ISOImage {
   size_bytes: string
 }
 
+export interface DiskImage {
+  name: string
+  size_bytes: string
+}
+
 export interface CreateVMRequest {
   name: string
   cpus: number
@@ -125,6 +132,7 @@ export interface CreateVMRequest {
   bridge_name?: string
   cloud_init_enabled: boolean
   cloud_init_user_data: string
+  source_image: string
 }
 
 export type DiagnosticStatus =
@@ -337,6 +345,11 @@ export async function getHostStatus(): Promise<HostStatus> {
 
 export async function listISOs(): Promise<ISOImage[]> {
   const response = await callTwirp<{ images?: ISOImage[] }>('ListISOs', {})
+  return response.images ?? []
+}
+
+export async function listDiskImages(): Promise<DiskImage[]> {
+  const response = await callTwirp<{ images?: DiskImage[] }>('ListDiskImages', {})
   return response.images ?? []
 }
 

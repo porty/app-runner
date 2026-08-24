@@ -4,5 +4,7 @@
   "disk_dir": "disk",
   "qemu_binary": "qemu-system-x86_64",
   "qemu_img_binary": "qemu-img",
-  "xorriso_binary": "xorriso"
+  "xorriso_binary": "xorriso",
+  "uefi_code_path": "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
+  "uefi_vars_path": "/usr/share/edk2/x64/OVMF_VARS.4m.fd"
 }

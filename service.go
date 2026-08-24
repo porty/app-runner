@@ -72,6 +72,21 @@ func (s *appRunnerService) ListISOs(context.Context, *apprunnerv1.ListISOsReques
 	return response, nil
 }
 
+func (s *appRunnerService) ListDiskImages(context.Context, *apprunnerv1.ListDiskImagesRequest) (*apprunnerv1.ListDiskImagesResponse, error) {
+	if err := s.requireManager(); err != nil {
+		return nil, err
+	}
+	images, err := s.manager.ListDiskImages()
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	response := &apprunnerv1.ListDiskImagesResponse{Images: make([]*apprunnerv1.DiskImage, 0, len(images))}
+	for _, image := range images {
+		response.Images = append(response.Images, &apprunnerv1.DiskImage{Name: image.Name, SizeBytes: image.SizeBytes})
+	}
+	return response, nil
+}
+
 func (s *appRunnerService) ListVMs(context.Context, *apprunnerv1.ListVMsRequest) (*apprunnerv1.ListVMsResponse, error) {
 	if err := s.requireManager(); err != nil {
 		return nil, err
@@ -109,8 +124,9 @@ func (s *appRunnerService) CreateVM(ctx context.Context, request *apprunnerv1.Cr
 	vm, err := s.manager.Create(ctx, createVMOptions{
 		Name: request.GetName(), CPUs: request.GetCpus(), MemoryMiB: request.GetMemoryMib(),
 		DiskGiB: request.GetDiskGib(), ISOName: request.GetIsoName(), NetworkMode: mode,
-		BridgeName: request.GetBridgeName(),
-		CloudInit:  vmCloudInit{Enabled: request.GetCloudInitEnabled(), UserData: request.GetCloudInitUserData()},
+		BridgeName:  request.GetBridgeName(),
+		CloudInit:   vmCloudInit{Enabled: request.GetCloudInitEnabled(), UserData: request.GetCloudInitUserData()},
+		SourceImage: request.GetSourceImage(),
 	})
 	if err != nil {
 		return nil, rpcError(err)
@@ -436,7 +452,8 @@ func virtualMachineToProto(vm virtualMachine) *apprunnerv1.VirtualMachine {
 			Enabled: vm.IPMI.Enabled, BridgeName: vm.IPMI.BridgeName, Address: vm.IPMI.Address,
 			Port: ipmiPort, Username: vm.IPMI.Username, Running: vm.IPMIRunning, LastError: vm.IPMIError,
 		},
-		CloudInit: &apprunnerv1.VMCloudInit{Enabled: vm.CloudInit.Enabled, UserData: vm.CloudInit.UserData},
+		CloudInit:   &apprunnerv1.VMCloudInit{Enabled: vm.CloudInit.Enabled, UserData: vm.CloudInit.UserData},
+		SourceImage: vm.SourceImage, Firmware: string(vm.Firmware),
 	}
 	for _, disk := range vm.Disks {
 		result.Disks = append(result.Disks, &apprunnerv1.VMDisk{Id: disk.ID, SizeGib: disk.SizeGiB, System: disk.System})

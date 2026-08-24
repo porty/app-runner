@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -107,6 +109,55 @@ func TestQEMUArgumentsMountCloudInitISO(t *testing.T) {
 	} {
 		if !slices.Contains(arguments, expected) {
 			t.Fatalf("cloud-init argument %q is missing: %#v", expected, arguments)
+		}
+	}
+}
+
+func TestQEMUCreatesLinkedQCow2Disk(t *testing.T) {
+	qemuImg, err := exec.LookPath("qemu-img")
+	if err != nil {
+		t.Skip("qemu-img is not installed")
+	}
+	directory := t.TempDir()
+	backingPath := filepath.Join(directory, "ubuntu.img")
+	if output, err := exec.Command(qemuImg, "create", "-f", "qcow2", backingPath, "4G").CombinedOutput(); err != nil {
+		t.Fatalf("create backing image: %s: %v", output, err)
+	}
+	settings := defaultConfig(directory)
+	settings.QEMUImgBinary = qemuImg
+	qemu := newQEMUHypervisor(settings)
+	overlayPath := filepath.Join(directory, "overlay.qcow2")
+	if err := qemu.CreateLinkedDisk(context.Background(), overlayPath, backingPath, 20); err != nil {
+		t.Fatal(err)
+	}
+	output, err := exec.Command(qemuImg, "info", "--output=json", overlayPath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("inspect overlay: %s: %v", output, err)
+	}
+	var info struct {
+		Format          string `json:"format"`
+		VirtualSize     uint64 `json:"virtual-size"`
+		BackingFilename string `json:"backing-filename"`
+	}
+	if err := json.Unmarshal(output, &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Format != "qcow2" || info.VirtualSize != 20<<30 || info.BackingFilename != backingPath {
+		t.Fatalf("unexpected linked overlay information: %#v", info)
+	}
+}
+
+func TestQEMUArgumentsUsePersistentUEFIFirmware(t *testing.T) {
+	settings := defaultConfig(t.TempDir())
+	settings.UEFICodePath = "/firmware/OVMF_CODE.fd"
+	qemu := newQEMUHypervisor(settings)
+	arguments := qemu.arguments(virtualMachine{ID: "vm-id", Firmware: vmFirmwareUEFI, NetworkMode: networkModeNAT})
+	for _, expected := range []string{
+		"if=pflash,format=raw,unit=0,readonly=on,file=/firmware/OVMF_CODE.fd",
+		"if=pflash,format=raw,unit=1,file=" + filepath.Join(settings.DiskDir, "vm-id-uefi-vars.fd"),
+	} {
+		if !slices.Contains(arguments, expected) {
+			t.Fatalf("UEFI argument %q is missing: %#v", expected, arguments)
 		}
 	}
 }

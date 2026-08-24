@@ -25,6 +25,7 @@ import {
 } from '@mui/material'
 import {
   AlbumRounded,
+  AddRounded,
   ChevronRightRounded,
   ExpandMoreRounded,
   FolderOpenRounded,
@@ -33,6 +34,7 @@ import {
   SdCardRounded,
   UploadFileRounded,
 } from '@mui/icons-material'
+import { Link } from 'react-router-dom'
 
 import {
   downloadStorageFile,
@@ -47,6 +49,11 @@ type UploadMethod = 'device' | 'url'
 
 function storageIcon(root: StorageRootName) {
   return root === 'iso' ? <AlbumRounded color="primary" /> : <SdCardRounded color="secondary" />
+}
+
+function storageFileIcon(root: StorageRootName, name: string) {
+  if (root === 'iso' && /\.(?:img|qcow2)$/i.test(name)) return <SdCardRounded color="secondary" />
+  return storageIcon(root)
 }
 
 function formatSize(bytes = 0): string {
@@ -85,6 +92,8 @@ function StorageEntry({ entry, root, depth }: { entry: StorageNode; root: Storag
   const directory = entry.kind === 'directory'
   const [open, setOpen] = useState(false)
   const children = entry.children ?? []
+  const canCreateVM = root === 'iso' && !directory && /\.(?:iso|img|qcow2)$/i.test(entry.name)
+  const createVMSearch = new URLSearchParams({ create: '1', source_root: root, source_path: entry.path }).toString()
 
   return (
     <>
@@ -98,7 +107,7 @@ function StorageEntry({ entry, root, depth }: { entry: StorageNode; root: Storag
           {directory && (open ? <ExpandMoreRounded fontSize="small" /> : <ChevronRightRounded fontSize="small" />)}
         </Box>
         <ListItemIcon sx={{ minWidth: 38 }}>
-          {directory ? (open ? <FolderOpenRounded color="warning" /> : <FolderRounded color="warning" />) : storageIcon(root)}
+          {directory ? (open ? <FolderOpenRounded color="warning" /> : <FolderRounded color="warning" />) : storageFileIcon(root, entry.name)}
         </ListItemIcon>
         <ListItemText
           primary={entry.name}
@@ -115,6 +124,17 @@ function StorageEntry({ entry, root, depth }: { entry: StorageNode; root: Storag
               {formatModified(entry.modified_at)}
             </Typography>
           </Stack>
+        )}
+        {canCreateVM && (
+          <Button
+            component={Link}
+            to={`/compute/virtual-machines?${createVMSearch}`}
+            size="small"
+            startIcon={<AddRounded />}
+            sx={{ ml: 2, flexShrink: 0 }}
+          >
+            Create VM
+          </Button>
         )}
       </ListItemButton>
       {directory && (
