@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { applyNetworkChange, configureBridgeDHCP, configureVMIPMI, createVM, echo, getNetworkingStatus, listVMs, ping } from './api'
+import { applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMIPMI, createVM, downloadStorageFile, echo, getNetworkingStatus, listStorage, listVMs, ping, uploadStorageFiles } from './api'
 
 describe('Twirp API client', () => {
   afterEach(() => {
@@ -96,6 +96,20 @@ describe('Twirp API client', () => {
           network_mode: 'NETWORK_MODE_NAT',
         }),
       }),
+    )
+  })
+
+  it('clones a VM with its requested new name', async () => {
+    const virtualMachine = { id: 'clone-id', name: 'Development-copy', status: 'VM_STATUS_STOPPED' as const }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ virtual_machine: virtualMachine }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(cloneVM('vm-id', 'Development-copy')).resolves.toEqual(virtualMachine)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/twirp/apprunner.v1.AppRunnerService/CloneVM',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ id: 'vm-id', name: 'Development-copy' }) }),
     )
   })
 
@@ -203,5 +217,53 @@ describe('Twirp API client', () => {
       '/twirp/apprunner.v1.AppRunnerService/ConfigureVMIPMI',
       expect.objectContaining({ body: JSON.stringify(configuration) }),
     )
+  })
+
+  it('loads the recursive storage roots', async () => {
+    const rpcRoots = [{ name: 'iso', entries: [{ name: 'linux', path: 'linux', kind: 'STORAGE_ENTRY_KIND_DIRECTORY', children: [] }] }]
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ roots: rpcRoots }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listStorage()).resolves.toEqual([
+      { name: 'iso', entries: [{ name: 'linux', path: 'linux', kind: 'directory', size_bytes: 0, children: [] }] },
+    ])
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/twirp/apprunner.v1.AppRunnerService/ListStorage',
+      expect.objectContaining({ method: 'POST', body: '{}' }),
+    )
+  })
+
+  it('uploads browser files as multipart form data', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ uploaded: [] }), {
+      status: 201, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const file = new File(['image'], 'installer.iso')
+
+    await uploadStorageFiles('iso', 'linux', [file])
+    const request = fetchMock.mock.calls[0]
+    expect(request[0]).toBe('/api/storage/upload')
+    expect(request[1]).toMatchObject({ method: 'POST' })
+    expect(request[1].body.get('root')).toBe('iso')
+    expect(request[1].body.get('directory')).toBe('linux')
+    expect(request[1].body.get('files')).toBe(file)
+  })
+
+  it('requests a server-side URL download', async () => {
+    const file = { name: 'installer.iso', path: 'installer.iso', kind: 'STORAGE_ENTRY_KIND_FILE', size_bytes: '5' }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ file }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(downloadStorageFile({ root: 'iso', directory: '', url: 'https://example.com/installer.iso' })).resolves.toEqual({
+      name: 'installer.iso', path: 'installer.iso', kind: 'file', size_bytes: 5,
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/twirp/apprunner.v1.AppRunnerService/DownloadStorageFile', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ root: 'iso', directory: '', url: 'https://example.com/installer.iso' }),
+    }))
   })
 })

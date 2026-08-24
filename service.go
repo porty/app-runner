@@ -14,6 +14,7 @@ import (
 type appRunnerService struct {
 	manager      *vmManager
 	networking   *networkManager
+	storage      *storageService
 	capabilities func() hostCapabilities
 	now          func() time.Time
 }
@@ -113,6 +114,17 @@ func (s *appRunnerService) CreateVM(ctx context.Context, request *apprunnerv1.Cr
 		return nil, rpcError(err)
 	}
 	return &apprunnerv1.CreateVMResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+}
+
+func (s *appRunnerService) CloneVM(ctx context.Context, request *apprunnerv1.CloneVMRequest) (*apprunnerv1.CloneVMResponse, error) {
+	if err := s.requireManager(); err != nil {
+		return nil, err
+	}
+	vm, err := s.manager.Clone(ctx, request.GetId(), request.GetName())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.CloneVMResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
 }
 
 func (s *appRunnerService) StartVM(_ context.Context, request *apprunnerv1.StartVMRequest) (*apprunnerv1.StartVMResponse, error) {
@@ -386,7 +398,8 @@ func rpcError(err error) error {
 	case errors.Is(err, errVMNameExists):
 		return twirp.NewError(twirp.AlreadyExists, err.Error())
 	case errors.Is(err, errVMAlreadyRunning), errors.Is(err, errVMNotRunning), errors.Is(err, errBridgeUnavailable),
-		errors.Is(err, errHostUnavailable), errors.Is(err, errDeleteRunningVM), errors.Is(err, errDeviceRunningVM):
+		errors.Is(err, errHostUnavailable), errors.Is(err, errDeleteRunningVM), errors.Is(err, errDeviceRunningVM),
+		errors.Is(err, errCloneRunningVM):
 		return twirp.NewError(twirp.FailedPrecondition, err.Error())
 	default:
 		return twirp.InternalError(fmt.Sprintf("virtual machine operation failed: %v", err))

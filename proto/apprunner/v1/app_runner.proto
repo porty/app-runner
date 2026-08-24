@@ -9,9 +9,12 @@ service AppRunnerService {
   rpc Echo(EchoRequest) returns (EchoResponse);
   rpc GetHostStatus(GetHostStatusRequest) returns (GetHostStatusResponse);
   rpc ListISOs(ListISOsRequest) returns (ListISOsResponse);
+  rpc ListStorage(ListStorageRequest) returns (ListStorageResponse);
+  rpc DownloadStorageFile(DownloadStorageFileRequest) returns (DownloadStorageFileResponse);
   rpc ListVMs(ListVMsRequest) returns (ListVMsResponse);
   rpc GetVM(GetVMRequest) returns (GetVMResponse);
   rpc CreateVM(CreateVMRequest) returns (CreateVMResponse);
+  rpc CloneVM(CloneVMRequest) returns (CloneVMResponse);
   rpc StartVM(StartVMRequest) returns (StartVMResponse);
   rpc StopVM(StopVMRequest) returns (StopVMResponse);
   rpc UpdateVM(UpdateVMRequest) returns (UpdateVMResponse);
@@ -125,6 +128,43 @@ message ListISOsResponse {
   repeated ISOImage images = 1;
 }
 
+enum StorageEntryKind {
+  STORAGE_ENTRY_KIND_UNSPECIFIED = 0;
+  STORAGE_ENTRY_KIND_FILE = 1;
+  STORAGE_ENTRY_KIND_DIRECTORY = 2;
+}
+
+message StorageEntry {
+  string name = 1;
+  string path = 2;
+  StorageEntryKind kind = 3;
+  uint64 size_bytes = 4;
+  string modified_at = 5;
+  repeated StorageEntry children = 6;
+}
+
+message StorageRoot {
+  string name = 1;
+  repeated StorageEntry entries = 2;
+}
+
+message ListStorageRequest {}
+
+message ListStorageResponse {
+  repeated StorageRoot roots = 1;
+}
+
+message DownloadStorageFileRequest {
+  string root = 1;
+  string directory = 2;
+  string url = 3;
+  string filename = 4;
+}
+
+message DownloadStorageFileResponse {
+  StorageEntry file = 1;
+}
+
 message ListVMsRequest {}
 
 message ListVMsResponse {
@@ -150,6 +190,15 @@ message CreateVMRequest {
 }
 
 message CreateVMResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message CloneVMRequest {
+  string id = 1;
+  string name = 2;
+}
+
+message CloneVMResponse {
   VirtualMachine virtual_machine = 1;
 }
 

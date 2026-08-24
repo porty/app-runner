@@ -125,6 +125,55 @@ func (NetworkMode) EnumDescriptor() ([]byte, []int) {
 	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{1}
 }
 
+type StorageEntryKind int32
+
+const (
+	StorageEntryKind_STORAGE_ENTRY_KIND_UNSPECIFIED StorageEntryKind = 0
+	StorageEntryKind_STORAGE_ENTRY_KIND_FILE        StorageEntryKind = 1
+	StorageEntryKind_STORAGE_ENTRY_KIND_DIRECTORY   StorageEntryKind = 2
+)
+
+// Enum value maps for StorageEntryKind.
+var (
+	StorageEntryKind_name = map[int32]string{
+		0: "STORAGE_ENTRY_KIND_UNSPECIFIED",
+		1: "STORAGE_ENTRY_KIND_FILE",
+		2: "STORAGE_ENTRY_KIND_DIRECTORY",
+	}
+	StorageEntryKind_value = map[string]int32{
+		"STORAGE_ENTRY_KIND_UNSPECIFIED": 0,
+		"STORAGE_ENTRY_KIND_FILE":        1,
+		"STORAGE_ENTRY_KIND_DIRECTORY":   2,
+	}
+)
+
+func (x StorageEntryKind) Enum() *StorageEntryKind {
+	p := new(StorageEntryKind)
+	*p = x
+	return p
+}
+
+func (x StorageEntryKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (StorageEntryKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_apprunner_v1_app_runner_proto_enumTypes[2].Descriptor()
+}
+
+func (StorageEntryKind) Type() protoreflect.EnumType {
+	return &file_apprunner_v1_app_runner_proto_enumTypes[2]
+}
+
+func (x StorageEntryKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use StorageEntryKind.Descriptor instead.
+func (StorageEntryKind) EnumDescriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{2}
+}
+
 type DiagnosticStatus int32
 
 const (
@@ -164,11 +213,11 @@ func (x DiagnosticStatus) String() string {
 }
 
 func (DiagnosticStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_apprunner_v1_app_runner_proto_enumTypes[2].Descriptor()
+	return file_apprunner_v1_app_runner_proto_enumTypes[3].Descriptor()
 }
 
 func (DiagnosticStatus) Type() protoreflect.EnumType {
-	return &file_apprunner_v1_app_runner_proto_enumTypes[2]
+	return &file_apprunner_v1_app_runner_proto_enumTypes[3]
 }
 
 func (x DiagnosticStatus) Number() protoreflect.EnumNumber {
@@ -177,7 +226,7 @@ func (x DiagnosticStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DiagnosticStatus.Descriptor instead.
 func (DiagnosticStatus) EnumDescriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{2}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{3}
 }
 
 type NetworkChangeType int32
@@ -225,11 +274,11 @@ func (x NetworkChangeType) String() string {
 }
 
 func (NetworkChangeType) Descriptor() protoreflect.EnumDescriptor {
-	return file_apprunner_v1_app_runner_proto_enumTypes[3].Descriptor()
+	return file_apprunner_v1_app_runner_proto_enumTypes[4].Descriptor()
 }
 
 func (NetworkChangeType) Type() protoreflect.EnumType {
-	return &file_apprunner_v1_app_runner_proto_enumTypes[3]
+	return &file_apprunner_v1_app_runner_proto_enumTypes[4]
 }
 
 func (x NetworkChangeType) Number() protoreflect.EnumNumber {
@@ -238,7 +287,7 @@ func (x NetworkChangeType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use NetworkChangeType.Descriptor instead.
 func (NetworkChangeType) EnumDescriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{3}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{4}
 }
 
 type PingRequest struct {
@@ -1081,6 +1130,334 @@ func (x *ListISOsResponse) GetImages() []*ISOImage {
 	return nil
 }
 
+type StorageEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	Kind          StorageEntryKind       `protobuf:"varint,3,opt,name=kind,proto3,enum=apprunner.v1.StorageEntryKind" json:"kind,omitempty"`
+	SizeBytes     uint64                 `protobuf:"varint,4,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	ModifiedAt    string                 `protobuf:"bytes,5,opt,name=modified_at,json=modifiedAt,proto3" json:"modified_at,omitempty"`
+	Children      []*StorageEntry        `protobuf:"bytes,6,rep,name=children,proto3" json:"children,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StorageEntry) Reset() {
+	*x = StorageEntry{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StorageEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StorageEntry) ProtoMessage() {}
+
+func (x *StorageEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StorageEntry.ProtoReflect.Descriptor instead.
+func (*StorageEntry) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *StorageEntry) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *StorageEntry) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *StorageEntry) GetKind() StorageEntryKind {
+	if x != nil {
+		return x.Kind
+	}
+	return StorageEntryKind_STORAGE_ENTRY_KIND_UNSPECIFIED
+}
+
+func (x *StorageEntry) GetSizeBytes() uint64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *StorageEntry) GetModifiedAt() string {
+	if x != nil {
+		return x.ModifiedAt
+	}
+	return ""
+}
+
+func (x *StorageEntry) GetChildren() []*StorageEntry {
+	if x != nil {
+		return x.Children
+	}
+	return nil
+}
+
+type StorageRoot struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Entries       []*StorageEntry        `protobuf:"bytes,2,rep,name=entries,proto3" json:"entries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StorageRoot) Reset() {
+	*x = StorageRoot{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StorageRoot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StorageRoot) ProtoMessage() {}
+
+func (x *StorageRoot) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StorageRoot.ProtoReflect.Descriptor instead.
+func (*StorageRoot) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *StorageRoot) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *StorageRoot) GetEntries() []*StorageEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+type ListStorageRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListStorageRequest) Reset() {
+	*x = ListStorageRequest{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListStorageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListStorageRequest) ProtoMessage() {}
+
+func (x *ListStorageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListStorageRequest.ProtoReflect.Descriptor instead.
+func (*ListStorageRequest) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{16}
+}
+
+type ListStorageResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Roots         []*StorageRoot         `protobuf:"bytes,1,rep,name=roots,proto3" json:"roots,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListStorageResponse) Reset() {
+	*x = ListStorageResponse{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListStorageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListStorageResponse) ProtoMessage() {}
+
+func (x *ListStorageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListStorageResponse.ProtoReflect.Descriptor instead.
+func (*ListStorageResponse) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ListStorageResponse) GetRoots() []*StorageRoot {
+	if x != nil {
+		return x.Roots
+	}
+	return nil
+}
+
+type DownloadStorageFileRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Root          string                 `protobuf:"bytes,1,opt,name=root,proto3" json:"root,omitempty"`
+	Directory     string                 `protobuf:"bytes,2,opt,name=directory,proto3" json:"directory,omitempty"`
+	Url           string                 `protobuf:"bytes,3,opt,name=url,proto3" json:"url,omitempty"`
+	Filename      string                 `protobuf:"bytes,4,opt,name=filename,proto3" json:"filename,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadStorageFileRequest) Reset() {
+	*x = DownloadStorageFileRequest{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadStorageFileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadStorageFileRequest) ProtoMessage() {}
+
+func (x *DownloadStorageFileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadStorageFileRequest.ProtoReflect.Descriptor instead.
+func (*DownloadStorageFileRequest) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *DownloadStorageFileRequest) GetRoot() string {
+	if x != nil {
+		return x.Root
+	}
+	return ""
+}
+
+func (x *DownloadStorageFileRequest) GetDirectory() string {
+	if x != nil {
+		return x.Directory
+	}
+	return ""
+}
+
+func (x *DownloadStorageFileRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *DownloadStorageFileRequest) GetFilename() string {
+	if x != nil {
+		return x.Filename
+	}
+	return ""
+}
+
+type DownloadStorageFileResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	File          *StorageEntry          `protobuf:"bytes,1,opt,name=file,proto3" json:"file,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadStorageFileResponse) Reset() {
+	*x = DownloadStorageFileResponse{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadStorageFileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadStorageFileResponse) ProtoMessage() {}
+
+func (x *DownloadStorageFileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadStorageFileResponse.ProtoReflect.Descriptor instead.
+func (*DownloadStorageFileResponse) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *DownloadStorageFileResponse) GetFile() *StorageEntry {
+	if x != nil {
+		return x.File
+	}
+	return nil
+}
+
 type ListVMsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1089,7 +1466,7 @@ type ListVMsRequest struct {
 
 func (x *ListVMsRequest) Reset() {
 	*x = ListVMsRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[14]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1101,7 +1478,7 @@ func (x *ListVMsRequest) String() string {
 func (*ListVMsRequest) ProtoMessage() {}
 
 func (x *ListVMsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[14]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1114,7 +1491,7 @@ func (x *ListVMsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListVMsRequest.ProtoReflect.Descriptor instead.
 func (*ListVMsRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{14}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{20}
 }
 
 type ListVMsResponse struct {
@@ -1126,7 +1503,7 @@ type ListVMsResponse struct {
 
 func (x *ListVMsResponse) Reset() {
 	*x = ListVMsResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[15]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1138,7 +1515,7 @@ func (x *ListVMsResponse) String() string {
 func (*ListVMsResponse) ProtoMessage() {}
 
 func (x *ListVMsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[15]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1151,7 +1528,7 @@ func (x *ListVMsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListVMsResponse.ProtoReflect.Descriptor instead.
 func (*ListVMsResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{15}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ListVMsResponse) GetVirtualMachines() []*VirtualMachine {
@@ -1170,7 +1547,7 @@ type GetVMRequest struct {
 
 func (x *GetVMRequest) Reset() {
 	*x = GetVMRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[16]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1182,7 +1559,7 @@ func (x *GetVMRequest) String() string {
 func (*GetVMRequest) ProtoMessage() {}
 
 func (x *GetVMRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[16]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1195,7 +1572,7 @@ func (x *GetVMRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetVMRequest.ProtoReflect.Descriptor instead.
 func (*GetVMRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{16}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *GetVMRequest) GetId() string {
@@ -1214,7 +1591,7 @@ type GetVMResponse struct {
 
 func (x *GetVMResponse) Reset() {
 	*x = GetVMResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[17]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1226,7 +1603,7 @@ func (x *GetVMResponse) String() string {
 func (*GetVMResponse) ProtoMessage() {}
 
 func (x *GetVMResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[17]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1239,7 +1616,7 @@ func (x *GetVMResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetVMResponse.ProtoReflect.Descriptor instead.
 func (*GetVMResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{17}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *GetVMResponse) GetVirtualMachine() *VirtualMachine {
@@ -1264,7 +1641,7 @@ type CreateVMRequest struct {
 
 func (x *CreateVMRequest) Reset() {
 	*x = CreateVMRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[18]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1276,7 +1653,7 @@ func (x *CreateVMRequest) String() string {
 func (*CreateVMRequest) ProtoMessage() {}
 
 func (x *CreateVMRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[18]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1289,7 +1666,7 @@ func (x *CreateVMRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateVMRequest.ProtoReflect.Descriptor instead.
 func (*CreateVMRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{18}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *CreateVMRequest) GetName() string {
@@ -1350,7 +1727,7 @@ type CreateVMResponse struct {
 
 func (x *CreateVMResponse) Reset() {
 	*x = CreateVMResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[19]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1362,7 +1739,7 @@ func (x *CreateVMResponse) String() string {
 func (*CreateVMResponse) ProtoMessage() {}
 
 func (x *CreateVMResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[19]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1375,10 +1752,106 @@ func (x *CreateVMResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateVMResponse.ProtoReflect.Descriptor instead.
 func (*CreateVMResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{19}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *CreateVMResponse) GetVirtualMachine() *VirtualMachine {
+	if x != nil {
+		return x.VirtualMachine
+	}
+	return nil
+}
+
+type CloneVMRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloneVMRequest) Reset() {
+	*x = CloneVMRequest{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloneVMRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloneVMRequest) ProtoMessage() {}
+
+func (x *CloneVMRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloneVMRequest.ProtoReflect.Descriptor instead.
+func (*CloneVMRequest) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *CloneVMRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *CloneVMRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type CloneVMResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	VirtualMachine *VirtualMachine        `protobuf:"bytes,1,opt,name=virtual_machine,json=virtualMachine,proto3" json:"virtual_machine,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CloneVMResponse) Reset() {
+	*x = CloneVMResponse{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloneVMResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloneVMResponse) ProtoMessage() {}
+
+func (x *CloneVMResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloneVMResponse.ProtoReflect.Descriptor instead.
+func (*CloneVMResponse) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *CloneVMResponse) GetVirtualMachine() *VirtualMachine {
 	if x != nil {
 		return x.VirtualMachine
 	}
@@ -1394,7 +1867,7 @@ type StartVMRequest struct {
 
 func (x *StartVMRequest) Reset() {
 	*x = StartVMRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[20]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1406,7 +1879,7 @@ func (x *StartVMRequest) String() string {
 func (*StartVMRequest) ProtoMessage() {}
 
 func (x *StartVMRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[20]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1419,7 +1892,7 @@ func (x *StartVMRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartVMRequest.ProtoReflect.Descriptor instead.
 func (*StartVMRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{20}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *StartVMRequest) GetId() string {
@@ -1438,7 +1911,7 @@ type StartVMResponse struct {
 
 func (x *StartVMResponse) Reset() {
 	*x = StartVMResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[21]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1450,7 +1923,7 @@ func (x *StartVMResponse) String() string {
 func (*StartVMResponse) ProtoMessage() {}
 
 func (x *StartVMResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[21]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1463,7 +1936,7 @@ func (x *StartVMResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartVMResponse.ProtoReflect.Descriptor instead.
 func (*StartVMResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{21}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *StartVMResponse) GetVirtualMachine() *VirtualMachine {
@@ -1483,7 +1956,7 @@ type StopVMRequest struct {
 
 func (x *StopVMRequest) Reset() {
 	*x = StopVMRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[22]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1495,7 +1968,7 @@ func (x *StopVMRequest) String() string {
 func (*StopVMRequest) ProtoMessage() {}
 
 func (x *StopVMRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[22]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1508,7 +1981,7 @@ func (x *StopVMRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopVMRequest.ProtoReflect.Descriptor instead.
 func (*StopVMRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{22}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *StopVMRequest) GetId() string {
@@ -1534,7 +2007,7 @@ type StopVMResponse struct {
 
 func (x *StopVMResponse) Reset() {
 	*x = StopVMResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[23]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1546,7 +2019,7 @@ func (x *StopVMResponse) String() string {
 func (*StopVMResponse) ProtoMessage() {}
 
 func (x *StopVMResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[23]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1559,7 +2032,7 @@ func (x *StopVMResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopVMResponse.ProtoReflect.Descriptor instead.
 func (*StopVMResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{23}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *StopVMResponse) GetVirtualMachine() *VirtualMachine {
@@ -1582,7 +2055,7 @@ type UpdateVMRequest struct {
 
 func (x *UpdateVMRequest) Reset() {
 	*x = UpdateVMRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[24]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1594,7 +2067,7 @@ func (x *UpdateVMRequest) String() string {
 func (*UpdateVMRequest) ProtoMessage() {}
 
 func (x *UpdateVMRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[24]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1607,7 +2080,7 @@ func (x *UpdateVMRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateVMRequest.ProtoReflect.Descriptor instead.
 func (*UpdateVMRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{24}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *UpdateVMRequest) GetId() string {
@@ -1654,7 +2127,7 @@ type UpdateVMResponse struct {
 
 func (x *UpdateVMResponse) Reset() {
 	*x = UpdateVMResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[25]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1666,7 +2139,7 @@ func (x *UpdateVMResponse) String() string {
 func (*UpdateVMResponse) ProtoMessage() {}
 
 func (x *UpdateVMResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[25]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1679,7 +2152,7 @@ func (x *UpdateVMResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateVMResponse.ProtoReflect.Descriptor instead.
 func (*UpdateVMResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{25}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *UpdateVMResponse) GetVirtualMachine() *VirtualMachine {
@@ -1701,7 +2174,7 @@ type UpdateVMNetworkRequest struct {
 
 func (x *UpdateVMNetworkRequest) Reset() {
 	*x = UpdateVMNetworkRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[26]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1713,7 +2186,7 @@ func (x *UpdateVMNetworkRequest) String() string {
 func (*UpdateVMNetworkRequest) ProtoMessage() {}
 
 func (x *UpdateVMNetworkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[26]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1726,7 +2199,7 @@ func (x *UpdateVMNetworkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateVMNetworkRequest.ProtoReflect.Descriptor instead.
 func (*UpdateVMNetworkRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{26}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *UpdateVMNetworkRequest) GetId() string {
@@ -1766,7 +2239,7 @@ type UpdateVMNetworkResponse struct {
 
 func (x *UpdateVMNetworkResponse) Reset() {
 	*x = UpdateVMNetworkResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[27]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1778,7 +2251,7 @@ func (x *UpdateVMNetworkResponse) String() string {
 func (*UpdateVMNetworkResponse) ProtoMessage() {}
 
 func (x *UpdateVMNetworkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[27]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1791,7 +2264,7 @@ func (x *UpdateVMNetworkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateVMNetworkResponse.ProtoReflect.Descriptor instead.
 func (*UpdateVMNetworkResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{27}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *UpdateVMNetworkResponse) GetVirtualMachine() *VirtualMachine {
@@ -1811,7 +2284,7 @@ type AddVMDiskRequest struct {
 
 func (x *AddVMDiskRequest) Reset() {
 	*x = AddVMDiskRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[28]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1823,7 +2296,7 @@ func (x *AddVMDiskRequest) String() string {
 func (*AddVMDiskRequest) ProtoMessage() {}
 
 func (x *AddVMDiskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[28]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1836,7 +2309,7 @@ func (x *AddVMDiskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddVMDiskRequest.ProtoReflect.Descriptor instead.
 func (*AddVMDiskRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{28}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *AddVMDiskRequest) GetId() string {
@@ -1862,7 +2335,7 @@ type AddVMDiskResponse struct {
 
 func (x *AddVMDiskResponse) Reset() {
 	*x = AddVMDiskResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[29]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1874,7 +2347,7 @@ func (x *AddVMDiskResponse) String() string {
 func (*AddVMDiskResponse) ProtoMessage() {}
 
 func (x *AddVMDiskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[29]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1887,7 +2360,7 @@ func (x *AddVMDiskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddVMDiskResponse.ProtoReflect.Descriptor instead.
 func (*AddVMDiskResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{29}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *AddVMDiskResponse) GetVirtualMachine() *VirtualMachine {
@@ -1907,7 +2380,7 @@ type RemoveVMDiskRequest struct {
 
 func (x *RemoveVMDiskRequest) Reset() {
 	*x = RemoveVMDiskRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[30]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1919,7 +2392,7 @@ func (x *RemoveVMDiskRequest) String() string {
 func (*RemoveVMDiskRequest) ProtoMessage() {}
 
 func (x *RemoveVMDiskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[30]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1932,7 +2405,7 @@ func (x *RemoveVMDiskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveVMDiskRequest.ProtoReflect.Descriptor instead.
 func (*RemoveVMDiskRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{30}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *RemoveVMDiskRequest) GetId() string {
@@ -1958,7 +2431,7 @@ type RemoveVMDiskResponse struct {
 
 func (x *RemoveVMDiskResponse) Reset() {
 	*x = RemoveVMDiskResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[31]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1970,7 +2443,7 @@ func (x *RemoveVMDiskResponse) String() string {
 func (*RemoveVMDiskResponse) ProtoMessage() {}
 
 func (x *RemoveVMDiskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[31]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1983,7 +2456,7 @@ func (x *RemoveVMDiskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveVMDiskResponse.ProtoReflect.Descriptor instead.
 func (*RemoveVMDiskResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{31}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *RemoveVMDiskResponse) GetVirtualMachine() *VirtualMachine {
@@ -2003,7 +2476,7 @@ type AddVMCDROMRequest struct {
 
 func (x *AddVMCDROMRequest) Reset() {
 	*x = AddVMCDROMRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[32]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2015,7 +2488,7 @@ func (x *AddVMCDROMRequest) String() string {
 func (*AddVMCDROMRequest) ProtoMessage() {}
 
 func (x *AddVMCDROMRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[32]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2028,7 +2501,7 @@ func (x *AddVMCDROMRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddVMCDROMRequest.ProtoReflect.Descriptor instead.
 func (*AddVMCDROMRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{32}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *AddVMCDROMRequest) GetId() string {
@@ -2054,7 +2527,7 @@ type AddVMCDROMResponse struct {
 
 func (x *AddVMCDROMResponse) Reset() {
 	*x = AddVMCDROMResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[33]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2066,7 +2539,7 @@ func (x *AddVMCDROMResponse) String() string {
 func (*AddVMCDROMResponse) ProtoMessage() {}
 
 func (x *AddVMCDROMResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[33]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2079,7 +2552,7 @@ func (x *AddVMCDROMResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddVMCDROMResponse.ProtoReflect.Descriptor instead.
 func (*AddVMCDROMResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{33}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *AddVMCDROMResponse) GetVirtualMachine() *VirtualMachine {
@@ -2100,7 +2573,7 @@ type UpdateVMCDROMRequest struct {
 
 func (x *UpdateVMCDROMRequest) Reset() {
 	*x = UpdateVMCDROMRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[34]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2112,7 +2585,7 @@ func (x *UpdateVMCDROMRequest) String() string {
 func (*UpdateVMCDROMRequest) ProtoMessage() {}
 
 func (x *UpdateVMCDROMRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[34]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2125,7 +2598,7 @@ func (x *UpdateVMCDROMRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateVMCDROMRequest.ProtoReflect.Descriptor instead.
 func (*UpdateVMCDROMRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{34}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *UpdateVMCDROMRequest) GetId() string {
@@ -2158,7 +2631,7 @@ type UpdateVMCDROMResponse struct {
 
 func (x *UpdateVMCDROMResponse) Reset() {
 	*x = UpdateVMCDROMResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[35]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2170,7 +2643,7 @@ func (x *UpdateVMCDROMResponse) String() string {
 func (*UpdateVMCDROMResponse) ProtoMessage() {}
 
 func (x *UpdateVMCDROMResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[35]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2183,7 +2656,7 @@ func (x *UpdateVMCDROMResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateVMCDROMResponse.ProtoReflect.Descriptor instead.
 func (*UpdateVMCDROMResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{35}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *UpdateVMCDROMResponse) GetVirtualMachine() *VirtualMachine {
@@ -2203,7 +2676,7 @@ type RemoveVMCDROMRequest struct {
 
 func (x *RemoveVMCDROMRequest) Reset() {
 	*x = RemoveVMCDROMRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[36]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2215,7 +2688,7 @@ func (x *RemoveVMCDROMRequest) String() string {
 func (*RemoveVMCDROMRequest) ProtoMessage() {}
 
 func (x *RemoveVMCDROMRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[36]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2228,7 +2701,7 @@ func (x *RemoveVMCDROMRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveVMCDROMRequest.ProtoReflect.Descriptor instead.
 func (*RemoveVMCDROMRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{36}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *RemoveVMCDROMRequest) GetId() string {
@@ -2254,7 +2727,7 @@ type RemoveVMCDROMResponse struct {
 
 func (x *RemoveVMCDROMResponse) Reset() {
 	*x = RemoveVMCDROMResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[37]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2266,7 +2739,7 @@ func (x *RemoveVMCDROMResponse) String() string {
 func (*RemoveVMCDROMResponse) ProtoMessage() {}
 
 func (x *RemoveVMCDROMResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[37]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2279,7 +2752,7 @@ func (x *RemoveVMCDROMResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveVMCDROMResponse.ProtoReflect.Descriptor instead.
 func (*RemoveVMCDROMResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{37}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *RemoveVMCDROMResponse) GetVirtualMachine() *VirtualMachine {
@@ -2303,7 +2776,7 @@ type ConfigureVMIPMIRequest struct {
 
 func (x *ConfigureVMIPMIRequest) Reset() {
 	*x = ConfigureVMIPMIRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[38]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2315,7 +2788,7 @@ func (x *ConfigureVMIPMIRequest) String() string {
 func (*ConfigureVMIPMIRequest) ProtoMessage() {}
 
 func (x *ConfigureVMIPMIRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[38]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2328,7 +2801,7 @@ func (x *ConfigureVMIPMIRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigureVMIPMIRequest.ProtoReflect.Descriptor instead.
 func (*ConfigureVMIPMIRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{38}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *ConfigureVMIPMIRequest) GetId() string {
@@ -2382,7 +2855,7 @@ type ConfigureVMIPMIResponse struct {
 
 func (x *ConfigureVMIPMIResponse) Reset() {
 	*x = ConfigureVMIPMIResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[39]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2394,7 +2867,7 @@ func (x *ConfigureVMIPMIResponse) String() string {
 func (*ConfigureVMIPMIResponse) ProtoMessage() {}
 
 func (x *ConfigureVMIPMIResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[39]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2407,7 +2880,7 @@ func (x *ConfigureVMIPMIResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigureVMIPMIResponse.ProtoReflect.Descriptor instead.
 func (*ConfigureVMIPMIResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{39}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ConfigureVMIPMIResponse) GetVirtualMachine() *VirtualMachine {
@@ -2426,7 +2899,7 @@ type DeleteVMRequest struct {
 
 func (x *DeleteVMRequest) Reset() {
 	*x = DeleteVMRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[40]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2438,7 +2911,7 @@ func (x *DeleteVMRequest) String() string {
 func (*DeleteVMRequest) ProtoMessage() {}
 
 func (x *DeleteVMRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[40]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2451,7 +2924,7 @@ func (x *DeleteVMRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteVMRequest.ProtoReflect.Descriptor instead.
 func (*DeleteVMRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{40}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *DeleteVMRequest) GetId() string {
@@ -2470,7 +2943,7 @@ type DeleteVMResponse struct {
 
 func (x *DeleteVMResponse) Reset() {
 	*x = DeleteVMResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[41]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2482,7 +2955,7 @@ func (x *DeleteVMResponse) String() string {
 func (*DeleteVMResponse) ProtoMessage() {}
 
 func (x *DeleteVMResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[41]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2495,7 +2968,7 @@ func (x *DeleteVMResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteVMResponse.ProtoReflect.Descriptor instead.
 func (*DeleteVMResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{41}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *DeleteVMResponse) GetId() string {
@@ -2518,7 +2991,7 @@ type NetworkDiagnostic struct {
 
 func (x *NetworkDiagnostic) Reset() {
 	*x = NetworkDiagnostic{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[42]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2530,7 +3003,7 @@ func (x *NetworkDiagnostic) String() string {
 func (*NetworkDiagnostic) ProtoMessage() {}
 
 func (x *NetworkDiagnostic) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[42]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2543,7 +3016,7 @@ func (x *NetworkDiagnostic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkDiagnostic.ProtoReflect.Descriptor instead.
 func (*NetworkDiagnostic) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{42}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *NetworkDiagnostic) GetKey() string {
@@ -2596,7 +3069,7 @@ type UserIdentity struct {
 
 func (x *UserIdentity) Reset() {
 	*x = UserIdentity{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[43]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2608,7 +3081,7 @@ func (x *UserIdentity) String() string {
 func (*UserIdentity) ProtoMessage() {}
 
 func (x *UserIdentity) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[43]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2621,7 +3094,7 @@ func (x *UserIdentity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserIdentity.ProtoReflect.Descriptor instead.
 func (*UserIdentity) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{43}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *UserIdentity) GetUsername() string {
@@ -2689,7 +3162,7 @@ type NetworkInterface struct {
 
 func (x *NetworkInterface) Reset() {
 	*x = NetworkInterface{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[44]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2701,7 +3174,7 @@ func (x *NetworkInterface) String() string {
 func (*NetworkInterface) ProtoMessage() {}
 
 func (x *NetworkInterface) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[44]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2714,7 +3187,7 @@ func (x *NetworkInterface) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkInterface.ProtoReflect.Descriptor instead.
 func (*NetworkInterface) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{44}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *NetworkInterface) GetName() string {
@@ -2785,7 +3258,7 @@ type WorkloadAttachment struct {
 
 func (x *WorkloadAttachment) Reset() {
 	*x = WorkloadAttachment{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[45]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2797,7 +3270,7 @@ func (x *WorkloadAttachment) String() string {
 func (*WorkloadAttachment) ProtoMessage() {}
 
 func (x *WorkloadAttachment) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[45]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2810,7 +3283,7 @@ func (x *WorkloadAttachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkloadAttachment.ProtoReflect.Descriptor instead.
 func (*WorkloadAttachment) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{45}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *WorkloadAttachment) GetId() string {
@@ -2860,7 +3333,7 @@ type NetworkBridge struct {
 
 func (x *NetworkBridge) Reset() {
 	*x = NetworkBridge{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[46]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2872,7 +3345,7 @@ func (x *NetworkBridge) String() string {
 func (*NetworkBridge) ProtoMessage() {}
 
 func (x *NetworkBridge) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[46]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2885,7 +3358,7 @@ func (x *NetworkBridge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkBridge.ProtoReflect.Descriptor instead.
 func (*NetworkBridge) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{46}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *NetworkBridge) GetName() string {
@@ -2988,7 +3461,7 @@ type BridgeDHCPStatus struct {
 
 func (x *BridgeDHCPStatus) Reset() {
 	*x = BridgeDHCPStatus{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[47]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3000,7 +3473,7 @@ func (x *BridgeDHCPStatus) String() string {
 func (*BridgeDHCPStatus) ProtoMessage() {}
 
 func (x *BridgeDHCPStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[47]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3013,7 +3486,7 @@ func (x *BridgeDHCPStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BridgeDHCPStatus.ProtoReflect.Descriptor instead.
 func (*BridgeDHCPStatus) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{47}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *BridgeDHCPStatus) GetEnabled() bool {
@@ -3132,7 +3605,7 @@ type PendingNetworkChange struct {
 
 func (x *PendingNetworkChange) Reset() {
 	*x = PendingNetworkChange{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[48]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3144,7 +3617,7 @@ func (x *PendingNetworkChange) String() string {
 func (*PendingNetworkChange) ProtoMessage() {}
 
 func (x *PendingNetworkChange) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[48]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3157,7 +3630,7 @@ func (x *PendingNetworkChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PendingNetworkChange.ProtoReflect.Descriptor instead.
 func (*PendingNetworkChange) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{48}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *PendingNetworkChange) GetId() string {
@@ -3195,7 +3668,7 @@ type NetworkingStatus struct {
 
 func (x *NetworkingStatus) Reset() {
 	*x = NetworkingStatus{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[49]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3207,7 +3680,7 @@ func (x *NetworkingStatus) String() string {
 func (*NetworkingStatus) ProtoMessage() {}
 
 func (x *NetworkingStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[49]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3220,7 +3693,7 @@ func (x *NetworkingStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkingStatus.ProtoReflect.Descriptor instead.
 func (*NetworkingStatus) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{49}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *NetworkingStatus) GetUser() *UserIdentity {
@@ -3273,7 +3746,7 @@ type GetNetworkingStatusRequest struct {
 
 func (x *GetNetworkingStatusRequest) Reset() {
 	*x = GetNetworkingStatusRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[50]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3285,7 +3758,7 @@ func (x *GetNetworkingStatusRequest) String() string {
 func (*GetNetworkingStatusRequest) ProtoMessage() {}
 
 func (x *GetNetworkingStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[50]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3298,7 +3771,7 @@ func (x *GetNetworkingStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNetworkingStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetNetworkingStatusRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{50}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{58}
 }
 
 type GetNetworkingStatusResponse struct {
@@ -3310,7 +3783,7 @@ type GetNetworkingStatusResponse struct {
 
 func (x *GetNetworkingStatusResponse) Reset() {
 	*x = GetNetworkingStatusResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[51]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3322,7 +3795,7 @@ func (x *GetNetworkingStatusResponse) String() string {
 func (*GetNetworkingStatusResponse) ProtoMessage() {}
 
 func (x *GetNetworkingStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[51]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3335,7 +3808,7 @@ func (x *GetNetworkingStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNetworkingStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetNetworkingStatusResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{51}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *GetNetworkingStatusResponse) GetStatus() *NetworkingStatus {
@@ -3357,7 +3830,7 @@ type ApplyNetworkChangeRequest struct {
 
 func (x *ApplyNetworkChangeRequest) Reset() {
 	*x = ApplyNetworkChangeRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[52]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3369,7 +3842,7 @@ func (x *ApplyNetworkChangeRequest) String() string {
 func (*ApplyNetworkChangeRequest) ProtoMessage() {}
 
 func (x *ApplyNetworkChangeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[52]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3382,7 +3855,7 @@ func (x *ApplyNetworkChangeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyNetworkChangeRequest.ProtoReflect.Descriptor instead.
 func (*ApplyNetworkChangeRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{52}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *ApplyNetworkChangeRequest) GetType() NetworkChangeType {
@@ -3422,7 +3895,7 @@ type ApplyNetworkChangeResponse struct {
 
 func (x *ApplyNetworkChangeResponse) Reset() {
 	*x = ApplyNetworkChangeResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[53]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3434,7 +3907,7 @@ func (x *ApplyNetworkChangeResponse) String() string {
 func (*ApplyNetworkChangeResponse) ProtoMessage() {}
 
 func (x *ApplyNetworkChangeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[53]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3447,7 +3920,7 @@ func (x *ApplyNetworkChangeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyNetworkChangeResponse.ProtoReflect.Descriptor instead.
 func (*ApplyNetworkChangeResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{53}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *ApplyNetworkChangeResponse) GetPendingChange() *PendingNetworkChange {
@@ -3466,7 +3939,7 @@ type ConfirmNetworkChangeRequest struct {
 
 func (x *ConfirmNetworkChangeRequest) Reset() {
 	*x = ConfirmNetworkChangeRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[54]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3478,7 +3951,7 @@ func (x *ConfirmNetworkChangeRequest) String() string {
 func (*ConfirmNetworkChangeRequest) ProtoMessage() {}
 
 func (x *ConfirmNetworkChangeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[54]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3491,7 +3964,7 @@ func (x *ConfirmNetworkChangeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfirmNetworkChangeRequest.ProtoReflect.Descriptor instead.
 func (*ConfirmNetworkChangeRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{54}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *ConfirmNetworkChangeRequest) GetId() string {
@@ -3510,7 +3983,7 @@ type ConfirmNetworkChangeResponse struct {
 
 func (x *ConfirmNetworkChangeResponse) Reset() {
 	*x = ConfirmNetworkChangeResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[55]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3522,7 +3995,7 @@ func (x *ConfirmNetworkChangeResponse) String() string {
 func (*ConfirmNetworkChangeResponse) ProtoMessage() {}
 
 func (x *ConfirmNetworkChangeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[55]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3535,7 +4008,7 @@ func (x *ConfirmNetworkChangeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfirmNetworkChangeResponse.ProtoReflect.Descriptor instead.
 func (*ConfirmNetworkChangeResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{55}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *ConfirmNetworkChangeResponse) GetStatus() *NetworkingStatus {
@@ -3554,7 +4027,7 @@ type RevertNetworkChangeRequest struct {
 
 func (x *RevertNetworkChangeRequest) Reset() {
 	*x = RevertNetworkChangeRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[56]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3566,7 +4039,7 @@ func (x *RevertNetworkChangeRequest) String() string {
 func (*RevertNetworkChangeRequest) ProtoMessage() {}
 
 func (x *RevertNetworkChangeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[56]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3579,7 +4052,7 @@ func (x *RevertNetworkChangeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevertNetworkChangeRequest.ProtoReflect.Descriptor instead.
 func (*RevertNetworkChangeRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{56}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *RevertNetworkChangeRequest) GetId() string {
@@ -3598,7 +4071,7 @@ type RevertNetworkChangeResponse struct {
 
 func (x *RevertNetworkChangeResponse) Reset() {
 	*x = RevertNetworkChangeResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[57]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3610,7 +4083,7 @@ func (x *RevertNetworkChangeResponse) String() string {
 func (*RevertNetworkChangeResponse) ProtoMessage() {}
 
 func (x *RevertNetworkChangeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[57]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3623,7 +4096,7 @@ func (x *RevertNetworkChangeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevertNetworkChangeResponse.ProtoReflect.Descriptor instead.
 func (*RevertNetworkChangeResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{57}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *RevertNetworkChangeResponse) GetStatus() *NetworkingStatus {
@@ -3650,7 +4123,7 @@ type ConfigureBridgeDHCPRequest struct {
 
 func (x *ConfigureBridgeDHCPRequest) Reset() {
 	*x = ConfigureBridgeDHCPRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[58]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3662,7 +4135,7 @@ func (x *ConfigureBridgeDHCPRequest) String() string {
 func (*ConfigureBridgeDHCPRequest) ProtoMessage() {}
 
 func (x *ConfigureBridgeDHCPRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[58]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3675,7 +4148,7 @@ func (x *ConfigureBridgeDHCPRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigureBridgeDHCPRequest.ProtoReflect.Descriptor instead.
 func (*ConfigureBridgeDHCPRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{58}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *ConfigureBridgeDHCPRequest) GetBridgeName() string {
@@ -3750,7 +4223,7 @@ type ConfigureBridgeDHCPResponse struct {
 
 func (x *ConfigureBridgeDHCPResponse) Reset() {
 	*x = ConfigureBridgeDHCPResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[59]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3762,7 +4235,7 @@ func (x *ConfigureBridgeDHCPResponse) String() string {
 func (*ConfigureBridgeDHCPResponse) ProtoMessage() {}
 
 func (x *ConfigureBridgeDHCPResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[59]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3775,7 +4248,7 @@ func (x *ConfigureBridgeDHCPResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigureBridgeDHCPResponse.ProtoReflect.Descriptor instead.
 func (*ConfigureBridgeDHCPResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{59}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *ConfigureBridgeDHCPResponse) GetStatus() *NetworkingStatus {
@@ -3857,7 +4330,29 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\x06status\x18\x01 \x01(\v2\x18.apprunner.v1.HostStatusR\x06status\"\x11\n" +
 	"\x0fListISOsRequest\"B\n" +
 	"\x10ListISOsResponse\x12.\n" +
-	"\x06images\x18\x01 \x03(\v2\x16.apprunner.v1.ISOImageR\x06images\"\x10\n" +
+	"\x06images\x18\x01 \x03(\v2\x16.apprunner.v1.ISOImageR\x06images\"\xe2\x01\n" +
+	"\fStorageEntry\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x122\n" +
+	"\x04kind\x18\x03 \x01(\x0e2\x1e.apprunner.v1.StorageEntryKindR\x04kind\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x04 \x01(\x04R\tsizeBytes\x12\x1f\n" +
+	"\vmodified_at\x18\x05 \x01(\tR\n" +
+	"modifiedAt\x126\n" +
+	"\bchildren\x18\x06 \x03(\v2\x1a.apprunner.v1.StorageEntryR\bchildren\"W\n" +
+	"\vStorageRoot\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x124\n" +
+	"\aentries\x18\x02 \x03(\v2\x1a.apprunner.v1.StorageEntryR\aentries\"\x14\n" +
+	"\x12ListStorageRequest\"F\n" +
+	"\x13ListStorageResponse\x12/\n" +
+	"\x05roots\x18\x01 \x03(\v2\x19.apprunner.v1.StorageRootR\x05roots\"|\n" +
+	"\x1aDownloadStorageFileRequest\x12\x12\n" +
+	"\x04root\x18\x01 \x01(\tR\x04root\x12\x1c\n" +
+	"\tdirectory\x18\x02 \x01(\tR\tdirectory\x12\x10\n" +
+	"\x03url\x18\x03 \x01(\tR\x03url\x12\x1a\n" +
+	"\bfilename\x18\x04 \x01(\tR\bfilename\"M\n" +
+	"\x1bDownloadStorageFileResponse\x12.\n" +
+	"\x04file\x18\x01 \x01(\v2\x1a.apprunner.v1.StorageEntryR\x04file\"\x10\n" +
 	"\x0eListVMsRequest\"Z\n" +
 	"\x0fListVMsResponse\x12G\n" +
 	"\x10virtual_machines\x18\x01 \x03(\v2\x1c.apprunner.v1.VirtualMachineR\x0fvirtualMachines\"\x1e\n" +
@@ -3876,6 +4371,11 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\vbridge_name\x18\a \x01(\tR\n" +
 	"bridgeName\"Y\n" +
 	"\x10CreateVMResponse\x12E\n" +
+	"\x0fvirtual_machine\x18\x01 \x01(\v2\x1c.apprunner.v1.VirtualMachineR\x0evirtualMachine\"4\n" +
+	"\x0eCloneVMRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"X\n" +
+	"\x0fCloneVMResponse\x12E\n" +
 	"\x0fvirtual_machine\x18\x01 \x01(\v2\x1c.apprunner.v1.VirtualMachineR\x0evirtualMachine\" \n" +
 	"\x0eStartVMRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"X\n" +
@@ -4069,7 +4569,11 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\vNetworkMode\x12\x1c\n" +
 	"\x18NETWORK_MODE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10NETWORK_MODE_NAT\x10\x01\x12\x17\n" +
-	"\x13NETWORK_MODE_BRIDGE\x10\x02*\xa8\x01\n" +
+	"\x13NETWORK_MODE_BRIDGE\x10\x02*u\n" +
+	"\x10StorageEntryKind\x12\"\n" +
+	"\x1eSTORAGE_ENTRY_KIND_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17STORAGE_ENTRY_KIND_FILE\x10\x01\x12 \n" +
+	"\x1cSTORAGE_ENTRY_KIND_DIRECTORY\x10\x02*\xa8\x01\n" +
 	"\x10DiagnosticStatus\x12!\n" +
 	"\x1dDIAGNOSTIC_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16DIAGNOSTIC_STATUS_PASS\x10\x01\x12\x1d\n" +
@@ -4083,15 +4587,18 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"!NETWORK_CHANGE_TYPE_SET_BRIDGE_UP\x10\x03\x12'\n" +
 	"#NETWORK_CHANGE_TYPE_SET_BRIDGE_DOWN\x10\x04\x12(\n" +
 	"$NETWORK_CHANGE_TYPE_ATTACH_INTERFACE\x10\x05\x12(\n" +
-	"$NETWORK_CHANGE_TYPE_DETACH_INTERFACE\x10\x062\xb3\x0f\n" +
+	"$NETWORK_CHANGE_TYPE_DETACH_INTERFACE\x10\x062\xbb\x11\n" +
 	"\x10AppRunnerService\x12=\n" +
 	"\x04Ping\x12\x19.apprunner.v1.PingRequest\x1a\x1a.apprunner.v1.PingResponse\x12=\n" +
 	"\x04Echo\x12\x19.apprunner.v1.EchoRequest\x1a\x1a.apprunner.v1.EchoResponse\x12X\n" +
 	"\rGetHostStatus\x12\".apprunner.v1.GetHostStatusRequest\x1a#.apprunner.v1.GetHostStatusResponse\x12I\n" +
-	"\bListISOs\x12\x1d.apprunner.v1.ListISOsRequest\x1a\x1e.apprunner.v1.ListISOsResponse\x12F\n" +
+	"\bListISOs\x12\x1d.apprunner.v1.ListISOsRequest\x1a\x1e.apprunner.v1.ListISOsResponse\x12R\n" +
+	"\vListStorage\x12 .apprunner.v1.ListStorageRequest\x1a!.apprunner.v1.ListStorageResponse\x12j\n" +
+	"\x13DownloadStorageFile\x12(.apprunner.v1.DownloadStorageFileRequest\x1a).apprunner.v1.DownloadStorageFileResponse\x12F\n" +
 	"\aListVMs\x12\x1c.apprunner.v1.ListVMsRequest\x1a\x1d.apprunner.v1.ListVMsResponse\x12@\n" +
 	"\x05GetVM\x12\x1a.apprunner.v1.GetVMRequest\x1a\x1b.apprunner.v1.GetVMResponse\x12I\n" +
 	"\bCreateVM\x12\x1d.apprunner.v1.CreateVMRequest\x1a\x1e.apprunner.v1.CreateVMResponse\x12F\n" +
+	"\aCloneVM\x12\x1c.apprunner.v1.CloneVMRequest\x1a\x1d.apprunner.v1.CloneVMResponse\x12F\n" +
 	"\aStartVM\x12\x1c.apprunner.v1.StartVMRequest\x1a\x1d.apprunner.v1.StartVMResponse\x12C\n" +
 	"\x06StopVM\x12\x1b.apprunner.v1.StopVMRequest\x1a\x1c.apprunner.v1.StopVMResponse\x12I\n" +
 	"\bUpdateVM\x12\x1d.apprunner.v1.UpdateVMRequest\x1a\x1e.apprunner.v1.UpdateVMResponse\x12^\n" +
@@ -4122,163 +4629,184 @@ func file_apprunner_v1_app_runner_proto_rawDescGZIP() []byte {
 	return file_apprunner_v1_app_runner_proto_rawDescData
 }
 
-var file_apprunner_v1_app_runner_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_apprunner_v1_app_runner_proto_msgTypes = make([]protoimpl.MessageInfo, 60)
+var file_apprunner_v1_app_runner_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_apprunner_v1_app_runner_proto_msgTypes = make([]protoimpl.MessageInfo, 68)
 var file_apprunner_v1_app_runner_proto_goTypes = []any{
 	(VMStatus)(0),                        // 0: apprunner.v1.VMStatus
 	(NetworkMode)(0),                     // 1: apprunner.v1.NetworkMode
-	(DiagnosticStatus)(0),                // 2: apprunner.v1.DiagnosticStatus
-	(NetworkChangeType)(0),               // 3: apprunner.v1.NetworkChangeType
-	(*PingRequest)(nil),                  // 4: apprunner.v1.PingRequest
-	(*PingResponse)(nil),                 // 5: apprunner.v1.PingResponse
-	(*EchoRequest)(nil),                  // 6: apprunner.v1.EchoRequest
-	(*EchoResponse)(nil),                 // 7: apprunner.v1.EchoResponse
-	(*VirtualMachine)(nil),               // 8: apprunner.v1.VirtualMachine
-	(*VMDisk)(nil),                       // 9: apprunner.v1.VMDisk
-	(*VMCDROM)(nil),                      // 10: apprunner.v1.VMCDROM
-	(*VMIPMIStatus)(nil),                 // 11: apprunner.v1.VMIPMIStatus
-	(*HostStatus)(nil),                   // 12: apprunner.v1.HostStatus
-	(*ISOImage)(nil),                     // 13: apprunner.v1.ISOImage
-	(*GetHostStatusRequest)(nil),         // 14: apprunner.v1.GetHostStatusRequest
-	(*GetHostStatusResponse)(nil),        // 15: apprunner.v1.GetHostStatusResponse
-	(*ListISOsRequest)(nil),              // 16: apprunner.v1.ListISOsRequest
-	(*ListISOsResponse)(nil),             // 17: apprunner.v1.ListISOsResponse
-	(*ListVMsRequest)(nil),               // 18: apprunner.v1.ListVMsRequest
-	(*ListVMsResponse)(nil),              // 19: apprunner.v1.ListVMsResponse
-	(*GetVMRequest)(nil),                 // 20: apprunner.v1.GetVMRequest
-	(*GetVMResponse)(nil),                // 21: apprunner.v1.GetVMResponse
-	(*CreateVMRequest)(nil),              // 22: apprunner.v1.CreateVMRequest
-	(*CreateVMResponse)(nil),             // 23: apprunner.v1.CreateVMResponse
-	(*StartVMRequest)(nil),               // 24: apprunner.v1.StartVMRequest
-	(*StartVMResponse)(nil),              // 25: apprunner.v1.StartVMResponse
-	(*StopVMRequest)(nil),                // 26: apprunner.v1.StopVMRequest
-	(*StopVMResponse)(nil),               // 27: apprunner.v1.StopVMResponse
-	(*UpdateVMRequest)(nil),              // 28: apprunner.v1.UpdateVMRequest
-	(*UpdateVMResponse)(nil),             // 29: apprunner.v1.UpdateVMResponse
-	(*UpdateVMNetworkRequest)(nil),       // 30: apprunner.v1.UpdateVMNetworkRequest
-	(*UpdateVMNetworkResponse)(nil),      // 31: apprunner.v1.UpdateVMNetworkResponse
-	(*AddVMDiskRequest)(nil),             // 32: apprunner.v1.AddVMDiskRequest
-	(*AddVMDiskResponse)(nil),            // 33: apprunner.v1.AddVMDiskResponse
-	(*RemoveVMDiskRequest)(nil),          // 34: apprunner.v1.RemoveVMDiskRequest
-	(*RemoveVMDiskResponse)(nil),         // 35: apprunner.v1.RemoveVMDiskResponse
-	(*AddVMCDROMRequest)(nil),            // 36: apprunner.v1.AddVMCDROMRequest
-	(*AddVMCDROMResponse)(nil),           // 37: apprunner.v1.AddVMCDROMResponse
-	(*UpdateVMCDROMRequest)(nil),         // 38: apprunner.v1.UpdateVMCDROMRequest
-	(*UpdateVMCDROMResponse)(nil),        // 39: apprunner.v1.UpdateVMCDROMResponse
-	(*RemoveVMCDROMRequest)(nil),         // 40: apprunner.v1.RemoveVMCDROMRequest
-	(*RemoveVMCDROMResponse)(nil),        // 41: apprunner.v1.RemoveVMCDROMResponse
-	(*ConfigureVMIPMIRequest)(nil),       // 42: apprunner.v1.ConfigureVMIPMIRequest
-	(*ConfigureVMIPMIResponse)(nil),      // 43: apprunner.v1.ConfigureVMIPMIResponse
-	(*DeleteVMRequest)(nil),              // 44: apprunner.v1.DeleteVMRequest
-	(*DeleteVMResponse)(nil),             // 45: apprunner.v1.DeleteVMResponse
-	(*NetworkDiagnostic)(nil),            // 46: apprunner.v1.NetworkDiagnostic
-	(*UserIdentity)(nil),                 // 47: apprunner.v1.UserIdentity
-	(*NetworkInterface)(nil),             // 48: apprunner.v1.NetworkInterface
-	(*WorkloadAttachment)(nil),           // 49: apprunner.v1.WorkloadAttachment
-	(*NetworkBridge)(nil),                // 50: apprunner.v1.NetworkBridge
-	(*BridgeDHCPStatus)(nil),             // 51: apprunner.v1.BridgeDHCPStatus
-	(*PendingNetworkChange)(nil),         // 52: apprunner.v1.PendingNetworkChange
-	(*NetworkingStatus)(nil),             // 53: apprunner.v1.NetworkingStatus
-	(*GetNetworkingStatusRequest)(nil),   // 54: apprunner.v1.GetNetworkingStatusRequest
-	(*GetNetworkingStatusResponse)(nil),  // 55: apprunner.v1.GetNetworkingStatusResponse
-	(*ApplyNetworkChangeRequest)(nil),    // 56: apprunner.v1.ApplyNetworkChangeRequest
-	(*ApplyNetworkChangeResponse)(nil),   // 57: apprunner.v1.ApplyNetworkChangeResponse
-	(*ConfirmNetworkChangeRequest)(nil),  // 58: apprunner.v1.ConfirmNetworkChangeRequest
-	(*ConfirmNetworkChangeResponse)(nil), // 59: apprunner.v1.ConfirmNetworkChangeResponse
-	(*RevertNetworkChangeRequest)(nil),   // 60: apprunner.v1.RevertNetworkChangeRequest
-	(*RevertNetworkChangeResponse)(nil),  // 61: apprunner.v1.RevertNetworkChangeResponse
-	(*ConfigureBridgeDHCPRequest)(nil),   // 62: apprunner.v1.ConfigureBridgeDHCPRequest
-	(*ConfigureBridgeDHCPResponse)(nil),  // 63: apprunner.v1.ConfigureBridgeDHCPResponse
+	(StorageEntryKind)(0),                // 2: apprunner.v1.StorageEntryKind
+	(DiagnosticStatus)(0),                // 3: apprunner.v1.DiagnosticStatus
+	(NetworkChangeType)(0),               // 4: apprunner.v1.NetworkChangeType
+	(*PingRequest)(nil),                  // 5: apprunner.v1.PingRequest
+	(*PingResponse)(nil),                 // 6: apprunner.v1.PingResponse
+	(*EchoRequest)(nil),                  // 7: apprunner.v1.EchoRequest
+	(*EchoResponse)(nil),                 // 8: apprunner.v1.EchoResponse
+	(*VirtualMachine)(nil),               // 9: apprunner.v1.VirtualMachine
+	(*VMDisk)(nil),                       // 10: apprunner.v1.VMDisk
+	(*VMCDROM)(nil),                      // 11: apprunner.v1.VMCDROM
+	(*VMIPMIStatus)(nil),                 // 12: apprunner.v1.VMIPMIStatus
+	(*HostStatus)(nil),                   // 13: apprunner.v1.HostStatus
+	(*ISOImage)(nil),                     // 14: apprunner.v1.ISOImage
+	(*GetHostStatusRequest)(nil),         // 15: apprunner.v1.GetHostStatusRequest
+	(*GetHostStatusResponse)(nil),        // 16: apprunner.v1.GetHostStatusResponse
+	(*ListISOsRequest)(nil),              // 17: apprunner.v1.ListISOsRequest
+	(*ListISOsResponse)(nil),             // 18: apprunner.v1.ListISOsResponse
+	(*StorageEntry)(nil),                 // 19: apprunner.v1.StorageEntry
+	(*StorageRoot)(nil),                  // 20: apprunner.v1.StorageRoot
+	(*ListStorageRequest)(nil),           // 21: apprunner.v1.ListStorageRequest
+	(*ListStorageResponse)(nil),          // 22: apprunner.v1.ListStorageResponse
+	(*DownloadStorageFileRequest)(nil),   // 23: apprunner.v1.DownloadStorageFileRequest
+	(*DownloadStorageFileResponse)(nil),  // 24: apprunner.v1.DownloadStorageFileResponse
+	(*ListVMsRequest)(nil),               // 25: apprunner.v1.ListVMsRequest
+	(*ListVMsResponse)(nil),              // 26: apprunner.v1.ListVMsResponse
+	(*GetVMRequest)(nil),                 // 27: apprunner.v1.GetVMRequest
+	(*GetVMResponse)(nil),                // 28: apprunner.v1.GetVMResponse
+	(*CreateVMRequest)(nil),              // 29: apprunner.v1.CreateVMRequest
+	(*CreateVMResponse)(nil),             // 30: apprunner.v1.CreateVMResponse
+	(*CloneVMRequest)(nil),               // 31: apprunner.v1.CloneVMRequest
+	(*CloneVMResponse)(nil),              // 32: apprunner.v1.CloneVMResponse
+	(*StartVMRequest)(nil),               // 33: apprunner.v1.StartVMRequest
+	(*StartVMResponse)(nil),              // 34: apprunner.v1.StartVMResponse
+	(*StopVMRequest)(nil),                // 35: apprunner.v1.StopVMRequest
+	(*StopVMResponse)(nil),               // 36: apprunner.v1.StopVMResponse
+	(*UpdateVMRequest)(nil),              // 37: apprunner.v1.UpdateVMRequest
+	(*UpdateVMResponse)(nil),             // 38: apprunner.v1.UpdateVMResponse
+	(*UpdateVMNetworkRequest)(nil),       // 39: apprunner.v1.UpdateVMNetworkRequest
+	(*UpdateVMNetworkResponse)(nil),      // 40: apprunner.v1.UpdateVMNetworkResponse
+	(*AddVMDiskRequest)(nil),             // 41: apprunner.v1.AddVMDiskRequest
+	(*AddVMDiskResponse)(nil),            // 42: apprunner.v1.AddVMDiskResponse
+	(*RemoveVMDiskRequest)(nil),          // 43: apprunner.v1.RemoveVMDiskRequest
+	(*RemoveVMDiskResponse)(nil),         // 44: apprunner.v1.RemoveVMDiskResponse
+	(*AddVMCDROMRequest)(nil),            // 45: apprunner.v1.AddVMCDROMRequest
+	(*AddVMCDROMResponse)(nil),           // 46: apprunner.v1.AddVMCDROMResponse
+	(*UpdateVMCDROMRequest)(nil),         // 47: apprunner.v1.UpdateVMCDROMRequest
+	(*UpdateVMCDROMResponse)(nil),        // 48: apprunner.v1.UpdateVMCDROMResponse
+	(*RemoveVMCDROMRequest)(nil),         // 49: apprunner.v1.RemoveVMCDROMRequest
+	(*RemoveVMCDROMResponse)(nil),        // 50: apprunner.v1.RemoveVMCDROMResponse
+	(*ConfigureVMIPMIRequest)(nil),       // 51: apprunner.v1.ConfigureVMIPMIRequest
+	(*ConfigureVMIPMIResponse)(nil),      // 52: apprunner.v1.ConfigureVMIPMIResponse
+	(*DeleteVMRequest)(nil),              // 53: apprunner.v1.DeleteVMRequest
+	(*DeleteVMResponse)(nil),             // 54: apprunner.v1.DeleteVMResponse
+	(*NetworkDiagnostic)(nil),            // 55: apprunner.v1.NetworkDiagnostic
+	(*UserIdentity)(nil),                 // 56: apprunner.v1.UserIdentity
+	(*NetworkInterface)(nil),             // 57: apprunner.v1.NetworkInterface
+	(*WorkloadAttachment)(nil),           // 58: apprunner.v1.WorkloadAttachment
+	(*NetworkBridge)(nil),                // 59: apprunner.v1.NetworkBridge
+	(*BridgeDHCPStatus)(nil),             // 60: apprunner.v1.BridgeDHCPStatus
+	(*PendingNetworkChange)(nil),         // 61: apprunner.v1.PendingNetworkChange
+	(*NetworkingStatus)(nil),             // 62: apprunner.v1.NetworkingStatus
+	(*GetNetworkingStatusRequest)(nil),   // 63: apprunner.v1.GetNetworkingStatusRequest
+	(*GetNetworkingStatusResponse)(nil),  // 64: apprunner.v1.GetNetworkingStatusResponse
+	(*ApplyNetworkChangeRequest)(nil),    // 65: apprunner.v1.ApplyNetworkChangeRequest
+	(*ApplyNetworkChangeResponse)(nil),   // 66: apprunner.v1.ApplyNetworkChangeResponse
+	(*ConfirmNetworkChangeRequest)(nil),  // 67: apprunner.v1.ConfirmNetworkChangeRequest
+	(*ConfirmNetworkChangeResponse)(nil), // 68: apprunner.v1.ConfirmNetworkChangeResponse
+	(*RevertNetworkChangeRequest)(nil),   // 69: apprunner.v1.RevertNetworkChangeRequest
+	(*RevertNetworkChangeResponse)(nil),  // 70: apprunner.v1.RevertNetworkChangeResponse
+	(*ConfigureBridgeDHCPRequest)(nil),   // 71: apprunner.v1.ConfigureBridgeDHCPRequest
+	(*ConfigureBridgeDHCPResponse)(nil),  // 72: apprunner.v1.ConfigureBridgeDHCPResponse
 }
 var file_apprunner_v1_app_runner_proto_depIdxs = []int32{
 	1,  // 0: apprunner.v1.VirtualMachine.network_mode:type_name -> apprunner.v1.NetworkMode
 	0,  // 1: apprunner.v1.VirtualMachine.status:type_name -> apprunner.v1.VMStatus
-	11, // 2: apprunner.v1.VirtualMachine.ipmi:type_name -> apprunner.v1.VMIPMIStatus
-	9,  // 3: apprunner.v1.VirtualMachine.disks:type_name -> apprunner.v1.VMDisk
-	10, // 4: apprunner.v1.VirtualMachine.cdroms:type_name -> apprunner.v1.VMCDROM
-	12, // 5: apprunner.v1.GetHostStatusResponse.status:type_name -> apprunner.v1.HostStatus
-	13, // 6: apprunner.v1.ListISOsResponse.images:type_name -> apprunner.v1.ISOImage
-	8,  // 7: apprunner.v1.ListVMsResponse.virtual_machines:type_name -> apprunner.v1.VirtualMachine
-	8,  // 8: apprunner.v1.GetVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
-	1,  // 9: apprunner.v1.CreateVMRequest.network_mode:type_name -> apprunner.v1.NetworkMode
-	8,  // 10: apprunner.v1.CreateVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
-	8,  // 11: apprunner.v1.StartVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
-	8,  // 12: apprunner.v1.StopVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
-	8,  // 13: apprunner.v1.UpdateVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
-	1,  // 14: apprunner.v1.UpdateVMNetworkRequest.network_mode:type_name -> apprunner.v1.NetworkMode
-	8,  // 15: apprunner.v1.UpdateVMNetworkResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
-	8,  // 16: apprunner.v1.AddVMDiskResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
-	8,  // 17: apprunner.v1.RemoveVMDiskResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
-	8,  // 18: apprunner.v1.AddVMCDROMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
-	8,  // 19: apprunner.v1.UpdateVMCDROMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
-	8,  // 20: apprunner.v1.RemoveVMCDROMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
-	8,  // 21: apprunner.v1.ConfigureVMIPMIResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
-	2,  // 22: apprunner.v1.NetworkDiagnostic.status:type_name -> apprunner.v1.DiagnosticStatus
-	49, // 23: apprunner.v1.NetworkBridge.workloads:type_name -> apprunner.v1.WorkloadAttachment
-	46, // 24: apprunner.v1.NetworkBridge.diagnostics:type_name -> apprunner.v1.NetworkDiagnostic
-	51, // 25: apprunner.v1.NetworkBridge.dhcp:type_name -> apprunner.v1.BridgeDHCPStatus
-	47, // 26: apprunner.v1.NetworkingStatus.user:type_name -> apprunner.v1.UserIdentity
-	46, // 27: apprunner.v1.NetworkingStatus.diagnostics:type_name -> apprunner.v1.NetworkDiagnostic
-	50, // 28: apprunner.v1.NetworkingStatus.bridges:type_name -> apprunner.v1.NetworkBridge
-	48, // 29: apprunner.v1.NetworkingStatus.interfaces:type_name -> apprunner.v1.NetworkInterface
-	52, // 30: apprunner.v1.NetworkingStatus.pending_change:type_name -> apprunner.v1.PendingNetworkChange
-	53, // 31: apprunner.v1.GetNetworkingStatusResponse.status:type_name -> apprunner.v1.NetworkingStatus
-	3,  // 32: apprunner.v1.ApplyNetworkChangeRequest.type:type_name -> apprunner.v1.NetworkChangeType
-	52, // 33: apprunner.v1.ApplyNetworkChangeResponse.pending_change:type_name -> apprunner.v1.PendingNetworkChange
-	53, // 34: apprunner.v1.ConfirmNetworkChangeResponse.status:type_name -> apprunner.v1.NetworkingStatus
-	53, // 35: apprunner.v1.RevertNetworkChangeResponse.status:type_name -> apprunner.v1.NetworkingStatus
-	53, // 36: apprunner.v1.ConfigureBridgeDHCPResponse.status:type_name -> apprunner.v1.NetworkingStatus
-	4,  // 37: apprunner.v1.AppRunnerService.Ping:input_type -> apprunner.v1.PingRequest
-	6,  // 38: apprunner.v1.AppRunnerService.Echo:input_type -> apprunner.v1.EchoRequest
-	14, // 39: apprunner.v1.AppRunnerService.GetHostStatus:input_type -> apprunner.v1.GetHostStatusRequest
-	16, // 40: apprunner.v1.AppRunnerService.ListISOs:input_type -> apprunner.v1.ListISOsRequest
-	18, // 41: apprunner.v1.AppRunnerService.ListVMs:input_type -> apprunner.v1.ListVMsRequest
-	20, // 42: apprunner.v1.AppRunnerService.GetVM:input_type -> apprunner.v1.GetVMRequest
-	22, // 43: apprunner.v1.AppRunnerService.CreateVM:input_type -> apprunner.v1.CreateVMRequest
-	24, // 44: apprunner.v1.AppRunnerService.StartVM:input_type -> apprunner.v1.StartVMRequest
-	26, // 45: apprunner.v1.AppRunnerService.StopVM:input_type -> apprunner.v1.StopVMRequest
-	28, // 46: apprunner.v1.AppRunnerService.UpdateVM:input_type -> apprunner.v1.UpdateVMRequest
-	30, // 47: apprunner.v1.AppRunnerService.UpdateVMNetwork:input_type -> apprunner.v1.UpdateVMNetworkRequest
-	32, // 48: apprunner.v1.AppRunnerService.AddVMDisk:input_type -> apprunner.v1.AddVMDiskRequest
-	34, // 49: apprunner.v1.AppRunnerService.RemoveVMDisk:input_type -> apprunner.v1.RemoveVMDiskRequest
-	36, // 50: apprunner.v1.AppRunnerService.AddVMCDROM:input_type -> apprunner.v1.AddVMCDROMRequest
-	38, // 51: apprunner.v1.AppRunnerService.UpdateVMCDROM:input_type -> apprunner.v1.UpdateVMCDROMRequest
-	40, // 52: apprunner.v1.AppRunnerService.RemoveVMCDROM:input_type -> apprunner.v1.RemoveVMCDROMRequest
-	42, // 53: apprunner.v1.AppRunnerService.ConfigureVMIPMI:input_type -> apprunner.v1.ConfigureVMIPMIRequest
-	44, // 54: apprunner.v1.AppRunnerService.DeleteVM:input_type -> apprunner.v1.DeleteVMRequest
-	54, // 55: apprunner.v1.AppRunnerService.GetNetworkingStatus:input_type -> apprunner.v1.GetNetworkingStatusRequest
-	56, // 56: apprunner.v1.AppRunnerService.ApplyNetworkChange:input_type -> apprunner.v1.ApplyNetworkChangeRequest
-	58, // 57: apprunner.v1.AppRunnerService.ConfirmNetworkChange:input_type -> apprunner.v1.ConfirmNetworkChangeRequest
-	60, // 58: apprunner.v1.AppRunnerService.RevertNetworkChange:input_type -> apprunner.v1.RevertNetworkChangeRequest
-	62, // 59: apprunner.v1.AppRunnerService.ConfigureBridgeDHCP:input_type -> apprunner.v1.ConfigureBridgeDHCPRequest
-	5,  // 60: apprunner.v1.AppRunnerService.Ping:output_type -> apprunner.v1.PingResponse
-	7,  // 61: apprunner.v1.AppRunnerService.Echo:output_type -> apprunner.v1.EchoResponse
-	15, // 62: apprunner.v1.AppRunnerService.GetHostStatus:output_type -> apprunner.v1.GetHostStatusResponse
-	17, // 63: apprunner.v1.AppRunnerService.ListISOs:output_type -> apprunner.v1.ListISOsResponse
-	19, // 64: apprunner.v1.AppRunnerService.ListVMs:output_type -> apprunner.v1.ListVMsResponse
-	21, // 65: apprunner.v1.AppRunnerService.GetVM:output_type -> apprunner.v1.GetVMResponse
-	23, // 66: apprunner.v1.AppRunnerService.CreateVM:output_type -> apprunner.v1.CreateVMResponse
-	25, // 67: apprunner.v1.AppRunnerService.StartVM:output_type -> apprunner.v1.StartVMResponse
-	27, // 68: apprunner.v1.AppRunnerService.StopVM:output_type -> apprunner.v1.StopVMResponse
-	29, // 69: apprunner.v1.AppRunnerService.UpdateVM:output_type -> apprunner.v1.UpdateVMResponse
-	31, // 70: apprunner.v1.AppRunnerService.UpdateVMNetwork:output_type -> apprunner.v1.UpdateVMNetworkResponse
-	33, // 71: apprunner.v1.AppRunnerService.AddVMDisk:output_type -> apprunner.v1.AddVMDiskResponse
-	35, // 72: apprunner.v1.AppRunnerService.RemoveVMDisk:output_type -> apprunner.v1.RemoveVMDiskResponse
-	37, // 73: apprunner.v1.AppRunnerService.AddVMCDROM:output_type -> apprunner.v1.AddVMCDROMResponse
-	39, // 74: apprunner.v1.AppRunnerService.UpdateVMCDROM:output_type -> apprunner.v1.UpdateVMCDROMResponse
-	41, // 75: apprunner.v1.AppRunnerService.RemoveVMCDROM:output_type -> apprunner.v1.RemoveVMCDROMResponse
-	43, // 76: apprunner.v1.AppRunnerService.ConfigureVMIPMI:output_type -> apprunner.v1.ConfigureVMIPMIResponse
-	45, // 77: apprunner.v1.AppRunnerService.DeleteVM:output_type -> apprunner.v1.DeleteVMResponse
-	55, // 78: apprunner.v1.AppRunnerService.GetNetworkingStatus:output_type -> apprunner.v1.GetNetworkingStatusResponse
-	57, // 79: apprunner.v1.AppRunnerService.ApplyNetworkChange:output_type -> apprunner.v1.ApplyNetworkChangeResponse
-	59, // 80: apprunner.v1.AppRunnerService.ConfirmNetworkChange:output_type -> apprunner.v1.ConfirmNetworkChangeResponse
-	61, // 81: apprunner.v1.AppRunnerService.RevertNetworkChange:output_type -> apprunner.v1.RevertNetworkChangeResponse
-	63, // 82: apprunner.v1.AppRunnerService.ConfigureBridgeDHCP:output_type -> apprunner.v1.ConfigureBridgeDHCPResponse
-	60, // [60:83] is the sub-list for method output_type
-	37, // [37:60] is the sub-list for method input_type
-	37, // [37:37] is the sub-list for extension type_name
-	37, // [37:37] is the sub-list for extension extendee
-	0,  // [0:37] is the sub-list for field type_name
+	12, // 2: apprunner.v1.VirtualMachine.ipmi:type_name -> apprunner.v1.VMIPMIStatus
+	10, // 3: apprunner.v1.VirtualMachine.disks:type_name -> apprunner.v1.VMDisk
+	11, // 4: apprunner.v1.VirtualMachine.cdroms:type_name -> apprunner.v1.VMCDROM
+	13, // 5: apprunner.v1.GetHostStatusResponse.status:type_name -> apprunner.v1.HostStatus
+	14, // 6: apprunner.v1.ListISOsResponse.images:type_name -> apprunner.v1.ISOImage
+	2,  // 7: apprunner.v1.StorageEntry.kind:type_name -> apprunner.v1.StorageEntryKind
+	19, // 8: apprunner.v1.StorageEntry.children:type_name -> apprunner.v1.StorageEntry
+	19, // 9: apprunner.v1.StorageRoot.entries:type_name -> apprunner.v1.StorageEntry
+	20, // 10: apprunner.v1.ListStorageResponse.roots:type_name -> apprunner.v1.StorageRoot
+	19, // 11: apprunner.v1.DownloadStorageFileResponse.file:type_name -> apprunner.v1.StorageEntry
+	9,  // 12: apprunner.v1.ListVMsResponse.virtual_machines:type_name -> apprunner.v1.VirtualMachine
+	9,  // 13: apprunner.v1.GetVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	1,  // 14: apprunner.v1.CreateVMRequest.network_mode:type_name -> apprunner.v1.NetworkMode
+	9,  // 15: apprunner.v1.CreateVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	9,  // 16: apprunner.v1.CloneVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	9,  // 17: apprunner.v1.StartVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	9,  // 18: apprunner.v1.StopVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	9,  // 19: apprunner.v1.UpdateVMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	1,  // 20: apprunner.v1.UpdateVMNetworkRequest.network_mode:type_name -> apprunner.v1.NetworkMode
+	9,  // 21: apprunner.v1.UpdateVMNetworkResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	9,  // 22: apprunner.v1.AddVMDiskResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	9,  // 23: apprunner.v1.RemoveVMDiskResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	9,  // 24: apprunner.v1.AddVMCDROMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	9,  // 25: apprunner.v1.UpdateVMCDROMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	9,  // 26: apprunner.v1.RemoveVMCDROMResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	9,  // 27: apprunner.v1.ConfigureVMIPMIResponse.virtual_machine:type_name -> apprunner.v1.VirtualMachine
+	3,  // 28: apprunner.v1.NetworkDiagnostic.status:type_name -> apprunner.v1.DiagnosticStatus
+	58, // 29: apprunner.v1.NetworkBridge.workloads:type_name -> apprunner.v1.WorkloadAttachment
+	55, // 30: apprunner.v1.NetworkBridge.diagnostics:type_name -> apprunner.v1.NetworkDiagnostic
+	60, // 31: apprunner.v1.NetworkBridge.dhcp:type_name -> apprunner.v1.BridgeDHCPStatus
+	56, // 32: apprunner.v1.NetworkingStatus.user:type_name -> apprunner.v1.UserIdentity
+	55, // 33: apprunner.v1.NetworkingStatus.diagnostics:type_name -> apprunner.v1.NetworkDiagnostic
+	59, // 34: apprunner.v1.NetworkingStatus.bridges:type_name -> apprunner.v1.NetworkBridge
+	57, // 35: apprunner.v1.NetworkingStatus.interfaces:type_name -> apprunner.v1.NetworkInterface
+	61, // 36: apprunner.v1.NetworkingStatus.pending_change:type_name -> apprunner.v1.PendingNetworkChange
+	62, // 37: apprunner.v1.GetNetworkingStatusResponse.status:type_name -> apprunner.v1.NetworkingStatus
+	4,  // 38: apprunner.v1.ApplyNetworkChangeRequest.type:type_name -> apprunner.v1.NetworkChangeType
+	61, // 39: apprunner.v1.ApplyNetworkChangeResponse.pending_change:type_name -> apprunner.v1.PendingNetworkChange
+	62, // 40: apprunner.v1.ConfirmNetworkChangeResponse.status:type_name -> apprunner.v1.NetworkingStatus
+	62, // 41: apprunner.v1.RevertNetworkChangeResponse.status:type_name -> apprunner.v1.NetworkingStatus
+	62, // 42: apprunner.v1.ConfigureBridgeDHCPResponse.status:type_name -> apprunner.v1.NetworkingStatus
+	5,  // 43: apprunner.v1.AppRunnerService.Ping:input_type -> apprunner.v1.PingRequest
+	7,  // 44: apprunner.v1.AppRunnerService.Echo:input_type -> apprunner.v1.EchoRequest
+	15, // 45: apprunner.v1.AppRunnerService.GetHostStatus:input_type -> apprunner.v1.GetHostStatusRequest
+	17, // 46: apprunner.v1.AppRunnerService.ListISOs:input_type -> apprunner.v1.ListISOsRequest
+	21, // 47: apprunner.v1.AppRunnerService.ListStorage:input_type -> apprunner.v1.ListStorageRequest
+	23, // 48: apprunner.v1.AppRunnerService.DownloadStorageFile:input_type -> apprunner.v1.DownloadStorageFileRequest
+	25, // 49: apprunner.v1.AppRunnerService.ListVMs:input_type -> apprunner.v1.ListVMsRequest
+	27, // 50: apprunner.v1.AppRunnerService.GetVM:input_type -> apprunner.v1.GetVMRequest
+	29, // 51: apprunner.v1.AppRunnerService.CreateVM:input_type -> apprunner.v1.CreateVMRequest
+	31, // 52: apprunner.v1.AppRunnerService.CloneVM:input_type -> apprunner.v1.CloneVMRequest
+	33, // 53: apprunner.v1.AppRunnerService.StartVM:input_type -> apprunner.v1.StartVMRequest
+	35, // 54: apprunner.v1.AppRunnerService.StopVM:input_type -> apprunner.v1.StopVMRequest
+	37, // 55: apprunner.v1.AppRunnerService.UpdateVM:input_type -> apprunner.v1.UpdateVMRequest
+	39, // 56: apprunner.v1.AppRunnerService.UpdateVMNetwork:input_type -> apprunner.v1.UpdateVMNetworkRequest
+	41, // 57: apprunner.v1.AppRunnerService.AddVMDisk:input_type -> apprunner.v1.AddVMDiskRequest
+	43, // 58: apprunner.v1.AppRunnerService.RemoveVMDisk:input_type -> apprunner.v1.RemoveVMDiskRequest
+	45, // 59: apprunner.v1.AppRunnerService.AddVMCDROM:input_type -> apprunner.v1.AddVMCDROMRequest
+	47, // 60: apprunner.v1.AppRunnerService.UpdateVMCDROM:input_type -> apprunner.v1.UpdateVMCDROMRequest
+	49, // 61: apprunner.v1.AppRunnerService.RemoveVMCDROM:input_type -> apprunner.v1.RemoveVMCDROMRequest
+	51, // 62: apprunner.v1.AppRunnerService.ConfigureVMIPMI:input_type -> apprunner.v1.ConfigureVMIPMIRequest
+	53, // 63: apprunner.v1.AppRunnerService.DeleteVM:input_type -> apprunner.v1.DeleteVMRequest
+	63, // 64: apprunner.v1.AppRunnerService.GetNetworkingStatus:input_type -> apprunner.v1.GetNetworkingStatusRequest
+	65, // 65: apprunner.v1.AppRunnerService.ApplyNetworkChange:input_type -> apprunner.v1.ApplyNetworkChangeRequest
+	67, // 66: apprunner.v1.AppRunnerService.ConfirmNetworkChange:input_type -> apprunner.v1.ConfirmNetworkChangeRequest
+	69, // 67: apprunner.v1.AppRunnerService.RevertNetworkChange:input_type -> apprunner.v1.RevertNetworkChangeRequest
+	71, // 68: apprunner.v1.AppRunnerService.ConfigureBridgeDHCP:input_type -> apprunner.v1.ConfigureBridgeDHCPRequest
+	6,  // 69: apprunner.v1.AppRunnerService.Ping:output_type -> apprunner.v1.PingResponse
+	8,  // 70: apprunner.v1.AppRunnerService.Echo:output_type -> apprunner.v1.EchoResponse
+	16, // 71: apprunner.v1.AppRunnerService.GetHostStatus:output_type -> apprunner.v1.GetHostStatusResponse
+	18, // 72: apprunner.v1.AppRunnerService.ListISOs:output_type -> apprunner.v1.ListISOsResponse
+	22, // 73: apprunner.v1.AppRunnerService.ListStorage:output_type -> apprunner.v1.ListStorageResponse
+	24, // 74: apprunner.v1.AppRunnerService.DownloadStorageFile:output_type -> apprunner.v1.DownloadStorageFileResponse
+	26, // 75: apprunner.v1.AppRunnerService.ListVMs:output_type -> apprunner.v1.ListVMsResponse
+	28, // 76: apprunner.v1.AppRunnerService.GetVM:output_type -> apprunner.v1.GetVMResponse
+	30, // 77: apprunner.v1.AppRunnerService.CreateVM:output_type -> apprunner.v1.CreateVMResponse
+	32, // 78: apprunner.v1.AppRunnerService.CloneVM:output_type -> apprunner.v1.CloneVMResponse
+	34, // 79: apprunner.v1.AppRunnerService.StartVM:output_type -> apprunner.v1.StartVMResponse
+	36, // 80: apprunner.v1.AppRunnerService.StopVM:output_type -> apprunner.v1.StopVMResponse
+	38, // 81: apprunner.v1.AppRunnerService.UpdateVM:output_type -> apprunner.v1.UpdateVMResponse
+	40, // 82: apprunner.v1.AppRunnerService.UpdateVMNetwork:output_type -> apprunner.v1.UpdateVMNetworkResponse
+	42, // 83: apprunner.v1.AppRunnerService.AddVMDisk:output_type -> apprunner.v1.AddVMDiskResponse
+	44, // 84: apprunner.v1.AppRunnerService.RemoveVMDisk:output_type -> apprunner.v1.RemoveVMDiskResponse
+	46, // 85: apprunner.v1.AppRunnerService.AddVMCDROM:output_type -> apprunner.v1.AddVMCDROMResponse
+	48, // 86: apprunner.v1.AppRunnerService.UpdateVMCDROM:output_type -> apprunner.v1.UpdateVMCDROMResponse
+	50, // 87: apprunner.v1.AppRunnerService.RemoveVMCDROM:output_type -> apprunner.v1.RemoveVMCDROMResponse
+	52, // 88: apprunner.v1.AppRunnerService.ConfigureVMIPMI:output_type -> apprunner.v1.ConfigureVMIPMIResponse
+	54, // 89: apprunner.v1.AppRunnerService.DeleteVM:output_type -> apprunner.v1.DeleteVMResponse
+	64, // 90: apprunner.v1.AppRunnerService.GetNetworkingStatus:output_type -> apprunner.v1.GetNetworkingStatusResponse
+	66, // 91: apprunner.v1.AppRunnerService.ApplyNetworkChange:output_type -> apprunner.v1.ApplyNetworkChangeResponse
+	68, // 92: apprunner.v1.AppRunnerService.ConfirmNetworkChange:output_type -> apprunner.v1.ConfirmNetworkChangeResponse
+	70, // 93: apprunner.v1.AppRunnerService.RevertNetworkChange:output_type -> apprunner.v1.RevertNetworkChangeResponse
+	72, // 94: apprunner.v1.AppRunnerService.ConfigureBridgeDHCP:output_type -> apprunner.v1.ConfigureBridgeDHCPResponse
+	69, // [69:95] is the sub-list for method output_type
+	43, // [43:69] is the sub-list for method input_type
+	43, // [43:43] is the sub-list for extension type_name
+	43, // [43:43] is the sub-list for extension extendee
+	0,  // [0:43] is the sub-list for field type_name
 }
 
 func init() { file_apprunner_v1_app_runner_proto_init() }
@@ -4291,8 +4819,8 @@ func file_apprunner_v1_app_runner_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_apprunner_v1_app_runner_proto_rawDesc), len(file_apprunner_v1_app_runner_proto_rawDesc)),
-			NumEnums:      4,
-			NumMessages:   60,
+			NumEnums:      5,
+			NumMessages:   68,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
