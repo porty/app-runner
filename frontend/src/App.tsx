@@ -45,6 +45,7 @@ import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 
 import { echo, ping, type PingResponse } from './api'
 import CloudInitPage from './CloudInitPage'
+import CreateVirtualMachinePage from './CreateVirtualMachinePage'
 import HostWarnings from './HostWarnings'
 import NetworkingPage from './NetworkingPage'
 import StoragePage from './StoragePage'
@@ -412,6 +413,7 @@ export default function App({ mode, onToggleMode, refreshSpeed, onRefreshSpeedCh
             <Route path="/" element={<Overview />} />
             <Route path="/activity" element={<PlaceholderPage title="Activity" description="Recent control plane events and operations." />} />
             <Route path="/compute/virtual-machines" element={<VirtualMachinesPage refreshInterval={refreshIntervals[refreshSpeed]} />} />
+            <Route path="/compute/virtual-machines/new" element={<CreateVirtualMachinePage />} />
             <Route path="/compute/virtual-machines/:id/settings" element={<VirtualMachineSettingsPage />} />
             <Route
               path="/compute/virtual-machines/:id/console"
