@@ -109,6 +109,7 @@ func (s *appRunnerService) CreateVM(ctx context.Context, request *apprunnerv1.Cr
 		Name: request.GetName(), CPUs: request.GetCpus(), MemoryMiB: request.GetMemoryMib(),
 		DiskGiB: request.GetDiskGib(), ISOName: request.GetIsoName(), NetworkMode: mode,
 		BridgeName: request.GetBridgeName(),
+		CloudInit:  vmCloudInit{Enabled: request.GetCloudInitEnabled(), UserData: request.GetCloudInitUserData()},
 	})
 	if err != nil {
 		return nil, rpcError(err)
@@ -239,6 +240,19 @@ func (s *appRunnerService) RemoveVMCDROM(_ context.Context, request *apprunnerv1
 		return nil, rpcError(err)
 	}
 	return &apprunnerv1.RemoveVMCDROMResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+}
+
+func (s *appRunnerService) ConfigureVMCloudInit(ctx context.Context, request *apprunnerv1.ConfigureVMCloudInitRequest) (*apprunnerv1.ConfigureVMCloudInitResponse, error) {
+	if err := s.requireManager(); err != nil {
+		return nil, err
+	}
+	vm, err := s.manager.ConfigureCloudInit(ctx, request.GetId(), vmCloudInit{
+		Enabled: request.GetEnabled(), UserData: request.GetUserData(),
+	})
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.ConfigureVMCloudInitResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
 }
 
 func (s *appRunnerService) ConfigureVMIPMI(_ context.Context, request *apprunnerv1.ConfigureVMIPMIRequest) (*apprunnerv1.ConfigureVMIPMIResponse, error) {
@@ -378,6 +392,7 @@ func virtualMachineToProto(vm virtualMachine) *apprunnerv1.VirtualMachine {
 			Enabled: vm.IPMI.Enabled, BridgeName: vm.IPMI.BridgeName, Address: vm.IPMI.Address,
 			Port: ipmiPort, Username: vm.IPMI.Username, Running: vm.IPMIRunning, LastError: vm.IPMIError,
 		},
+		CloudInit: &apprunnerv1.VMCloudInit{Enabled: vm.CloudInit.Enabled, UserData: vm.CloudInit.UserData},
 	}
 	for _, disk := range vm.Disks {
 		result.Disks = append(result.Disks, &apprunnerv1.VMDisk{Id: disk.ID, SizeGib: disk.SizeGiB, System: disk.System})

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMIPMI, createVM, downloadStorageFile, echo, getNetworkingStatus, listStorage, listVMs, ping, rebootVM, uploadStorageFiles } from './api'
+import { applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMCloudInit, configureVMIPMI, createVM, downloadStorageFile, echo, getNetworkingStatus, listStorage, listVMs, ping, rebootVM, uploadStorageFiles } from './api'
 
 describe('Twirp API client', () => {
   afterEach(() => {
@@ -82,6 +82,8 @@ describe('Twirp API client', () => {
         disk_gib: 20,
         iso_name: 'installer.iso',
         network_mode: 'NETWORK_MODE_NAT',
+        cloud_init_enabled: true,
+        cloud_init_user_data: '#cloud-config\npackages: [curl]\n',
       }),
     ).resolves.toEqual(virtualMachine)
     expect(fetchMock).toHaveBeenCalledWith(
@@ -94,6 +96,8 @@ describe('Twirp API client', () => {
           disk_gib: 20,
           iso_name: 'installer.iso',
           network_mode: 'NETWORK_MODE_NAT',
+          cloud_init_enabled: true,
+          cloud_init_user_data: '#cloud-config\npackages: [curl]\n',
         }),
       }),
     )
@@ -229,6 +233,21 @@ describe('Twirp API client', () => {
     await expect(configureVMIPMI(configuration)).resolves.toEqual(virtualMachine)
     expect(fetchMock).toHaveBeenCalledWith(
       '/twirp/apprunner.v1.AppRunnerService/ConfigureVMIPMI',
+      expect.objectContaining({ body: JSON.stringify(configuration) }),
+    )
+  })
+
+  it('configures Cloud Init through Twirp', async () => {
+    const configuration = { id: 'vm-id', enabled: true, user_data: '#cloud-config\npackages: [curl]\n' }
+    const virtualMachine = { id: 'vm-id', name: 'node-1', cloud_init: { enabled: true, user_data: configuration.user_data } }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ virtual_machine: virtualMachine }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(configureVMCloudInit(configuration)).resolves.toEqual(virtualMachine)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/twirp/apprunner.v1.AppRunnerService/ConfigureVMCloudInit',
       expect.objectContaining({ body: JSON.stringify(configuration) }),
     )
   })

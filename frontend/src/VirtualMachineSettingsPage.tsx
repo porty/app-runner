@@ -27,6 +27,7 @@ import { Link, useParams } from 'react-router-dom'
 import {
   addVMCDROM,
   addVMDisk,
+  configureVMCloudInit,
   configureVMIPMI,
   getNetworkingStatus,
   getVM,
@@ -43,12 +44,13 @@ import {
   type UpdateVMRequest,
   type VirtualMachine,
   type VMIPMIConfiguration,
+  type VMCloudInitConfiguration,
 } from './api'
 
 const dnsLabelPattern = /^(?=.{1,63}$)[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/
 const macAddressPattern = /^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/
 
-type SettingsTab = 'general' | 'storage' | 'networking'
+type SettingsTab = 'general' | 'storage' | 'cloud-init' | 'networking'
 
 export default function VirtualMachineSettingsPage() {
   const { id = '' } = useParams()
@@ -59,6 +61,7 @@ export default function VirtualMachineSettingsPage() {
   const [general, setGeneral] = useState<UpdateVMRequest | null>(null)
   const [network, setNetwork] = useState<UpdateVMNetworkRequest | null>(null)
   const [ipmi, setIPMI] = useState<VMIPMIConfiguration | null>(null)
+  const [cloudInit, setCloudInit] = useState<VMCloudInitConfiguration | null>(null)
   const [tab, setTab] = useState<SettingsTab>('general')
   const [newDiskGiB, setNewDiskGiB] = useState(20)
   const [newCDROMISO, setNewCDROMISO] = useState('')
@@ -99,6 +102,11 @@ export default function VirtualMachineSettingsPage() {
         username: loadedVM.ipmi?.username || 'admin',
         password: '',
       })
+      setCloudInit({
+        id: loadedVM.id,
+        enabled: loadedVM.cloud_init?.enabled ?? false,
+        user_data: loadedVM.cloud_init?.user_data ?? '',
+      })
       setNewCDROMISO(loadedImages[0]?.name ?? '')
       setError('')
     } catch (requestError) {
@@ -125,13 +133,14 @@ export default function VirtualMachineSettingsPage() {
   }
 
   const save = async () => {
-    if (!general || !network || !ipmi) return
+    if (!general || !network || !ipmi || !cloudInit) return
     setBusy(true)
     setError('')
     try {
       await updateVM(general)
       await updateVMNetwork(network)
       await configureVMIPMI(ipmi)
+      await configureVMCloudInit(cloudInit)
       const updated = await getVM(id)
       setVM(updated)
       setGeneral({ ...general, name: updated.name, description: updated.description ?? '', cpus: updated.cpus, memory_mib: updated.memory_mib })
@@ -144,6 +153,7 @@ export default function VirtualMachineSettingsPage() {
         username: updated.ipmi?.username ?? ipmi.username,
         password: '',
       })
+      setCloudInit({ id: updated.id, enabled: updated.cloud_init?.enabled ?? false, user_data: updated.cloud_init?.user_data ?? '' })
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to save virtual machine settings')
     } finally {
@@ -152,7 +162,7 @@ export default function VirtualMachineSettingsPage() {
   }
 
   if (loading) return <Box sx={{ display: 'grid', placeItems: 'center', minHeight: 320 }}><CircularProgress /></Box>
-  if (!vm || !general || !network || !ipmi) return <Alert severity="error">{error || 'Virtual machine settings are unavailable.'}</Alert>
+  if (!vm || !general || !network || !ipmi || !cloudInit) return <Alert severity="error">{error || 'Virtual machine settings are unavailable.'}</Alert>
 
   const running = vm.status === 'VM_STATUS_RUNNING'
   const stopping = vm.status === 'VM_STATUS_STOPPING'
@@ -160,8 +170,9 @@ export default function VirtualMachineSettingsPage() {
   const nameValid = dnsLabelPattern.test(general.name.trim())
   const macValid = macAddressPattern.test(network.mac_address.trim()) && (Number.parseInt(network.mac_address.slice(0, 2), 16) & 1) === 0
   const ipmiValid = !ipmi.enabled || Boolean(ipmi.bridge_name && ipmi.address && ipmi.username && (vm.ipmi?.enabled || ipmi.password))
+  const cloudInitDirty = cloudInit.enabled !== (vm.cloud_init?.enabled ?? false) || cloudInit.user_data !== (vm.cloud_init?.user_data ?? '')
   const saveDisabled = busy || !nameValid || general.cpus < 1 || general.cpus > 64 || general.memory_mib < 256 || general.memory_mib > 1048576 ||
-    !macValid || (network.network_mode === 'NETWORK_MODE_BRIDGE' && !network.bridge_name) || !ipmiValid
+    !macValid || (network.network_mode === 'NETWORK_MODE_BRIDGE' && !network.bridge_name) || !ipmiValid || (active && cloudInitDirty)
 
   return (
     <Box>
@@ -191,6 +202,7 @@ export default function VirtualMachineSettingsPage() {
         <Tabs value={tab} onChange={(_event, value: SettingsTab) => setTab(value)} variant="scrollable" scrollButtons="auto" sx={{ px: 2, borderBottom: 1, borderColor: 'divider' }}>
           <Tab value="general" label="General" />
           <Tab value="storage" label="Disks / CD-ROM" />
+          <Tab value="cloud-init" label="Cloud Init" />
           <Tab value="networking" label="Networking" />
         </Tabs>
 
@@ -261,6 +273,33 @@ export default function VirtualMachineSettingsPage() {
                   </Stack>
                 </Stack>
               </Box>
+            </Stack>
+          )}
+
+          {tab === 'cloud-init' && (
+            <Stack spacing={2.25} sx={{ maxWidth: 820 }}>
+              <Box>
+                <Typography variant="h6">NoCloud configuration</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  App Runner creates a cidata ISO containing user-data and generated per-VM meta-data. Changes require the VM to be stopped.
+                </Typography>
+              </Box>
+              {active && <Alert severity="info">Stop the virtual machine before changing its Cloud Init configuration.</Alert>}
+              <FormControlLabel
+                control={<Switch checked={cloudInit.enabled} disabled={active || busy} onChange={(event) => setCloudInit({ ...cloudInit, enabled: event.target.checked })} />}
+                label="Enable Cloud Init"
+              />
+              <TextField
+                label="user-data"
+                multiline
+                minRows={14}
+                value={cloudInit.user_data}
+                disabled={!cloudInit.enabled || active || busy}
+                onChange={(event) => setCloudInit({ ...cloudInit, user_data: event.target.value })}
+                placeholder={'#cloud-config\nusers:\n  - name: app'}
+                helperText="The content is written verbatim; cloud-config YAML and executable user-data scripts are both supported. Maximum size: 1 MiB."
+                slotProps={{ htmlInput: { maxLength: 1048576, spellCheck: false } }}
+              />
             </Stack>
           )}
 

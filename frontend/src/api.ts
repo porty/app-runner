@@ -36,6 +36,7 @@ export interface VirtualMachine {
   ipmi?: VMIPMIStatus
   disks?: VMDisk[]
   cdroms?: VMCDROM[]
+  cloud_init?: VMCloudInit
 }
 
 export interface VMDisk {
@@ -47,6 +48,11 @@ export interface VMDisk {
 export interface VMCDROM {
   id: string
   iso_name?: string
+}
+
+export interface VMCloudInit {
+  enabled: boolean
+  user_data: string
 }
 
 export interface UpdateVMRequest {
@@ -83,6 +89,12 @@ export interface VMIPMIConfiguration {
   password: string
 }
 
+export interface VMCloudInitConfiguration {
+  id: string
+  enabled: boolean
+  user_data: string
+}
+
 export interface HostStatus {
   qemu_available: boolean
   kvm_available: boolean
@@ -104,6 +116,8 @@ export interface CreateVMRequest {
   iso_name: string
   network_mode: NetworkMode
   bridge_name?: string
+  cloud_init_enabled: boolean
+  cloud_init_user_data: string
 }
 
 export type DiagnosticStatus =
@@ -391,6 +405,11 @@ export async function removeVMCDROM(id: string, cdromID: string): Promise<Virtua
 
 export async function configureVMIPMI(configuration: VMIPMIConfiguration): Promise<VirtualMachine> {
   const response = await callTwirp<{ virtual_machine: VirtualMachine }>('ConfigureVMIPMI', configuration)
+  return response.virtual_machine
+}
+
+export async function configureVMCloudInit(configuration: VMCloudInitConfiguration): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('ConfigureVMCloudInit', configuration)
   return response.virtual_machine
 }
 

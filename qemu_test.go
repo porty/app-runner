@@ -96,6 +96,21 @@ func TestQEMUArgumentsSupportBridgeNetworking(t *testing.T) {
 	}
 }
 
+func TestQEMUArgumentsMountCloudInitISO(t *testing.T) {
+	settings := defaultConfig(t.TempDir())
+	qemu := newQEMUHypervisor(settings)
+	arguments := qemu.arguments(virtualMachine{ID: "vm-id", NetworkMode: networkModeNAT, CloudInit: vmCloudInit{Enabled: true}})
+
+	for _, expected := range []string{
+		"file=" + filepath.Join(settings.DiskDir, "vm-id-cloud-init.iso") + ",if=none,id=cloudinit,media=cdrom,readonly=on",
+		"scsi-cd,drive=cloudinit,bus=scsi0.0,id=cloudinitdev",
+	} {
+		if !slices.Contains(arguments, expected) {
+			t.Fatalf("cloud-init argument %q is missing: %#v", expected, arguments)
+		}
+	}
+}
+
 func TestQEMUArgumentsHonorIPMIBootDevice(t *testing.T) {
 	qemu := newQEMUHypervisor(defaultConfig(t.TempDir()))
 	arguments := qemu.arguments(virtualMachine{ID: "vm-id", ISOName: "installer.iso", IPMI: vmIPMIConfig{BootDevice: uint8(1)}})

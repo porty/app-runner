@@ -12,4 +12,6 @@ Some operations modify live host networking and therefore require elevated opera
 
 The project is distributed as one executable containing both the management service and web interface. Its state remains on the local filesystem, alongside the VM disks and runtime data it manages.
 
+Cloud-init support uses `xorriso` to generate per-VM NoCloud ISO images. The binary defaults to `xorriso` and can be changed with the `xorriso_binary` configuration setting or `-xorriso` command-line flag.
+
 See [Architectural decisions](docs/architecture-decisions.md) for the constraints and tradeoffs that shape the project.

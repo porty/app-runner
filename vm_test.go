@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -181,6 +182,76 @@ func TestVMManagerRebootsOnlyRunningVMs(t *testing.T) {
 	}
 	if !hypervisor.reset || vm.Status != vmStatusRunning {
 		t.Fatalf("running VM was not reset correctly: %#v", vm)
+	}
+}
+
+func TestVMManagerManagesCloudInitISOThroughoutVMLifecycle(t *testing.T) {
+	manager, _, _ := newTestVMManager(t)
+	manager.buildCloudInitISO = func(_ context.Context, destination string, options cloudInitISOOptions) error {
+		contents := strings.Join([]string{options.InstanceID, options.Hostname, options.UserData}, "\n")
+		return os.WriteFile(destination, []byte(contents), 0o640)
+	}
+	vm, err := manager.Create(context.Background(), createVMOptions{
+		Name: "cloud-vm", CPUs: 2, MemoryMiB: 2048, DiskGiB: 20,
+		ISOName: "installer.iso", NetworkMode: networkModeNAT,
+		CloudInit: vmCloudInit{Enabled: true, UserData: "#cloud-config\npackages: [curl]\n"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCloudInitISOContents(t, manager.cloudInitISOPath(vm.ID), "vm-id\ncloud-vm\n#cloud-config\npackages: [curl]\n")
+
+	vm, err = manager.ConfigureCloudInit(context.Background(), vm.ID, vmCloudInit{Enabled: true, UserData: "#!/bin/sh\necho ready\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCloudInitISOContents(t, manager.cloudInitISOPath(vm.ID), "vm-id\ncloud-vm\n#!/bin/sh\necho ready\n")
+	vm, err = manager.Update(vm.ID, "renamed-cloud-vm", vm.Description, vm.CPUs, vm.MemoryMiB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCloudInitISOContents(t, manager.cloudInitISOPath(vm.ID), "vm-id\nrenamed-cloud-vm\n#!/bin/sh\necho ready\n")
+
+	manager.newID = func() (string, error) { return "cloud-clone-id", nil }
+	clone, err := manager.Clone(context.Background(), vm.ID, "cloud-vm-copy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clone.CloudInit != vm.CloudInit {
+		t.Fatalf("clone cloud-init configuration = %#v, want %#v", clone.CloudInit, vm.CloudInit)
+	}
+	assertCloudInitISOContents(t, manager.cloudInitISOPath(clone.ID), "cloud-clone-id\ncloud-vm-copy\n#!/bin/sh\necho ready\n")
+	if err := manager.Delete(clone.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(manager.cloudInitISOPath(clone.ID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted clone retained its cloud-init ISO: %v", err)
+	}
+
+	vm, err = manager.Start(vm.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.ConfigureCloudInit(context.Background(), vm.ID, vmCloudInit{Enabled: true, UserData: "changed"}); !errors.Is(err, errDeviceRunningVM) {
+		t.Fatalf("changing cloud-init on a running VM returned %v", err)
+	}
+	if _, err := manager.Stop(vm.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	vm, err = manager.ConfigureCloudInit(context.Background(), vm.ID, vmCloudInit{})
+	if err != nil || vm.CloudInit.Enabled {
+		t.Fatalf("disable cloud-init = %#v, %v", vm.CloudInit, err)
+	}
+	if _, err := os.Stat(manager.cloudInitISOPath(vm.ID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("disabled VM retained its cloud-init ISO: %v", err)
+	}
+}
+
+func assertCloudInitISOContents(t *testing.T, path, expected string) {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	if err != nil || string(contents) != expected {
+		t.Fatalf("cloud-init ISO %s = %q, %v; want %q", path, contents, err, expected)
 	}
 }
 
