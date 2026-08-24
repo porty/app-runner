@@ -13,7 +13,6 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
   FormControlLabel,
   LinearProgress,
   MenuItem,
@@ -48,22 +47,13 @@ import { Link } from 'react-router-dom'
 import {
   applyNetworkChange,
   confirmNetworkChange,
-  configureBridgeDHCP,
   getNetworkingStatus,
   revertNetworkChange,
-  type NetworkBridge,
   type NetworkChangeRequest,
   type NetworkDiagnostic,
   type NetworkingStatus,
   type PendingNetworkChange,
 } from './api'
-
-const dnsLabelPattern = /^(?=.{1,63}$)[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/
-
-function validDNSSuffix(value: string): boolean {
-  const suffix = value.trim().replace(/\.$/, '')
-  return suffix.length > 0 && suffix.length <= 253 && suffix.split('.').every((label) => dnsLabelPattern.test(label))
-}
 
 export default function NetworkingPage({ refreshInterval }: { refreshInterval: number | null }) {
   const [status, setStatus] = useState<NetworkingStatus | null>(null)
@@ -75,16 +65,6 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
   const [attachBridge, setAttachBridge] = useState('')
   const [attachInterface, setAttachInterface] = useState('')
   const [migrateAddresses, setMigrateAddresses] = useState(true)
-  const [dhcpBridge, setDHCPBridge] = useState<NetworkBridge | null>(null)
-  const [bridgeDescription, setBridgeDescription] = useState('')
-  const [dhcpEnabled, setDHCPEnabled] = useState(false)
-  const [dhcpCIDR, setDHCPCIDR] = useState('192.168.100.0/24')
-  const [natEnabled, setNATEnabled] = useState(false)
-  const [dnsEnabled, setDNSEnabled] = useState(false)
-  const [dnsForwarders, setDNSForwarders] = useState('')
-  const [autoDNS, setAutoDNS] = useState(false)
-  const [dnsSuffix, setDNSSuffix] = useState('')
-  const dnsSuffixValid = validDNSSuffix(dnsSuffix)
 
   const refresh = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true)
@@ -158,35 +138,10 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
     }
   }
 
-  const configureDHCP = async () => {
-    if (!dhcpBridge) return
-    setBusy(true)
-    setError('')
-    try {
-      setStatus(await configureBridgeDHCP({
-        bridge_name: dhcpBridge.name,
-        description: bridgeDescription.trim(),
-        enabled: dhcpEnabled,
-        cidr: dhcpCIDR.trim(),
-        nat_enabled: dhcpEnabled && natEnabled,
-        dns_enabled: dhcpEnabled && dnsEnabled,
-        dns_forwarders: dnsEnabled ? dnsForwarders.split(/[\s,]+/).filter(Boolean) : [],
-        auto_dns: dhcpEnabled && dnsEnabled && autoDNS,
-        dns_suffix: autoDNS ? dnsSuffix.trim() : '',
-      }))
-      setDHCPBridge(null)
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to configure bridge settings')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const bridges = status?.bridges ?? []
   const interfaces = status?.interfaces ?? []
   const attachableInterfaces = interfaces.filter((networkInterface) => networkInterface.can_attach)
   const mutationsDisabled = busy || Boolean(status?.pending_change) || !status?.can_manage
-  const settingsHasRunningWorkloads = (dhcpBridge?.workloads ?? []).some((workload) => workload.running)
 
   return (
     <Box>
@@ -250,17 +205,6 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
                   onAttach={() => {
                     setAttachBridge(bridge.name)
                     setAttachInterface(attachableInterfaces[0]?.name ?? '')
-                  }}
-                  onConfigureDHCP={() => {
-                    setDHCPBridge(bridge)
-                    setBridgeDescription(bridge.description ?? '')
-                    setDHCPEnabled(Boolean(bridge.dhcp?.enabled))
-                    setDHCPCIDR(bridge.dhcp?.cidr || '192.168.100.0/24')
-                    setNATEnabled(Boolean(bridge.dhcp?.nat_enabled))
-                    setDNSEnabled(Boolean(bridge.dhcp?.dns_enabled))
-                    setDNSForwarders((bridge.dhcp?.dns_forwarders ?? []).join('\n'))
-                    setAutoDNS(Boolean(bridge.dhcp?.auto_dns))
-                    setDNSSuffix(bridge.dhcp?.dns_suffix || `${bridge.name.toLowerCase()}.internal`)
                   }}
                 />
               ))}
@@ -335,96 +279,6 @@ export default function NetworkingPage({ refreshInterval }: { refreshInterval: n
         </DialogActions>
       </Dialog>
 
-      <Dialog open={Boolean(dhcpBridge)} onClose={() => setDHCPBridge(null)} fullWidth maxWidth="sm">
-        <DialogTitle>Bridge settings for {dhcpBridge?.name}</DialogTitle>
-        <DialogContent>
-          {settingsHasRunningWorkloads && (
-            <Alert severity="warning" sx={{ mt: 1, mb: 2 }}>Network service settings are locked while workloads are running. The bridge description can still be changed.</Alert>
-          )}
-          <TextField
-            fullWidth
-            label="Description"
-            value={bridgeDescription}
-            onChange={(event) => setBridgeDescription(event.target.value)}
-            helperText="Shown when selecting this bridge for a virtual machine"
-            slotProps={{ htmlInput: { maxLength: 255 } }}
-            sx={{ mb: 2 }}
-          />
-          <FormControlLabel
-            control={<Checkbox checked={dhcpEnabled} disabled={settingsHasRunningWorkloads} onChange={(event) => {
-              setDHCPEnabled(event.target.checked)
-              if (!event.target.checked) {
-                setNATEnabled(false)
-                setDNSEnabled(false)
-                setAutoDNS(false)
-              }
-            }} />}
-            label="Enable App Runner DHCP for this bridge"
-          />
-          <TextField
-            fullWidth
-            label="IPv4 range (CIDR)"
-            value={dhcpCIDR}
-            onChange={(event) => setDHCPCIDR(event.target.value)}
-            disabled={!dhcpEnabled || settingsHasRunningWorkloads}
-            helperText="Example: 192.168.100.0/24 reserves .1 for the bridge and leases .50–.254"
-            sx={{ mt: 2 }}
-          />
-          <FormControlLabel
-            sx={{ mt: 1.5 }}
-            control={<Checkbox checked={natEnabled} disabled={!dhcpEnabled || settingsHasRunningWorkloads} onChange={(event) => setNATEnabled(event.target.checked)} />}
-            label="Enable NAT and outbound routing for this range"
-          />
-          <Divider sx={{ my: 2 }} />
-          <FormControlLabel
-            control={<Checkbox checked={dnsEnabled} disabled={!dhcpEnabled || settingsHasRunningWorkloads} onChange={(event) => {
-              setDNSEnabled(event.target.checked)
-              if (!event.target.checked) setAutoDNS(false)
-            }} />}
-            label="Enable managed DNS for this bridge"
-          />
-          <TextField
-            fullWidth
-            multiline
-            minRows={2}
-            label="Forwarding DNS servers"
-            value={dnsForwarders}
-            onChange={(event) => setDNSForwarders(event.target.value)}
-            disabled={!dhcpEnabled || !dnsEnabled || settingsHasRunningWorkloads}
-            helperText="One IP address per line, or separate addresses with commas. An optional port is supported."
-            sx={{ mt: 1.5 }}
-          />
-          <FormControlLabel
-            sx={{ mt: 1 }}
-            control={<Checkbox checked={autoDNS} disabled={!dhcpEnabled || !dnsEnabled || settingsHasRunningWorkloads} onChange={(event) => setAutoDNS(event.target.checked)} />}
-            label="Auto DNS for virtual machines on this bridge"
-          />
-          <TextField
-            fullWidth
-            label="Auto DNS suffix"
-            value={dnsSuffix}
-            onChange={(event) => setDNSSuffix(event.target.value)}
-            disabled={!dhcpEnabled || !dnsEnabled || !autoDNS || settingsHasRunningWorkloads}
-            error={dhcpEnabled && dnsEnabled && autoDNS && !dnsSuffixValid}
-            helperText={dnsSuffixValid ? `VMs are published as VM-NAME.${dnsSuffix}` : 'Use one or more DNS labels separated by dots'}
-            sx={{ mt: 1.5 }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDHCPBridge(null)}>Cancel</Button>
-          <Button
-            variant="contained"
-            disabled={
-              busy || (dhcpEnabled && !dhcpCIDR.trim()) ||
-              (dhcpEnabled && dnsEnabled && !dnsForwarders.trim()) ||
-              (dhcpEnabled && dnsEnabled && autoDNS && !dnsSuffixValid)
-            }
-            onClick={() => void configureDHCP()}
-          >
-            Save settings
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   )
 }
@@ -447,15 +301,14 @@ function IdentitySummary({ status }: { status: NetworkingStatus }) {
   )
 }
 
-function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply, onRestore, onAttach, onConfigureDHCP }: {
-  bridge: NetworkBridge
+function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply, onRestore, onAttach }: {
+  bridge: import('./api').NetworkBridge
   disabled: boolean
   configurationDisabled: boolean
   canAttach: boolean
   onApply: (change: NetworkChangeRequest) => Promise<void>
   onRestore: () => void
   onAttach: () => void
-  onConfigureDHCP: () => void
 }) {
   const members = bridge.member_interfaces ?? []
   const workloads = bridge.workloads ?? []
@@ -573,7 +426,7 @@ function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply
             <Button aria-label={`Attach interface to ${bridge.name}`} disabled={disabled || !canAttach} onClick={onAttach}>
               <Tooltip title="Attach interface"><span><CableRounded /></span></Tooltip>
             </Button>
-            <Button aria-label={`Configure settings for ${bridge.name}`} disabled={configurationDisabled} onClick={onConfigureDHCP}>
+            <Button component={Link} to={`/configuration/networking/bridges/${encodeURIComponent(bridge.name)}`} aria-label={`Configure settings for ${bridge.name}`} disabled={configurationDisabled}>
               <Tooltip title="Settings"><span><SettingsEthernetRounded /></span></Tooltip>
             </Button>
             <Button aria-label={`Delete bridge ${bridge.name}`} color="error" disabled={disabled || members.length > 0 || workloads.length > 0 || dhcp?.enabled} onClick={deleteBridge}>

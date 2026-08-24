@@ -223,6 +223,8 @@ export interface DHCPLease {
   hardware_address: string
   address: string
   expires_at: string
+  vm_name?: string
+  is_static: boolean
 }
 
 export interface BridgeDHCPConfiguration {
@@ -485,6 +487,21 @@ export async function revertNetworkChange(id: string): Promise<NetworkingStatus>
 
 export async function configureBridgeDHCP(configuration: BridgeDHCPConfiguration): Promise<NetworkingStatus> {
   const response = await callTwirp<{ status: NetworkingStatus }>('ConfigureBridgeDHCP', configuration)
+  return response.status
+}
+
+export async function clearBridgeDHCPLeases(bridgeName: string): Promise<NetworkingStatus> {
+  const response = await callTwirp<{ status: NetworkingStatus }>('ClearBridgeDHCPLeases', { bridge_name: bridgeName })
+  return response.status
+}
+
+export async function deleteBridgeDHCPLease(bridgeName: string, hardwareAddress: string): Promise<NetworkingStatus> {
+  const response = await callTwirp<{ status: NetworkingStatus }>('DeleteBridgeDHCPLease', { bridge_name: bridgeName, hardware_address: hardwareAddress })
+  return response.status
+}
+
+export async function setBridgeDHCPStaticLease(bridgeName: string, hardwareAddress: string, address: string): Promise<NetworkingStatus> {
+  const response = await callTwirp<{ status: NetworkingStatus }>('SetBridgeDHCPStaticLease', { bridge_name: bridgeName, hardware_address: hardwareAddress, address })
   return response.status
 }
 
