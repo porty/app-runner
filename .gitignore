@@ -1,6 +1,7 @@
 /bin/
 /disk/
 /frontend/dist/
+/cmd/app-runner/frontend/dist/
 /frontend/node_modules/
 /iso/
 /app-runner.json
