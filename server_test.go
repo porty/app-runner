@@ -1,4 +1,4 @@
-package main
+package apprunner
 
 import (
 	"io/fs"

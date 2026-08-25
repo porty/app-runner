@@ -1,25 +1,26 @@
-package main
+package apprunner
 
 import (
 	"errors"
-	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/netip"
 	"os"
 )
 
-func main() {
+// RunServer starts the App Runner HTTP and Twirp API server.
+func RunServer(args []string, frontend fs.FS) error {
 	workingDirectory, err := os.Getwd()
 	if err != nil {
-		fatal(err)
+		return err
 	}
-	settings, err := loadConfig(os.Args[1:], workingDirectory)
+	settings, err := loadConfig(args, workingDirectory)
 	if err != nil {
-		fatal(err)
+		return err
 	}
 	if err := prepareDirectories(settings); err != nil {
-		fatal(err)
+		return err
 	}
 
 	capabilities := func() hostCapabilities { return detectHostCapabilities(settings) }
@@ -33,22 +34,22 @@ func main() {
 
 	manager, err := newVMManager(settings, newJSONVMStore(settings.DiskDir), newQEMUHypervisor(settings), capabilities)
 	if err != nil {
-		fatal(err)
+		return err
 	}
 	templates, err := newCloudInitTemplateManager(newJSONCloudInitTemplateStore(settings.DiskDir))
 	if err != nil {
-		fatal(err)
+		return err
 	}
 	networkProvider := newLinuxNetworkProvider()
 	manager.bridgeCapability = networkProvider.BridgeCapability
 	nat, err := newNATManager(settings.DiskDir)
 	if err != nil {
-		fatal(err)
+		return err
 	}
 	dns := newDNSManager()
 	dhcp, err := newDHCPManager(settings.DiskDir, networkProvider, nat, dns)
 	if err != nil {
-		fatal(err)
+		return err
 	}
 	defer dhcp.Close()
 	manager.networkLifecycle = dhcp
@@ -64,7 +65,7 @@ func main() {
 	defer ipmi.Close()
 	vms, err := manager.List()
 	if err != nil {
-		fatal(err)
+		return err
 	}
 	if err := dhcp.Reconcile(vms); err != nil {
 		slog.Warn("restore managed bridge network services", "error", err)
@@ -74,32 +75,27 @@ func main() {
 	}
 	networking, err := newNetworkManager(networkProvider, manager, settings.DiskDir, dhcp)
 	if err != nil {
-		fatal(err)
+		return err
 	}
-	networkStatus, err := networking.Status()
-	if err != nil {
+	if status, err := networking.Status(); err != nil {
 		slog.Warn("network diagnostics are unavailable", "error", err)
 	} else {
-		for _, diagnostic := range networkStatus.Diagnostics {
+		for _, diagnostic := range status.Diagnostics {
 			if diagnostic.Status == diagnosticFail {
 				slog.Warn("network diagnostic failed", "check", diagnostic.Label, "detail", diagnostic.Detail, "remediation", diagnostic.Remediation)
 			}
 		}
 	}
+
 	server := &http.Server{
 		Addr: settings.Listen,
-		Handler: newHTTPHandler(productionFrontend(), appRuntime{
+		Handler: newHTTPHandler(frontend, appRuntime{
 			manager: manager, networking: networking, storage: newStorageService(settings), templates: templates, capabilities: capabilities,
 		}),
 	}
-
 	slog.Info("App Runner listening", "address", settings.Listen, "iso_dir", settings.ISODir, "disk_dir", settings.DiskDir)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		fatal(err)
+		return err
 	}
-}
-
-func fatal(err error) {
-	fmt.Fprintln(os.Stderr, err)
-	os.Exit(1)
+	return nil
 }
