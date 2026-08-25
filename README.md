@@ -10,7 +10,18 @@ Its scope is deliberately smaller than infrastructure platforms such as Proxmox 
 
 Some operations modify live host networking and therefore require elevated operating-system capabilities. Those changes are designed for an operator working locally: risky network mutations are temporary until confirmed, and managed DHCP, DNS, and NAT follow the workloads that need them. App Runner does not replace the host's persistent network manager.
 
-The project is distributed as one executable containing both the management service and web interface. Its state remains on the local filesystem, alongside the VM disks and runtime data it manages.
+The `app-runner` server executable contains both the management service and web interface. The companion `arcli` executable controls that same JSON Twirp API, making it suitable for scripts and terminals. State remains on the local filesystem, alongside the VM disks and runtime data it manages.
+
+`make build` creates both binaries in `bin/`. By default the CLI connects to `http://127.0.0.1:8080`; use `--server` to target another listener:
+
+```
+bin/arcli vm list
+bin/arcli --server http://host:8080 storage list
+bin/arcli vm start vm-id
+bin/arcli net status
+```
+
+Run `arcli --help` for its command groups. Successful commands write JSON so their results can be piped to other tools.
 
 Cloud-init support uses `xorriso` to generate per-VM NoCloud ISO images. The binary defaults to `xorriso` and can be changed with the `xorriso_binary` configuration setting or `-xorriso` command-line flag. Reusable user-data templates are stored privately in `disk/cloud-init-templates.json`.
 
