@@ -4,6 +4,7 @@ import {
   Box,
   Button,
   Card,
+  Chip,
   CircularProgress,
   Collapse,
   Dialog,
@@ -39,13 +40,18 @@ import { Link } from 'react-router-dom'
 import {
   downloadStorageFile,
   listStorage,
+  listVMs,
   uploadStorageFiles,
   type StorageNode,
   type StorageRoot,
   type StorageRootName,
+  type VirtualMachine,
 } from './api'
 
 type UploadMethod = 'device' | 'url'
+type StorageUse = { vm: VirtualMachine; label: string }
+type StorageUses = Record<string, StorageUse[]>
+const visibleConsumers = 3
 
 function storageIcon(root: StorageRootName) {
   return root === 'iso' ? <AlbumRounded color="primary" /> : <SdCardRounded color="secondary" />
@@ -88,12 +94,56 @@ function collectDirectories(entries: StorageNode[], result: StorageNode[] = []):
   return result
 }
 
-function StorageEntry({ entry, root, depth }: { entry: StorageNode; root: StorageRootName; depth: number }) {
+function storageUseKey(root: StorageRootName, path: string): string {
+  return `${root}:${path.replace(/^\.\//, '')}`
+}
+
+function storageUsesByPath(virtualMachines: VirtualMachine[]): StorageUses {
+  const uses: StorageUses = {}
+  const add = (root: StorageRootName, path: string, vm: VirtualMachine, label: string) => {
+    if (!path) return
+    const key = storageUseKey(root, path)
+    uses[key] = [...(uses[key] ?? []), { vm, label }]
+  }
+  for (const vm of virtualMachines) {
+    for (const disk of vm.disks ?? []) {
+      add('disk', `${vm.id}-${disk.id}.qcow2`, vm, disk.system ? 'System disk' : 'Data disk')
+    }
+    for (const cdrom of vm.cdroms ?? []) add('iso', cdrom.iso_name ?? '', vm, 'CD-ROM')
+    if ((vm.cdroms ?? []).length === 0) add('iso', vm.iso_name, vm, 'CD-ROM')
+    add('iso', vm.source_image ?? '', vm, 'Cloud image')
+  }
+  return uses
+}
+
+function StorageConsumers({ consumers }: { consumers: StorageUse[] }) {
+  if (consumers.length === 0) return null
+  const shown = consumers.slice(0, visibleConsumers)
+  const remaining = consumers.slice(visibleConsumers)
+  return (
+    <Stack direction="row" spacing={0.5} sx={{ ml: 2, alignItems: 'center', flexShrink: 0 }}>
+      <Typography variant="caption" color="text.secondary">Used by</Typography>
+      {shown.map((consumer) => (
+        <Tooltip key={`${consumer.vm.id}-${consumer.label}`} title={consumer.label}>
+          <Chip component={Link} to={`/compute/virtual-machines/${consumer.vm.id}/settings`} clickable size="small" label={consumer.vm.name} />
+        </Tooltip>
+      ))}
+      {remaining.length > 0 && (
+        <Tooltip title={remaining.map((consumer) => `${consumer.vm.name} · ${consumer.label}`).join('\n')}>
+          <Chip size="small" label={`+${remaining.length} more`} />
+        </Tooltip>
+      )}
+    </Stack>
+  )
+}
+
+function StorageEntry({ entry, root, depth, uses }: { entry: StorageNode; root: StorageRootName; depth: number; uses: StorageUses }) {
   const directory = entry.kind === 'directory'
   const [open, setOpen] = useState(false)
   const children = entry.children ?? []
   const canCreateVM = root === 'iso' && !directory && /\.(?:iso|img|qcow2)$/i.test(entry.name)
   const createVMSearch = new URLSearchParams({ tab: 'storage', source_root: root, source_path: entry.path }).toString()
+  const consumers = uses[storageUseKey(root, entry.path)] ?? []
 
   return (
     <>
@@ -125,6 +175,7 @@ function StorageEntry({ entry, root, depth }: { entry: StorageNode; root: Storag
             </Typography>
           </Stack>
         )}
+        {!directory && <StorageConsumers consumers={consumers} />}
         {canCreateVM && (
           <Button
             component={Link}
@@ -140,7 +191,7 @@ function StorageEntry({ entry, root, depth }: { entry: StorageNode; root: Storag
       {directory && (
         <Collapse in={open} timeout="auto" unmountOnExit>
           {children.length > 0 ? children.map((child) => (
-            <StorageEntry key={child.path} entry={child} root={root} depth={depth + 1} />
+            <StorageEntry key={child.path} entry={child} root={root} depth={depth + 1} uses={uses} />
           )) : (
             <Typography variant="body2" color="text.secondary" sx={{ py: 1.5, pl: 9 + depth * 2 }}>
               Empty directory
@@ -152,7 +203,7 @@ function StorageEntry({ entry, root, depth }: { entry: StorageNode; root: Storag
   )
 }
 
-function StorageTreeRoot({ root }: { root: StorageRoot }) {
+function StorageTreeRoot({ root, uses }: { root: StorageRoot; uses: StorageUses }) {
   const [open, setOpen] = useState(true)
   const count = countEntries(root.entries)
 
@@ -176,7 +227,7 @@ function StorageTreeRoot({ root }: { root: StorageRoot }) {
       </ListItemButton>
       <Collapse in={open} timeout="auto" unmountOnExit>
         {root.entries.length > 0 ? root.entries.map((entry) => (
-          <StorageEntry key={entry.path} entry={entry} root={root.name} depth={1} />
+          <StorageEntry key={entry.path} entry={entry} root={root.name} depth={1} uses={uses} />
         )) : (
           <Typography color="text.secondary" sx={{ py: 3, pl: 9 }}>
             This storage root is empty.
@@ -189,6 +240,7 @@ function StorageTreeRoot({ root }: { root: StorageRoot }) {
 
 export default function StoragePage() {
   const [roots, setRoots] = useState<StorageRoot[]>([])
+  const [virtualMachines, setVirtualMachines] = useState<VirtualMachine[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -204,7 +256,9 @@ export default function StoragePage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setRoots(await listStorage())
+      const [loadedRoots, loadedVirtualMachines] = await Promise.all([listStorage(), listVMs()])
+      setRoots(loadedRoots)
+      setVirtualMachines(loadedVirtualMachines)
       setError('')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Storage could not be loaded')
@@ -221,6 +275,7 @@ export default function StoragePage() {
     const root = roots.find((candidate) => candidate.name === targetRoot)
     return root ? collectDirectories(root.entries) : []
   }, [roots, targetRoot])
+  const uses = useMemo(() => storageUsesByPath(virtualMachines), [virtualMachines])
 
   const openUpload = () => {
     setMethod('device')
@@ -298,7 +353,7 @@ export default function StoragePage() {
             {roots.map((root, index) => (
               <Box key={root.name}>
                 {index > 0 && <Divider />}
-                <StorageTreeRoot root={root} />
+                <StorageTreeRoot root={root} uses={uses} />
               </Box>
             ))}
           </List>

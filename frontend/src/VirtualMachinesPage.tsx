@@ -34,6 +34,7 @@ import { Link } from 'react-router-dom'
 
 import { cloneVM, deleteVM, getNetworkingStatus, listVMs, startVM, stopVM, type NetworkingStatus, type VirtualMachine, type VMStatus } from './api'
 import { canAccessVMConsole } from './vmConsoleAccess'
+import { copyText } from './clipboard'
 
 const dnsLabelPattern = /^(?=.{1,63}$)[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/
 const statusDetails: Record<VMStatus, { label: string; color: 'default' | 'success' | 'warning' | 'error' }> = {
@@ -63,7 +64,6 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
       const [machines, networkingStatus] = await Promise.all([listVMs(), getNetworkingStatus().catch(() => null)])
       setVirtualMachines(machines)
       setNetworking(networkingStatus)
-      setError('')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to load virtual machines')
     } finally {
@@ -120,7 +120,7 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
 
   const copyIPAddress = async (address: string) => {
     try {
-      await navigator.clipboard.writeText(address)
+      await copyText(address)
     } catch (copyError) {
       setError(copyError instanceof Error ? `Unable to copy IP address: ${copyError.message}` : 'Unable to copy IP address')
     }

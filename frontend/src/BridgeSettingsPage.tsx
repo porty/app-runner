@@ -6,6 +6,10 @@ import {
   Card,
   Checkbox,
   Divider,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControlLabel,
   IconButton,
   Stack,
@@ -40,6 +44,23 @@ function validDNSSuffix(value: string): boolean {
   return suffix.length > 0 && suffix.length <= 253 && suffix.split('.').every((label) => dnsLabelPattern.test(label))
 }
 
+function firstAvailableStaticAddress(cidr: string, poolStart: string, leases: DHCPLease[]): string {
+  const [networkAddress] = cidr.split('/')
+  const networkParts = networkAddress.split('.').map(Number)
+  const poolParts = poolStart.split('.').map(Number)
+  if (networkParts.length !== 4 || poolParts.length !== 4 || networkParts.some((part) => !Number.isInteger(part) || part < 0 || part > 255) || poolParts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return ''
+  const toNumber = (parts: number[]) => ((parts[0] << 24) >>> 0) + (parts[1] << 16) + (parts[2] << 8) + parts[3]
+  const toAddress = (value: number) => [value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255].join('.')
+  const used = new Set(leases.map((lease) => lease.address))
+  const network = toNumber(networkParts)
+  const pool = toNumber(poolParts)
+  for (let candidate = network + 2; candidate < pool; candidate += 1) {
+    const address = toAddress(candidate)
+    if (!used.has(address)) return address
+  }
+  return ''
+}
+
 export default function BridgeSettingsPage({ refreshInterval }: { refreshInterval: number | null }) {
   const { bridgeName = '' } = useParams()
   const [status, setStatus] = useState<NetworkingStatus | null>(null)
@@ -66,7 +87,6 @@ export default function BridgeSettingsPage({ refreshInterval }: { refreshInterva
     if (showLoading) setLoading(true)
     try {
       setStatus(await getNetworkingStatus())
-      setError('')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to load bridge settings')
     } finally {
@@ -120,7 +140,7 @@ export default function BridgeSettingsPage({ refreshInterval }: { refreshInterva
 
   const openStatic = (lease: DHCPLease) => {
     setStaticLease(lease)
-    setStaticAddress(lease.is_static ? lease.address : '')
+    setStaticAddress(lease.is_static ? lease.address : firstAvailableStaticAddress(bridge?.dhcp?.cidr ?? '', bridge?.dhcp?.pool_start ?? '', leases))
   }
 
   if (!loading && !bridge) {
@@ -185,20 +205,24 @@ export default function BridgeSettingsPage({ refreshInterval }: { refreshInterva
         </Table></TableContainer>
       </Card>
 
-      {staticLease && <Card variant="outlined" sx={{ p: 2, mt: 3, maxWidth: 560 }}>
-        <Stack spacing={1.5}>
-          <Typography variant="h6">Set static IP for {staticLease.vm_name || staticLease.hardware_address}</Typography>
-          <TextField autoFocus label="Static IPv4 address" value={staticAddress} onChange={(event) => setStaticAddress(event.target.value)} helperText="Choose an unused address before the dynamic DHCP pool (for example .2 through .49)." />
-          <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
-            <Button onClick={() => setStaticLease(null)} disabled={busy}>Cancel</Button>
-            <Button variant="contained" disabled={busy || !staticAddress.trim()} onClick={() => void run(async () => {
-              const updated = await setBridgeDHCPStaticLease(bridgeName, staticLease.hardware_address, staticAddress)
-              setStaticLease(null)
-              return updated
-            })}>Save static IP</Button>
+      <Dialog open={Boolean(staticLease)} onClose={busy ? undefined : () => setStaticLease(null)} fullWidth maxWidth="xs">
+        <DialogTitle>Set static IP</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ mt: 1 }}>
+            {staticLease && <Typography variant="body2" color="text.secondary">{staticLease.vm_name || staticLease.hardware_address}</Typography>}
+            <TextField autoFocus label="Static IPv4 address" value={staticAddress} onChange={(event) => setStaticAddress(event.target.value)} helperText="Choose an unused address before the dynamic DHCP pool (for example .2 through .49)." />
           </Stack>
-        </Stack>
-      </Card>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setStaticLease(null)} disabled={busy}>Cancel</Button>
+          <Button variant="contained" disabled={busy || !staticAddress.trim()} onClick={() => void run(async () => {
+            if (!staticLease) throw new Error('No lease selected')
+            const updated = await setBridgeDHCPStaticLease(bridgeName, staticLease.hardware_address, staticAddress)
+            setStaticLease(null)
+            return updated
+            })}>Save static IP</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }
