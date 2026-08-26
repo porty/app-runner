@@ -24,10 +24,10 @@ Launch and manage QEMU/KVM virtual machines from the web interface.
 
 - reads an optional `app-runner.json` configuration file from the current directory
 - command-line flags override values loaded from the configuration file
-- defaults ISO storage to `iso/` and VM data storage to `disk/`, relative to the current directory
-- creates both directories when they do not exist
+- defaults ISO storage to `iso/`, VM disks to `disk/`, application state to `state/`, and runtime sockets to `run/`, relative to the current directory
+- creates these directories when they do not exist
 - lists existing ISO files for selection in the frontend; uploading ISOs is out of scope
-- stores VM disks, runtime sockets, and persistent VM metadata beneath `disk/`
+- stores VM disks beneath `disk/`, persistent VM metadata beneath `state/`, and runtime sockets beneath `run/`
 
 ## Networking
 

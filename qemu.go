@@ -147,7 +147,7 @@ func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
 	if vm.Firmware == vmFirmwareUEFI {
 		arguments = append(arguments,
 			"-drive", "if=pflash,format=raw,unit=0,readonly=on,file="+q.settings.UEFICodePath,
-			"-drive", "if=pflash,format=raw,unit=1,file="+filepath.Join(q.settings.DiskDir, vm.ID+"-uefi-vars.fd"),
+			"-drive", "if=pflash,format=raw,unit=1,file="+q.settings.uefiVarsPath(vm.ID),
 		)
 	}
 	for diskIndex, disk := range effectiveVMDisks(vm) {
@@ -166,7 +166,7 @@ func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
 		driveID := cdromDriveID(cdromIndex)
 		deviceID := cdromDeviceID(cdromIndex)
 		if cdrom.ISOName != "" {
-			isoPath := filepath.Join(q.settings.ISODir, cdrom.ISOName)
+			isoPath := q.settings.isoPath(cdrom.ISOName)
 			arguments = append(arguments, "-drive", "file="+isoPath+",if=none,id="+driveID+",media=cdrom,readonly=on")
 			arguments = append(arguments, "-device", "scsi-cd,drive="+driveID+",bus=scsi0.0,id="+deviceID)
 		} else {
@@ -175,7 +175,7 @@ func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
 	}
 	if vm.CloudInit.Enabled {
 		arguments = append(arguments,
-			"-drive", "file="+filepath.Join(q.settings.DiskDir, vm.ID+"-cloud-init.iso")+",if=none,id=cloudinit,media=cdrom,readonly=on",
+			"-drive", "file="+q.settings.cloudInitISOPath(vm.ID)+",if=none,id=cloudinit,media=cdrom,readonly=on",
 			"-device", "scsi-cd,drive=cloudinit,bus=scsi0.0,id=cloudinitdev",
 		)
 	}
@@ -219,11 +219,11 @@ func (q *qemuHypervisor) bootOrder(vm virtualMachine) string {
 }
 
 func (q *qemuHypervisor) qmpSocketPath(id string) string {
-	return filepath.Join(q.settings.DiskDir, id+".qmp.sock")
+	return q.settings.qmpSocketPath(id)
 }
 
 func (q *qemuHypervisor) vncSocketPath(id string) string {
-	return filepath.Join(q.settings.DiskDir, id+".vnc.sock")
+	return q.settings.vncSocketPath(id)
 }
 
 func executeQMP(socketPath, command string) error {

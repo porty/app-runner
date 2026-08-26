@@ -29,7 +29,7 @@ func TestQEMUArgumentsUseRequiredVirtualisationProfile(t *testing.T) {
 		"scsi-cd,drive=install,bus=scsi0.0,id=cdromdev0",
 		"user,id=net0",
 		"virtio-net-pci,netdev=net0,mac=52:54:00:11:22:33",
-		"unix:" + filepath.Join(settings.DiskDir, "vm-id.vnc.sock"),
+		"unix:" + settings.vncSocketPath("vm-id"),
 	} {
 		if !slices.Contains(arguments, expected) {
 			t.Errorf("QEMU arguments do not contain %q: %#v", expected, arguments)
@@ -104,7 +104,7 @@ func TestQEMUArgumentsMountCloudInitISO(t *testing.T) {
 	arguments := qemu.arguments(virtualMachine{ID: "vm-id", NetworkMode: networkModeNAT, CloudInit: vmCloudInit{Enabled: true}})
 
 	for _, expected := range []string{
-		"file=" + filepath.Join(settings.DiskDir, "vm-id-cloud-init.iso") + ",if=none,id=cloudinit,media=cdrom,readonly=on",
+		"file=" + settings.cloudInitISOPath("vm-id") + ",if=none,id=cloudinit,media=cdrom,readonly=on",
 		"scsi-cd,drive=cloudinit,bus=scsi0.0,id=cloudinitdev",
 	} {
 		if !slices.Contains(arguments, expected) {
@@ -154,7 +154,7 @@ func TestQEMUArgumentsUsePersistentUEFIFirmware(t *testing.T) {
 	arguments := qemu.arguments(virtualMachine{ID: "vm-id", Firmware: vmFirmwareUEFI, NetworkMode: networkModeNAT})
 	for _, expected := range []string{
 		"if=pflash,format=raw,unit=0,readonly=on,file=/firmware/OVMF_CODE.fd",
-		"if=pflash,format=raw,unit=1,file=" + filepath.Join(settings.DiskDir, "vm-id-uefi-vars.fd"),
+		"if=pflash,format=raw,unit=1,file=" + settings.uefiVarsPath("vm-id"),
 	} {
 		if !slices.Contains(arguments, expected) {
 			t.Fatalf("UEFI argument %q is missing: %#v", expected, arguments)

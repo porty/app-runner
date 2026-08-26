@@ -13,10 +13,19 @@ import (
 
 const defaultConfigName = "app-runner.json"
 
+// config describes where App Runner listens and where it keeps its files.
+//
+// ISODir holds installer ISOs and cloud images, DiskDir holds virtual machine
+// disk images, StateDir holds application state (VM definitions, DHCP leases,
+// firmware variable stores, generated cloud-init media, recovery records), and
+// RunDir holds runtime sockets. Only ISODir and DiskDir are exposed as
+// operator-browsable storage.
 type config struct {
 	Listen        string `json:"listen"`
 	ISODir        string `json:"iso_dir"`
 	DiskDir       string `json:"disk_dir"`
+	StateDir      string `json:"state_dir"`
+	RunDir        string `json:"run_dir"`
 	BridgeName    string `json:"bridge_name"`
 	QEMUBinary    string `json:"qemu_binary"`
 	QEMUImgBinary string `json:"qemu_img_binary"`
@@ -31,6 +40,8 @@ func defaultConfig(workingDirectory string) config {
 		Listen:        "127.0.0.1:8080",
 		ISODir:        filepath.Join(workingDirectory, "iso"),
 		DiskDir:       filepath.Join(workingDirectory, "disk"),
+		StateDir:      filepath.Join(workingDirectory, "state"),
+		RunDir:        filepath.Join(workingDirectory, "run"),
 		BridgeName:    "br0",
 		QEMUBinary:    "qemu-system-x86_64",
 		QEMUImgBinary: "qemu-img",
@@ -77,7 +88,9 @@ func loadConfig(args []string, workingDirectory string) (config, error) {
 	flags.String("config", configPath, "path to the JSON configuration file")
 	flags.StringVar(&settings.Listen, "listen", settings.Listen, "HTTP listen address")
 	flags.StringVar(&settings.ISODir, "iso-dir", settings.ISODir, "directory containing ISO images")
-	flags.StringVar(&settings.DiskDir, "disk-dir", settings.DiskDir, "directory containing VM data")
+	flags.StringVar(&settings.DiskDir, "disk-dir", settings.DiskDir, "directory containing VM disk images")
+	flags.StringVar(&settings.StateDir, "state-dir", settings.StateDir, "directory containing application state")
+	flags.StringVar(&settings.RunDir, "run-dir", settings.RunDir, "directory containing runtime sockets")
 	flags.StringVar(&settings.BridgeName, "bridge", settings.BridgeName, "host bridge used by bridge networking")
 	flags.StringVar(&settings.QEMUBinary, "qemu", settings.QEMUBinary, "QEMU system binary")
 	flags.StringVar(&settings.QEMUImgBinary, "qemu-img", settings.QEMUImgBinary, "qemu-img binary")
@@ -93,6 +106,8 @@ func loadConfig(args []string, workingDirectory string) (config, error) {
 
 	settings.ISODir = absoluteFrom(workingDirectory, settings.ISODir)
 	settings.DiskDir = absoluteFrom(workingDirectory, settings.DiskDir)
+	settings.StateDir = absoluteFrom(workingDirectory, settings.StateDir)
+	settings.RunDir = absoluteFrom(workingDirectory, settings.RunDir)
 	settings.UEFICodePath = absoluteFrom(workingDirectory, settings.UEFICodePath)
 	settings.UEFIVarsPath = absoluteFrom(workingDirectory, settings.UEFIVarsPath)
 	if strings.TrimSpace(settings.BridgeName) == "" {
@@ -144,10 +159,35 @@ func absoluteFrom(workingDirectory, path string) string {
 }
 
 func prepareDirectories(settings config) error {
-	for _, directory := range []string{settings.ISODir, settings.DiskDir} {
+	for _, directory := range []string{settings.ISODir, settings.DiskDir, settings.StateDir, settings.RunDir} {
 		if err := os.MkdirAll(directory, 0o750); err != nil {
 			return fmt.Errorf("create directory %s: %w", directory, err)
 		}
 	}
 	return nil
+}
+
+// vmStateDir is the per-VM directory for firmware variables and generated media.
+func (c config) vmStateDir(id string) string {
+	return filepath.Join(c.StateDir, "vms", id)
+}
+
+func (c config) uefiVarsPath(id string) string {
+	return filepath.Join(c.vmStateDir(id), "uefi-vars.fd")
+}
+
+func (c config) cloudInitISOPath(id string) string {
+	return filepath.Join(c.vmStateDir(id), "cloud-init.iso")
+}
+
+func (c config) qmpSocketPath(id string) string {
+	return filepath.Join(c.RunDir, id+".qmp.sock")
+}
+
+func (c config) vncSocketPath(id string) string {
+	return filepath.Join(c.RunDir, id+".vnc.sock")
+}
+
+func (c config) isoPath(name string) string {
+	return filepath.Join(c.ISODir, name)
 }

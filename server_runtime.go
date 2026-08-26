@@ -32,22 +32,22 @@ func RunServer(args []string, frontend fs.FS) error {
 		slog.Warn("KVM is unavailable to the current user", "device", "/dev/kvm")
 	}
 
-	manager, err := newVMManager(settings, newJSONVMStore(settings.DiskDir), newQEMUHypervisor(settings), capabilities)
+	manager, err := newVMManager(settings, newJSONVMStore(settings.StateDir), newQEMUHypervisor(settings), capabilities)
 	if err != nil {
 		return err
 	}
-	templates, err := newCloudInitTemplateManager(newJSONCloudInitTemplateStore(settings.DiskDir))
+	templates, err := newCloudInitTemplateManager(newJSONCloudInitTemplateStore(settings.StateDir))
 	if err != nil {
 		return err
 	}
 	networkProvider := newLinuxNetworkProvider()
 	manager.bridgeCapability = networkProvider.BridgeCapability
-	nat, err := newNATManager(settings.DiskDir)
+	nat, err := newNATManager(settings.StateDir)
 	if err != nil {
 		return err
 	}
 	dns := newDNSManager()
-	dhcp, err := newDHCPManager(settings.DiskDir, networkProvider, nat, dns)
+	dhcp, err := newDHCPManager(settings.StateDir, networkProvider, nat, dns)
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func RunServer(args []string, frontend fs.FS) error {
 	if err := ipmi.Reconcile(vms); err != nil {
 		slog.Warn("restore virtual BMC services", "error", err)
 	}
-	networking, err := newNetworkManager(networkManagerOptions{Provider: networkProvider, VMs: manager, DHCP: dhcp, StateDirectory: settings.DiskDir})
+	networking, err := newNetworkManager(networkManagerOptions{Provider: networkProvider, VMs: manager, DHCP: dhcp, StateDirectory: settings.StateDir})
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func RunServer(args []string, frontend fs.FS) error {
 			manager: manager, networking: networking, storage: newStorageService(settings), templates: templates, capabilities: capabilities,
 		}),
 	}
-	slog.Info("App Runner listening", "address", settings.Listen, "iso_dir", settings.ISODir, "disk_dir", settings.DiskDir)
+	slog.Info("App Runner listening", "address", settings.Listen, "iso_dir", settings.ISODir, "disk_dir", settings.DiskDir, "state_dir", settings.StateDir, "run_dir", settings.RunDir)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

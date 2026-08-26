@@ -36,7 +36,7 @@ This document records the main decisions that define App Runner. It describes th
 
 ## Filesystem-backed local state
 
-**Decision:** VM definitions, disks, leases, configuration, and recovery state are stored as files beneath operator-selected local directories rather than in an external database.
+**Decision:** VM definitions, disks, leases, configuration, and recovery state are stored as files beneath operator-selected local directories rather than in an external database. Operator-facing storage (`iso/`, `disk/`) is kept separate from application state (`state/`) and runtime sockets (`run/`).
 
 **Rationale:** Local files match the single-host model, keep ownership visible, and make the application independent of another persistent service.
 
