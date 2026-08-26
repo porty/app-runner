@@ -83,6 +83,10 @@ func (h *fakeHypervisor) GracefulStop(vm virtualMachine) error {
 func (h *fakeHypervisor) ForceStop(vm virtualMachine) error {
 	h.forcedStop = true
 	delete(h.running, vm.PID)
+	if h.onExit != nil {
+		// QEMU's reaper reports the exit asynchronously, as the real hypervisor does.
+		go h.onExit(vm.PID, errors.New("signal: killed"))
+	}
 	return nil
 }
 
@@ -665,5 +669,53 @@ func TestVMManagerRejectsNamesThatCannotBeDNSLabels(t *testing.T) {
 		if !errors.As(err, &fieldErr) || fieldErr.field != "name" {
 			t.Fatalf("invalid DNS name %q was not rejected as a name field error: %v", name, err)
 		}
+	}
+}
+
+func TestForceStopWaitsForExitBeforeRestart(t *testing.T) {
+	manager, hypervisor, _ := newTestVMManager(t)
+	vm, err := manager.Create(context.Background(), createVMOptions{Name: "cycle", CPUs: 1, MemoryMiB: 512, DiskGiB: 5, ISOName: "installer.iso", NetworkMode: networkModeNAT})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Start(vm.ID); err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := manager.Stop(vm.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stopped.Status != vmStatusStopped || stopped.PID != 0 || stopped.LastError != "" {
+		t.Fatalf("forced stop should wait for the exit without recording an error: %#v", stopped)
+	}
+	if _, ok := manager.exits[vm.ID]; ok {
+		t.Fatal("exit signal was not cleared")
+	}
+	restarted, err := manager.Start(vm.ID)
+	if err != nil {
+		t.Fatalf("restart after forced stop: %v", err)
+	}
+	if restarted.Status != vmStatusRunning || !hypervisor.IsRunning(restarted.PID) {
+		t.Fatalf("VM did not restart: %#v", restarted)
+	}
+}
+
+func TestForceStopTimesOutWithoutExitCallback(t *testing.T) {
+	manager, hypervisor, _ := newTestVMManager(t)
+	manager.forceStopTimeout = 10 * time.Millisecond
+	vm, err := manager.Create(context.Background(), createVMOptions{Name: "stuck", CPUs: 1, MemoryMiB: 512, DiskGiB: 5, ISOName: "installer.iso", NetworkMode: networkModeNAT})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Start(vm.ID); err != nil {
+		t.Fatal(err)
+	}
+	hypervisor.onExit = nil // the reaper never reports
+	stopped, err := manager.Stop(vm.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stopped.Status != vmStatusStopped || stopped.PID != 0 {
+		t.Fatalf("forced stop should give up waiting and report stopped: %#v", stopped)
 	}
 }
