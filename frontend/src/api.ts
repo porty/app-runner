@@ -1,14 +1,5 @@
 const servicePath = '/twirp/apprunner.v1.AppRunnerService'
 
-export interface PingResponse {
-  message: string
-  server_time: string
-}
-
-export interface EchoResponse {
-  message: string
-}
-
 export type VMStatus =
   | 'VM_STATUS_STOPPED'
   | 'VM_STATUS_RUNNING'
@@ -337,14 +328,6 @@ async function callTwirp<Response>(
   }
 
   return (await response.json()) as Response
-}
-
-export function ping(): Promise<PingResponse> {
-  return callTwirp<PingResponse>('Ping', {})
-}
-
-export function echo(message: string): Promise<EchoResponse> {
-  return callTwirp<EchoResponse>('Echo', { message })
 }
 
 export async function getHostStatus(): Promise<HostStatus> {

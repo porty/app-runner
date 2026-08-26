@@ -1,29 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMCloudInit, configureVMIPMI, createCloudInitTemplate, createVM, deleteCloudInitTemplate, downloadStorageFile, echo, getNetworkingStatus, listCloudInitTemplates, listDiskImages, listStorage, listVMs, ping, rebootVM, updateCloudInitTemplate, uploadStorageFiles } from './api'
+import { applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMCloudInit, configureVMIPMI, createCloudInitTemplate, createVM, deleteCloudInitTemplate, downloadStorageFile, getNetworkingStatus, listCloudInitTemplates, listDiskImages, listStorage, listVMs, rebootVM, updateCloudInitTemplate, uploadStorageFiles } from './api'
 
 describe('Twirp API client', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it('calls the Ping method using Twirp JSON', async () => {
+  it('calls Twirp methods as JSON POST requests', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          message: 'App Runner backend is ready',
-          server_time: '2026-08-19T05:30:00Z',
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ),
+      new Response(JSON.stringify({ virtual_machines: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(ping()).resolves.toMatchObject({
-      message: 'App Runner backend is ready',
-    })
+    await expect(listVMs()).resolves.toEqual([])
     expect(fetchMock).toHaveBeenCalledWith(
-      '/twirp/apprunner.v1.AppRunnerService/Ping',
+      '/twirp/apprunner.v1.AppRunnerService/ListVMs',
       expect.objectContaining({ method: 'POST', body: '{}' }),
     )
   })
@@ -32,14 +24,14 @@ describe('Twirp API client', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ code: 'invalid_argument', msg: 'a message is required' }), {
+        new Response(JSON.stringify({ code: 'invalid_argument', msg: 'name: a name is required' }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' },
         }),
       ),
     )
 
-    await expect(echo('')).rejects.toThrow('a message is required')
+    await expect(cloneVM('vm-id', '')).rejects.toThrow('name: a name is required')
   })
 
   it('returns an empty VM list when the repeated field is omitted', async () => {
