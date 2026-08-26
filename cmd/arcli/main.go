@@ -703,14 +703,28 @@ func updateVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 	if e := parseFlags(f, args); e != nil {
 		return e
 	}
-	if e := require(f.Args(), 1, "usage: arcli vm update ID --name NAME --cpus N --memory MIB"); e != nil {
+	if e := require(f.Args(), 1, "usage: arcli vm update VM [--name NAME] [--description TEXT] [--cpus N] [--memory MIB]"); e != nil {
 		return e
 	}
-	id, e := vmID(ctx, c, f.Args()[0])
+	// UpdateVM replaces every field, so unspecified flags keep current values.
+	current, e := lookupVM(ctx, c, f.Args()[0])
 	if e != nil {
 		return e
 	}
-	r, e := c.UpdateVM(ctx, &apprunnerv1.UpdateVMRequest{Id: id, Name: *name, Description: *description, Cpus: uint32(*cpus), MemoryMib: uint32(*memory)})
+	request := &apprunnerv1.UpdateVMRequest{Id: current.GetId(), Name: current.GetName(), Description: current.GetDescription(), Cpus: current.GetCpus(), MemoryMib: current.GetMemoryMib()}
+	f.Visit(func(flag *flag.Flag) {
+		switch flag.Name {
+		case "name":
+			request.Name = *name
+		case "description":
+			request.Description = *description
+		case "cpus":
+			request.Cpus = uint32(*cpus)
+		case "memory":
+			request.MemoryMib = uint32(*memory)
+		}
+	})
+	r, e := c.UpdateVM(ctx, request)
 	if e != nil {
 		return e
 	}
