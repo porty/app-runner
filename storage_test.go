@@ -39,8 +39,7 @@ func TestStorageListIncludesRootsAndNestedDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rpc := newAppRunnerService(nil, nil)
-	rpc.storage = service
+	rpc := newAppRunnerService(appRuntime{storage: service})
 	response, err := rpc.ListStorage(context.Background(), &apprunnerv1.ListStorageRequest{})
 	if err != nil {
 		t.Fatalf("list storage: %v", err)
@@ -132,8 +131,7 @@ func TestStorageMultipartUploadToSubdirectory(t *testing.T) {
 
 func TestStorageDownloadsHTTPURL(t *testing.T) {
 	service, settings := testStorageService(t)
-	rpc := newAppRunnerService(nil, nil)
-	rpc.storage = service
+	rpc := newAppRunnerService(appRuntime{storage: service})
 	source := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Disposition", `attachment; filename="remote.iso"`)
 		_, _ = response.Write([]byte("remote image"))
@@ -157,8 +155,7 @@ func TestStorageDownloadsHTTPURL(t *testing.T) {
 
 func TestStorageRejectsDestinationsOutsideRoot(t *testing.T) {
 	service, _ := testStorageService(t)
-	rpc := newAppRunnerService(nil, nil)
-	rpc.storage = service
+	rpc := newAppRunnerService(appRuntime{storage: service})
 	_, err := rpc.DownloadStorageFile(context.Background(), &apprunnerv1.DownloadStorageFileRequest{
 		Root: "iso", Directory: "../disk", Url: "https://example.com/image.iso",
 	})

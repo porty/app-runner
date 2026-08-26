@@ -15,9 +15,6 @@ import (
 )
 
 func (s *appRunnerService) ListStorage(context.Context, *apprunnerv1.ListStorageRequest) (*apprunnerv1.ListStorageResponse, error) {
-	if s.storage == nil {
-		return nil, twirp.InternalError("storage is not configured")
-	}
 	roots, err := s.storage.list()
 	if err != nil {
 		return nil, twirp.InternalErrorWith(err)
@@ -34,9 +31,6 @@ func (s *appRunnerService) ListStorage(context.Context, *apprunnerv1.ListStorage
 }
 
 func (s *appRunnerService) DownloadStorageFile(ctx context.Context, request *apprunnerv1.DownloadStorageFileRequest) (*apprunnerv1.DownloadStorageFileResponse, error) {
-	if s.storage == nil {
-		return nil, twirp.InternalError("storage is not configured")
-	}
 	destination, err := s.storage.destinationDirectory(request.GetRoot(), request.GetDirectory())
 	if err != nil {
 		return nil, twirp.InvalidArgumentError("directory", err.Error())

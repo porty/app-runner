@@ -13,7 +13,7 @@ func TestSPAHandlerServesRouteFallback(t *testing.T) {
 		"index.html":    &fstest.MapFile{Data: []byte("<html>app</html>")},
 		"assets/app.js": &fstest.MapFile{Data: []byte("console.log('app')")},
 	}
-	handler := newHTTPHandler(fs.FS(frontend))
+	handler := newHTTPHandler(fs.FS(frontend), appRuntime{})
 
 	request := httptest.NewRequest(http.MethodGet, "/instances/virtual-machines", nil)
 	response := httptest.NewRecorder()
@@ -28,7 +28,7 @@ func TestSPAHandlerServesRouteFallback(t *testing.T) {
 }
 
 func TestDevelopmentHandlerDescribesFrontendWorkflow(t *testing.T) {
-	handler := newHTTPHandler(nil)
+	handler := newHTTPHandler(nil, appRuntime{})
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	response := httptest.NewRecorder()
 
