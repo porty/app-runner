@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	apprunnerv1 "github.com/roflware/app-runner/internal/gen/apprunner/v1"
+	"gopkg.in/yaml.v3"
 )
 
 const defaultServer = "http://127.0.0.1:8080"
@@ -30,11 +32,15 @@ func run(args []string, output io.Writer) error {
 	global.SetOutput(io.Discard)
 	server := global.String("server", defaultServer, "App Runner server URL")
 	timeout := global.Duration("timeout", 30*time.Second, "request timeout")
+	format := global.String("o", "table", "output format: table, json, or yaml")
 	if err := global.Parse(args); errors.Is(err, flag.ErrHelp) {
 		usage(output)
 		return nil
 	} else if err != nil {
 		return err
+	}
+	if *format != "table" && *format != "json" && *format != "yaml" {
+		return fmt.Errorf("-o must be table, json, or yaml, not %q", *format)
 	}
 	args = global.Args()
 	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
@@ -43,29 +49,30 @@ func run(args []string, output io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
+	out := &printer{Writer: output, format: *format}
 	client := apprunnerv1.NewAppRunnerServiceJSONClient(strings.TrimRight(*server, "/"), http.DefaultClient)
 	switch args[0] {
 	case "host":
-		return host(ctx, client, args[1:], output)
+		return host(ctx, client, args[1:], out)
 	case "iso":
-		return iso(ctx, client, args[1:], output)
+		return iso(ctx, client, args[1:], out)
 	case "image":
-		return image(ctx, client, args[1:], output)
+		return image(ctx, client, args[1:], out)
 	case "storage":
-		return storage(ctx, client, args[1:], output)
+		return storage(ctx, client, args[1:], out)
 	case "vm":
-		return vm(ctx, client, args[1:], output)
+		return vm(ctx, client, args[1:], out)
 	case "net":
-		return network(ctx, client, args[1:], output)
+		return network(ctx, client, args[1:], out)
 	case "cloud-init":
-		return cloudInit(ctx, client, args[1:], output)
+		return cloudInit(ctx, client, args[1:], out)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
 }
 
 func usage(output io.Writer) {
-	fmt.Fprint(output, `Usage: arcli [--server URL] [--timeout DURATION] <command>
+	fmt.Fprint(output, `Usage: arcli [--server URL] [--timeout DURATION] [-o table|json|yaml] <command>
 
 Commands:
   host status                    Show host capabilities
@@ -75,11 +82,203 @@ Commands:
   net <operation>                Inspect and manage host networking
   cloud-init <operation>         Manage reusable cloud-init templates
 
-Run "arcli <command> help" for a command's operations. All successful output is JSON.
+Run "arcli <command> help" for a command's operations. Successful output is a
+table by default; pass -o json or -o yaml for machine-readable output.
 `)
 }
 
-func writeJSON(output io.Writer, value any) error { return json.NewEncoder(output).Encode(value) }
+type printer struct {
+	io.Writer
+	format string
+}
+
+func write(output *printer, value any) error {
+	switch output.format {
+	case "json":
+		return json.NewEncoder(output).Encode(value)
+	case "yaml":
+		return writeYAML(output, value)
+	default:
+		return writeTable(output, value)
+	}
+}
+
+// writeYAML round-trips value through its JSON encoding so YAML output uses
+// the same field names as the JSON output.
+func writeYAML(output io.Writer, value any) error {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	var plain any
+	if err := decoder.Decode(&plain); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(yamlNumbers(plain))
+	if err != nil {
+		return err
+	}
+	_, err = output.Write(data)
+	return err
+}
+
+// yamlNumbers replaces json.Number values, which YAML would render as
+// strings, with plain integers or floats.
+func yamlNumbers(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		for key, element := range value {
+			value[key] = yamlNumbers(element)
+		}
+		return value
+	case []any:
+		for index, element := range value {
+			value[index] = yamlNumbers(element)
+		}
+		return value
+	case json.Number:
+		if integer, err := value.Int64(); err == nil {
+			return integer
+		}
+		if float, err := value.Float64(); err == nil {
+			return float
+		}
+		return value.String()
+	default:
+		return value
+	}
+}
+
+func writeTable(output io.Writer, value any) error {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	switch encoded = bytes.TrimSpace(encoded); {
+	case bytes.HasPrefix(encoded, []byte("[")):
+		var items []json.RawMessage
+		if err := json.Unmarshal(encoded, &items); err != nil {
+			return err
+		}
+		return writeListTable(output, items)
+	default:
+		fields, err := objectFields(encoded)
+		if err != nil {
+			return err
+		}
+		width := 0
+		for _, field := range fields {
+			width = max(width, len(field[0]))
+		}
+		for _, field := range fields {
+			if _, err := fmt.Fprintln(output, tableRow([]string{field[0], field[1]}, []int{width})); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+func writeListTable(output io.Writer, items []json.RawMessage) error {
+	var columns []string
+	seen := map[string]bool{}
+	rows := make([]map[string]string, len(items))
+	for index, item := range items {
+		fields, err := objectFields(bytes.TrimSpace(item))
+		if err != nil {
+			return err
+		}
+		rows[index] = map[string]string{}
+		for _, field := range fields {
+			if !seen[field[0]] {
+				seen[field[0]] = true
+				columns = append(columns, field[0])
+			}
+			rows[index][field[0]] = field[1]
+		}
+	}
+	if len(columns) == 0 {
+		return nil
+	}
+	widths := make([]int, len(columns))
+	for index, column := range columns {
+		widths[index] = len(column)
+	}
+	for _, row := range rows {
+		for index, column := range columns {
+			widths[index] = max(widths[index], len(row[column]))
+		}
+	}
+	header := make([]string, len(columns))
+	for index, column := range columns {
+		header[index] = strings.ToUpper(column)
+	}
+	if _, err := fmt.Fprintln(output, tableRow(header, widths)); err != nil {
+		return err
+	}
+	for _, row := range rows {
+		cells := make([]string, len(columns))
+		for index, column := range columns {
+			cells[index] = row[column]
+		}
+		if _, err := fmt.Fprintln(output, tableRow(cells, widths)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func tableRow(cells []string, widths []int) string {
+	padded := make([]string, len(cells))
+	for index, value := range cells {
+		if index < len(cells)-1 {
+			value = fmt.Sprintf("%-*s", widths[index], value)
+		}
+		padded[index] = value
+	}
+	return strings.Join(padded, "  ")
+}
+
+// objectFields lists a JSON object's fields in declaration order; any other
+// JSON value becomes a single "value" field.
+func objectFields(encoded []byte) ([][2]string, error) {
+	if len(encoded) == 0 || encoded[0] != '{' {
+		return [][2]string{{"value", cell(encoded)}}, nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	if _, err := decoder.Token(); err != nil {
+		return nil, err
+	}
+	var fields [][2]string
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		fields = append(fields, [2]string{fmt.Sprint(key), cell(value)})
+	}
+	return fields, nil
+}
+
+func cell(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return ""
+	}
+	if raw[0] == '"' {
+		var value string
+		if err := json.Unmarshal(raw, &value); err == nil {
+			return value
+		}
+	}
+	return string(raw)
+}
 func require(args []string, count int, message string) error {
 	if len(args) < count {
 		return errors.New(message)
@@ -92,7 +291,7 @@ func flags(name string) *flag.FlagSet {
 	return f
 }
 
-func host(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func host(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) != 1 || args[0] != "status" {
 		return errors.New("usage: arcli host status")
 	}
@@ -100,10 +299,10 @@ func host(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, ou
 	if err != nil {
 		return err
 	}
-	return writeJSON(output, r.GetStatus())
+	return write(output, r.GetStatus())
 }
 
-func iso(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func iso(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) != 1 || args[0] != "list" {
 		return errors.New("usage: arcli iso list")
 	}
@@ -111,10 +310,10 @@ func iso(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, out
 	if err != nil {
 		return err
 	}
-	return writeJSON(output, r.GetImages())
+	return write(output, r.GetImages())
 }
 
-func image(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func image(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) != 1 || args[0] != "list" {
 		return errors.New("usage: arcli image list")
 	}
@@ -122,10 +321,10 @@ func image(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, o
 	if err != nil {
 		return err
 	}
-	return writeJSON(output, r.GetImages())
+	return write(output, r.GetImages())
 }
 
-func storage(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func storage(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) == 0 || args[0] == "help" {
 		_, err := fmt.Fprintln(output, "usage: arcli storage list | download --root iso|disk --directory PATH --url URL [--filename NAME]")
 		return err
@@ -136,7 +335,7 @@ func storage(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 		if err != nil {
 			return err
 		}
-		return writeJSON(output, r.GetRoots())
+		return write(output, r.GetRoots())
 	case "download":
 		f := flags("storage download")
 		root := f.String("root", "", "storage root (iso or disk)")
@@ -153,13 +352,13 @@ func storage(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 		if err != nil {
 			return err
 		}
-		return writeJSON(output, r.GetFile())
+		return write(output, r.GetFile())
 	default:
 		return fmt.Errorf("unknown storage operation %q", args[0])
 	}
 }
 
-func vm(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func vm(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) == 0 || args[0] == "help" {
 		_, err := fmt.Fprintln(output, "usage: arcli vm list|get|create|clone|start|stop|reboot|delete|update|network|disk|cdrom|cloud-init|ipmi")
 		return err
@@ -170,7 +369,7 @@ func vm(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, outp
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetVirtualMachines())
+		return write(output, r.GetVirtualMachines())
 	case "get":
 		if e := require(args[1:], 1, "usage: arcli vm get ID"); e != nil {
 			return e
@@ -179,7 +378,7 @@ func vm(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, outp
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetVirtualMachine())
+		return write(output, r.GetVirtualMachine())
 	case "create":
 		return createVM(ctx, c, args[1:], output)
 	case "clone":
@@ -190,7 +389,7 @@ func vm(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, outp
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetVirtualMachine())
+		return write(output, r.GetVirtualMachine())
 	case "start", "reboot", "delete":
 		return vmAction(ctx, c, args, output)
 	case "stop":
@@ -206,7 +405,7 @@ func vm(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, outp
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetVirtualMachine())
+		return write(output, r.GetVirtualMachine())
 	case "update":
 		return updateVM(ctx, c, args[1:], output)
 	case "network":
@@ -224,7 +423,7 @@ func vm(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, outp
 	}
 }
 
-func vmAction(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func vmAction(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if e := require(args[1:], 1, "usage: arcli vm "+args[0]+" ID"); e != nil {
 		return e
 	}
@@ -234,23 +433,23 @@ func vmAction(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetVirtualMachine())
+		return write(output, r.GetVirtualMachine())
 	case "reboot":
 		r, e := c.RebootVM(ctx, &apprunnerv1.RebootVMRequest{Id: args[1]})
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetVirtualMachine())
+		return write(output, r.GetVirtualMachine())
 	default:
 		r, e := c.DeleteVM(ctx, &apprunnerv1.DeleteVMRequest{Id: args[1]})
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r)
+		return write(output, r)
 	}
 }
 
-func createVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func createVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	f := flags("vm create")
 	name := f.String("name", "", "VM name")
 	cpus := f.Uint("cpus", 1, "vCPUs")
@@ -279,9 +478,9 @@ func createVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 	if e != nil {
 		return e
 	}
-	return writeJSON(output, r.GetVirtualMachine())
+	return write(output, r.GetVirtualMachine())
 }
-func updateVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func updateVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	f := flags("vm update")
 	name := f.String("name", "", "VM name")
 	description := f.String("description", "", "description")
@@ -297,9 +496,9 @@ func updateVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 	if e != nil {
 		return e
 	}
-	return writeJSON(output, r.GetVirtualMachine())
+	return write(output, r.GetVirtualMachine())
 }
-func vmNetwork(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func vmNetwork(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	f := flags("vm network")
 	network := f.String("network", "nat", "nat or bridge")
 	bridge := f.String("bridge", "", "bridge name")
@@ -318,9 +517,9 @@ func vmNetwork(ctx context.Context, c apprunnerv1.AppRunnerService, args []strin
 	if e != nil {
 		return e
 	}
-	return writeJSON(output, r.GetVirtualMachine())
+	return write(output, r.GetVirtualMachine())
 }
-func vmDisk(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func vmDisk(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) == 0 {
 		return errors.New("usage: arcli vm disk add ID --size GIB | remove ID DISK_ID")
 	}
@@ -340,7 +539,7 @@ func vmDisk(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, 
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetVirtualMachine())
+		return write(output, r.GetVirtualMachine())
 	}
 	if args[0] == "remove" {
 		if e := require(args[1:], 2, "usage: arcli vm disk remove ID DISK_ID"); e != nil {
@@ -350,11 +549,11 @@ func vmDisk(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, 
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetVirtualMachine())
+		return write(output, r.GetVirtualMachine())
 	}
 	return errors.New("usage: arcli vm disk add|remove")
 }
-func vmCDROM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func vmCDROM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) == 0 {
 		return errors.New("usage: arcli vm cdrom add|set|remove")
 	}
@@ -371,7 +570,7 @@ func vmCDROM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetVirtualMachine())
+		return write(output, r.GetVirtualMachine())
 	case "set":
 		if e := require(args[1:], 3, "usage: arcli vm cdrom set ID CDROM_ID ISO"); e != nil {
 			return e
@@ -380,7 +579,7 @@ func vmCDROM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetVirtualMachine())
+		return write(output, r.GetVirtualMachine())
 	case "remove":
 		if e := require(args[1:], 2, "usage: arcli vm cdrom remove ID CDROM_ID"); e != nil {
 			return e
@@ -389,12 +588,12 @@ func vmCDROM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetVirtualMachine())
+		return write(output, r.GetVirtualMachine())
 	default:
 		return errors.New("usage: arcli vm cdrom add|set|remove")
 	}
 }
-func vmCloudInit(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func vmCloudInit(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	f := flags("vm cloud-init")
 	enabled := f.Bool("enabled", true, "enable cloud-init")
 	file := f.String("file", "", "user-data file")
@@ -412,9 +611,9 @@ func vmCloudInit(ctx context.Context, c apprunnerv1.AppRunnerService, args []str
 	if e != nil {
 		return e
 	}
-	return writeJSON(output, r.GetVirtualMachine())
+	return write(output, r.GetVirtualMachine())
 }
-func vmIPMI(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func vmIPMI(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	f := flags("vm ipmi")
 	enabled := f.Bool("enabled", true, "enable IPMI")
 	bridge := f.String("bridge", "", "bridge name")
@@ -431,10 +630,10 @@ func vmIPMI(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, 
 	if e != nil {
 		return e
 	}
-	return writeJSON(output, r.GetVirtualMachine())
+	return write(output, r.GetVirtualMachine())
 }
 
-func network(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func network(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) == 0 || args[0] == "help" {
 		_, err := fmt.Fprintln(output, "usage: arcli net status|apply|confirm|revert|dhcp")
 		return err
@@ -445,7 +644,7 @@ func network(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetStatus())
+		return write(output, r.GetStatus())
 	case "apply":
 		f := flags("net apply")
 		kind := f.String("type", "", "create-bridge, delete-bridge, up, down, attach, or detach")
@@ -463,7 +662,7 @@ func network(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetPendingChange())
+		return write(output, r.GetPendingChange())
 	case "confirm", "revert":
 		if e := require(args[1:], 1, "network change ID is required"); e != nil {
 			return e
@@ -473,20 +672,20 @@ func network(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 			if e != nil {
 				return e
 			}
-			return writeJSON(output, r.GetStatus())
+			return write(output, r.GetStatus())
 		}
 		r, e := c.RevertNetworkChange(ctx, &apprunnerv1.RevertNetworkChangeRequest{Id: args[1]})
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetStatus())
+		return write(output, r.GetStatus())
 	case "dhcp":
 		return networkDHCP(ctx, c, args[1:], output)
 	default:
 		return fmt.Errorf("unknown network operation %q", args[0])
 	}
 }
-func networkDHCP(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func networkDHCP(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) == 0 {
 		return errors.New("usage: arcli net dhcp configure|clear-leases|delete-lease|set-static")
 	}
@@ -510,7 +709,7 @@ func networkDHCP(ctx context.Context, c apprunnerv1.AppRunnerService, args []str
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetStatus())
+		return write(output, r.GetStatus())
 	}
 	if args[0] == "clear-leases" {
 		if e := require(args[1:], 1, "bridge name is required"); e != nil {
@@ -520,7 +719,7 @@ func networkDHCP(ctx context.Context, c apprunnerv1.AppRunnerService, args []str
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetStatus())
+		return write(output, r.GetStatus())
 	}
 	if args[0] == "delete-lease" || args[0] == "set-static" {
 		if e := require(args[1:], 2, "usage: arcli net dhcp "+args[0]+" BRIDGE MAC [ADDRESS]"); e != nil {
@@ -531,7 +730,7 @@ func networkDHCP(ctx context.Context, c apprunnerv1.AppRunnerService, args []str
 			if e != nil {
 				return e
 			}
-			return writeJSON(output, r.GetStatus())
+			return write(output, r.GetStatus())
 		}
 		if e := require(args[1:], 3, "address is required"); e != nil {
 			return e
@@ -540,12 +739,12 @@ func networkDHCP(ctx context.Context, c apprunnerv1.AppRunnerService, args []str
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetStatus())
+		return write(output, r.GetStatus())
 	}
 	return errors.New("usage: arcli net dhcp configure|clear-leases|delete-lease|set-static")
 }
 
-func cloudInit(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output io.Writer) error {
+func cloudInit(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) == 0 || args[0] == "help" {
 		_, err := fmt.Fprintln(output, "usage: arcli cloud-init list|create|update|delete")
 		return err
@@ -556,7 +755,7 @@ func cloudInit(ctx context.Context, c apprunnerv1.AppRunnerService, args []strin
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetTemplates())
+		return write(output, r.GetTemplates())
 	case "create", "update":
 		f := flags("cloud-init " + args[0])
 		file := f.String("file", "", "user-data file")
@@ -576,13 +775,13 @@ func cloudInit(ctx context.Context, c apprunnerv1.AppRunnerService, args []strin
 			if e != nil {
 				return e
 			}
-			return writeJSON(output, r.GetTemplate())
+			return write(output, r.GetTemplate())
 		}
 		r, e := c.UpdateCloudInitTemplate(ctx, &apprunnerv1.UpdateCloudInitTemplateRequest{Name: f.Args()[0], NewName: *newName, UserData: data})
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r.GetTemplate())
+		return write(output, r.GetTemplate())
 	case "delete":
 		if e := require(args[1:], 1, "template name is required"); e != nil {
 			return e
@@ -591,7 +790,7 @@ func cloudInit(ctx context.Context, c apprunnerv1.AppRunnerService, args []strin
 		if e != nil {
 			return e
 		}
-		return writeJSON(output, r)
+		return write(output, r)
 	default:
 		return errors.New("usage: arcli cloud-init list|create|update|delete")
 	}
