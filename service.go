@@ -10,6 +10,7 @@ import (
 	"github.com/twitchtv/twirp"
 )
 
+// appRunnerService implements the Twirp API on top of the application runtime.
 type appRunnerService struct {
 	manager      *vmManager
 	networking   *networkManager
@@ -18,18 +19,14 @@ type appRunnerService struct {
 	capabilities func() hostCapabilities
 }
 
-func newAppRunnerService(manager *vmManager, capabilities func() hostCapabilities, networking ...*networkManager) *appRunnerService {
-	service := &appRunnerService{manager: manager, capabilities: capabilities}
-	if len(networking) != 0 {
-		service.networking = networking[0]
+func newAppRunnerService(runtime appRuntime) *appRunnerService {
+	return &appRunnerService{
+		manager: runtime.manager, networking: runtime.networking, storage: runtime.storage,
+		templates: runtime.templates, capabilities: runtime.capabilities,
 	}
-	return service
 }
 
 func (s *appRunnerService) GetHostStatus(context.Context, *apprunnerv1.GetHostStatusRequest) (*apprunnerv1.GetHostStatusResponse, error) {
-	if s.capabilities == nil {
-		return nil, twirp.InternalError("host capabilities are not configured")
-	}
 	status := s.capabilities()
 	return &apprunnerv1.GetHostStatusResponse{Status: &apprunnerv1.HostStatus{
 		QemuAvailable:   status.QEMUAvailable,
@@ -41,9 +38,6 @@ func (s *appRunnerService) GetHostStatus(context.Context, *apprunnerv1.GetHostSt
 }
 
 func (s *appRunnerService) ListISOs(context.Context, *apprunnerv1.ListISOsRequest) (*apprunnerv1.ListISOsResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	images, err := s.manager.ListISOs()
 	if err != nil {
 		return nil, rpcError(err)
@@ -56,9 +50,6 @@ func (s *appRunnerService) ListISOs(context.Context, *apprunnerv1.ListISOsReques
 }
 
 func (s *appRunnerService) ListDiskImages(context.Context, *apprunnerv1.ListDiskImagesRequest) (*apprunnerv1.ListDiskImagesResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	images, err := s.manager.ListDiskImages()
 	if err != nil {
 		return nil, rpcError(err)
@@ -71,9 +62,6 @@ func (s *appRunnerService) ListDiskImages(context.Context, *apprunnerv1.ListDisk
 }
 
 func (s *appRunnerService) ListVMs(context.Context, *apprunnerv1.ListVMsRequest) (*apprunnerv1.ListVMsResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vms, err := s.manager.List()
 	if err != nil {
 		return nil, rpcError(err)
@@ -86,9 +74,6 @@ func (s *appRunnerService) ListVMs(context.Context, *apprunnerv1.ListVMsRequest)
 }
 
 func (s *appRunnerService) GetVM(_ context.Context, request *apprunnerv1.GetVMRequest) (*apprunnerv1.GetVMResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vm, err := s.manager.Get(request.GetId())
 	if err != nil {
 		return nil, rpcError(err)
@@ -97,9 +82,6 @@ func (s *appRunnerService) GetVM(_ context.Context, request *apprunnerv1.GetVMRe
 }
 
 func (s *appRunnerService) CreateVM(ctx context.Context, request *apprunnerv1.CreateVMRequest) (*apprunnerv1.CreateVMResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	mode, err := networkModeFromProto(request.GetNetworkMode())
 	if err != nil {
 		return nil, err
@@ -118,9 +100,6 @@ func (s *appRunnerService) CreateVM(ctx context.Context, request *apprunnerv1.Cr
 }
 
 func (s *appRunnerService) CloneVM(ctx context.Context, request *apprunnerv1.CloneVMRequest) (*apprunnerv1.CloneVMResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vm, err := s.manager.Clone(ctx, request.GetId(), request.GetName())
 	if err != nil {
 		return nil, rpcError(err)
@@ -129,9 +108,6 @@ func (s *appRunnerService) CloneVM(ctx context.Context, request *apprunnerv1.Clo
 }
 
 func (s *appRunnerService) StartVM(_ context.Context, request *apprunnerv1.StartVMRequest) (*apprunnerv1.StartVMResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vm, err := s.manager.Start(request.GetId())
 	if err != nil {
 		return nil, rpcError(err)
@@ -140,9 +116,6 @@ func (s *appRunnerService) StartVM(_ context.Context, request *apprunnerv1.Start
 }
 
 func (s *appRunnerService) StopVM(_ context.Context, request *apprunnerv1.StopVMRequest) (*apprunnerv1.StopVMResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vm, err := s.manager.Stop(request.GetId(), request.GetForce())
 	if err != nil {
 		return nil, rpcError(err)
@@ -151,9 +124,6 @@ func (s *appRunnerService) StopVM(_ context.Context, request *apprunnerv1.StopVM
 }
 
 func (s *appRunnerService) RebootVM(_ context.Context, request *apprunnerv1.RebootVMRequest) (*apprunnerv1.RebootVMResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vm, err := s.manager.Reboot(request.GetId())
 	if err != nil {
 		return nil, rpcError(err)
@@ -162,9 +132,6 @@ func (s *appRunnerService) RebootVM(_ context.Context, request *apprunnerv1.Rebo
 }
 
 func (s *appRunnerService) UpdateVM(_ context.Context, request *apprunnerv1.UpdateVMRequest) (*apprunnerv1.UpdateVMResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vm, err := s.manager.Update(request.GetId(), request.GetName(), request.GetDescription(), request.GetCpus(), request.GetMemoryMib())
 	if err != nil {
 		return nil, rpcError(err)
@@ -173,9 +140,6 @@ func (s *appRunnerService) UpdateVM(_ context.Context, request *apprunnerv1.Upda
 }
 
 func (s *appRunnerService) UpdateVMNetwork(_ context.Context, request *apprunnerv1.UpdateVMNetworkRequest) (*apprunnerv1.UpdateVMNetworkResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	mode, err := networkModeFromProto(request.GetNetworkMode())
 	if err != nil {
 		return nil, err
@@ -188,9 +152,6 @@ func (s *appRunnerService) UpdateVMNetwork(_ context.Context, request *apprunner
 }
 
 func (s *appRunnerService) AddVMDisk(ctx context.Context, request *apprunnerv1.AddVMDiskRequest) (*apprunnerv1.AddVMDiskResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vm, err := s.manager.AddDisk(ctx, request.GetId(), request.GetSizeGib())
 	if err != nil {
 		return nil, rpcError(err)
@@ -199,9 +160,6 @@ func (s *appRunnerService) AddVMDisk(ctx context.Context, request *apprunnerv1.A
 }
 
 func (s *appRunnerService) RemoveVMDisk(_ context.Context, request *apprunnerv1.RemoveVMDiskRequest) (*apprunnerv1.RemoveVMDiskResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vm, err := s.manager.RemoveDisk(request.GetId(), request.GetDiskId())
 	if err != nil {
 		return nil, rpcError(err)
@@ -210,9 +168,6 @@ func (s *appRunnerService) RemoveVMDisk(_ context.Context, request *apprunnerv1.
 }
 
 func (s *appRunnerService) AddVMCDROM(_ context.Context, request *apprunnerv1.AddVMCDROMRequest) (*apprunnerv1.AddVMCDROMResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vm, err := s.manager.AddCDROM(request.GetId(), request.GetIsoName())
 	if err != nil {
 		return nil, rpcError(err)
@@ -221,9 +176,6 @@ func (s *appRunnerService) AddVMCDROM(_ context.Context, request *apprunnerv1.Ad
 }
 
 func (s *appRunnerService) UpdateVMCDROM(_ context.Context, request *apprunnerv1.UpdateVMCDROMRequest) (*apprunnerv1.UpdateVMCDROMResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vm, err := s.manager.UpdateCDROM(request.GetId(), request.GetCdromId(), request.GetIsoName())
 	if err != nil {
 		return nil, rpcError(err)
@@ -232,9 +184,6 @@ func (s *appRunnerService) UpdateVMCDROM(_ context.Context, request *apprunnerv1
 }
 
 func (s *appRunnerService) RemoveVMCDROM(_ context.Context, request *apprunnerv1.RemoveVMCDROMRequest) (*apprunnerv1.RemoveVMCDROMResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vm, err := s.manager.RemoveCDROM(request.GetId(), request.GetCdromId())
 	if err != nil {
 		return nil, rpcError(err)
@@ -243,9 +192,6 @@ func (s *appRunnerService) RemoveVMCDROM(_ context.Context, request *apprunnerv1
 }
 
 func (s *appRunnerService) ConfigureVMCloudInit(ctx context.Context, request *apprunnerv1.ConfigureVMCloudInitRequest) (*apprunnerv1.ConfigureVMCloudInitResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vm, err := s.manager.ConfigureCloudInit(ctx, request.GetId(), vmCloudInit{
 		Enabled: request.GetEnabled(), UserData: request.GetUserData(),
 	})
@@ -256,9 +202,6 @@ func (s *appRunnerService) ConfigureVMCloudInit(ctx context.Context, request *ap
 }
 
 func (s *appRunnerService) ListCloudInitTemplates(context.Context, *apprunnerv1.ListCloudInitTemplatesRequest) (*apprunnerv1.ListCloudInitTemplatesResponse, error) {
-	if s.templates == nil {
-		return nil, twirp.InternalError("cloud-init templates are not configured")
-	}
 	response := &apprunnerv1.ListCloudInitTemplatesResponse{}
 	for _, template := range s.templates.List() {
 		response.Templates = append(response.Templates, cloudInitTemplateToProto(template))
@@ -267,9 +210,6 @@ func (s *appRunnerService) ListCloudInitTemplates(context.Context, *apprunnerv1.
 }
 
 func (s *appRunnerService) CreateCloudInitTemplate(_ context.Context, request *apprunnerv1.CreateCloudInitTemplateRequest) (*apprunnerv1.CreateCloudInitTemplateResponse, error) {
-	if s.templates == nil {
-		return nil, twirp.InternalError("cloud-init templates are not configured")
-	}
 	template, err := s.templates.Create(request.GetName(), request.GetUserData())
 	if err != nil {
 		return nil, rpcError(err)
@@ -278,9 +218,6 @@ func (s *appRunnerService) CreateCloudInitTemplate(_ context.Context, request *a
 }
 
 func (s *appRunnerService) UpdateCloudInitTemplate(_ context.Context, request *apprunnerv1.UpdateCloudInitTemplateRequest) (*apprunnerv1.UpdateCloudInitTemplateResponse, error) {
-	if s.templates == nil {
-		return nil, twirp.InternalError("cloud-init templates are not configured")
-	}
 	template, err := s.templates.Update(request.GetName(), request.GetNewName(), request.GetUserData())
 	if err != nil {
 		return nil, rpcError(err)
@@ -289,9 +226,6 @@ func (s *appRunnerService) UpdateCloudInitTemplate(_ context.Context, request *a
 }
 
 func (s *appRunnerService) DeleteCloudInitTemplate(_ context.Context, request *apprunnerv1.DeleteCloudInitTemplateRequest) (*apprunnerv1.DeleteCloudInitTemplateResponse, error) {
-	if s.templates == nil {
-		return nil, twirp.InternalError("cloud-init templates are not configured")
-	}
 	if err := s.templates.Delete(request.GetName()); err != nil {
 		return nil, rpcError(err)
 	}
@@ -299,9 +233,6 @@ func (s *appRunnerService) DeleteCloudInitTemplate(_ context.Context, request *a
 }
 
 func (s *appRunnerService) ConfigureVMIPMI(_ context.Context, request *apprunnerv1.ConfigureVMIPMIRequest) (*apprunnerv1.ConfigureVMIPMIResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	vm, err := s.manager.ConfigureIPMI(request.GetId(), vmIPMIConfig{
 		Enabled: request.GetEnabled(), BridgeName: request.GetBridgeName(), Address: request.GetAddress(),
 		Username: request.GetUsername(), Password: request.GetPassword(),
@@ -313,9 +244,6 @@ func (s *appRunnerService) ConfigureVMIPMI(_ context.Context, request *apprunner
 }
 
 func (s *appRunnerService) DeleteVM(_ context.Context, request *apprunnerv1.DeleteVMRequest) (*apprunnerv1.DeleteVMResponse, error) {
-	if err := s.requireManager(); err != nil {
-		return nil, err
-	}
 	if err := s.manager.Delete(request.GetId()); err != nil {
 		return nil, rpcError(err)
 	}
@@ -323,9 +251,6 @@ func (s *appRunnerService) DeleteVM(_ context.Context, request *apprunnerv1.Dele
 }
 
 func (s *appRunnerService) GetNetworkingStatus(context.Context, *apprunnerv1.GetNetworkingStatusRequest) (*apprunnerv1.GetNetworkingStatusResponse, error) {
-	if s.networking == nil {
-		return nil, twirp.InternalError("network manager is not configured")
-	}
 	status, err := s.networking.Status()
 	if err != nil {
 		return nil, rpcError(err)
@@ -334,9 +259,6 @@ func (s *appRunnerService) GetNetworkingStatus(context.Context, *apprunnerv1.Get
 }
 
 func (s *appRunnerService) ApplyNetworkChange(ctx context.Context, request *apprunnerv1.ApplyNetworkChangeRequest) (*apprunnerv1.ApplyNetworkChangeResponse, error) {
-	if s.networking == nil {
-		return nil, twirp.InternalError("network manager is not configured")
-	}
 	changeType, err := networkChangeTypeFromProto(request.GetType())
 	if err != nil {
 		return nil, err
@@ -356,9 +278,6 @@ func (s *appRunnerService) ApplyNetworkChange(ctx context.Context, request *appr
 }
 
 func (s *appRunnerService) ConfirmNetworkChange(ctx context.Context, request *apprunnerv1.ConfirmNetworkChangeRequest) (*apprunnerv1.ConfirmNetworkChangeResponse, error) {
-	if s.networking == nil {
-		return nil, twirp.InternalError("network manager is not configured")
-	}
 	if err := s.networking.Confirm(request.GetId()); err != nil {
 		return nil, twirp.NotFoundError(err.Error())
 	}
@@ -370,9 +289,6 @@ func (s *appRunnerService) ConfirmNetworkChange(ctx context.Context, request *ap
 }
 
 func (s *appRunnerService) RevertNetworkChange(ctx context.Context, request *apprunnerv1.RevertNetworkChangeRequest) (*apprunnerv1.RevertNetworkChangeResponse, error) {
-	if s.networking == nil {
-		return nil, twirp.InternalError("network manager is not configured")
-	}
 	if err := s.networking.Revert(request.GetId()); err != nil {
 		return nil, twirp.NewError(twirp.FailedPrecondition, err.Error())
 	}
@@ -384,9 +300,6 @@ func (s *appRunnerService) RevertNetworkChange(ctx context.Context, request *app
 }
 
 func (s *appRunnerService) ConfigureBridgeDHCP(ctx context.Context, request *apprunnerv1.ConfigureBridgeDHCPRequest) (*apprunnerv1.ConfigureBridgeDHCPResponse, error) {
-	if s.networking == nil {
-		return nil, twirp.InternalError("network manager is not configured")
-	}
 	if err := s.networking.ConfigureBridgeSettings(
 		request.GetBridgeName(), request.GetDescription(), request.GetEnabled(), request.GetCidr(), request.GetNatEnabled(),
 		bridgeDNSConfig{
@@ -434,9 +347,6 @@ func (s *appRunnerService) SetBridgeDHCPStaticLease(ctx context.Context, request
 }
 
 func (s *appRunnerService) updateBridgeDHCPLeases(bridge string, update func() error) (networkingStatus, error) {
-	if s.networking == nil {
-		return networkingStatus{}, twirp.InternalError("network manager is not configured")
-	}
 	if err := update(); err != nil {
 		return networkingStatus{}, twirp.NewError(twirp.FailedPrecondition, err.Error())
 	}
@@ -445,13 +355,6 @@ func (s *appRunnerService) updateBridgeDHCPLeases(bridge string, update func() e
 		return networkingStatus{}, rpcError(err)
 	}
 	return status, nil
-}
-
-func (s *appRunnerService) requireManager() error {
-	if s.manager == nil {
-		return twirp.InternalError("virtual machine manager is not configured")
-	}
-	return nil
 }
 
 func virtualMachineToProto(vm virtualMachine) *apprunnerv1.VirtualMachine {

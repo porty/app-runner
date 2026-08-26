@@ -14,8 +14,7 @@ func TestCloudInitTemplateRPCs(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager.now = func() time.Time { return time.Date(2026, time.August, 24, 5, 0, 0, 0, time.UTC) }
-	service := newAppRunnerService(nil, nil)
-	service.templates = manager
+	service := newAppRunnerService(appRuntime{templates: manager})
 
 	created, err := service.CreateCloudInitTemplate(context.Background(), &apprunnerv1.CreateCloudInitTemplateRequest{
 		Name: "Ubuntu", UserData: "#cloud-config\n",

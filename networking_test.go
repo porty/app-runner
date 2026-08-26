@@ -56,7 +56,7 @@ func (p *fakeNetworkProvider) SetBridgeDescription(name, description string) err
 func TestNetworkManagerConfirmsChangeBeforeTimeout(t *testing.T) {
 	vms, _, settings := newTestVMManager(t)
 	provider := &fakeNetworkProvider{}
-	manager, err := newNetworkManager(provider, vms, settings.DiskDir)
+	manager, err := newNetworkManager(networkManagerOptions{Provider: provider, VMs: vms, StateDirectory: settings.DiskDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestNetworkManagerConfirmsChangeBeforeTimeout(t *testing.T) {
 func TestNetworkManagerRevertsAfterTimeout(t *testing.T) {
 	vms, _, settings := newTestVMManager(t)
 	provider := &fakeNetworkProvider{restored: make(chan struct{}, 1)}
-	manager, err := newNetworkManager(provider, vms, settings.DiskDir)
+	manager, err := newNetworkManager(networkManagerOptions{Provider: provider, VMs: vms, StateDirectory: settings.DiskDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestNetworkManagerRevertsAfterTimeout(t *testing.T) {
 func TestNetworkManagerRevertsPendingChangeOnRestart(t *testing.T) {
 	vms, _, settings := newTestVMManager(t)
 	provider := &fakeNetworkProvider{}
-	manager, err := newNetworkManager(provider, vms, settings.DiskDir)
+	manager, err := newNetworkManager(networkManagerOptions{Provider: provider, VMs: vms, StateDirectory: settings.DiskDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestNetworkManagerRevertsPendingChangeOnRestart(t *testing.T) {
 	manager.timer.Stop()
 
 	restartedProvider := &fakeNetworkProvider{}
-	if _, err := newNetworkManager(restartedProvider, vms, settings.DiskDir); err != nil {
+	if _, err := newNetworkManager(networkManagerOptions{Provider: restartedProvider, VMs: vms, StateDirectory: settings.DiskDir}); err != nil {
 		t.Fatal(err)
 	}
 	if restartedProvider.restoreCount != 1 {
@@ -147,7 +147,7 @@ func TestNetworkingStatusMapsManagedVMsToTheirBridges(t *testing.T) {
 	provider := &fakeNetworkProvider{status: networkingStatus{
 		Bridges: []networkBridgeInfo{{Name: "br-lab", IsUp: true}},
 	}}
-	manager, err := newNetworkManager(provider, vms, settings.DiskDir)
+	manager, err := newNetworkManager(networkManagerOptions{Provider: provider, VMs: vms, StateDirectory: settings.DiskDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestNetworkManagerRestoresMissingConfiguredBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := &fakeNetworkProvider{}
-	manager, err := newNetworkManager(provider, vms, settings.DiskDir)
+	manager, err := newNetworkManager(networkManagerOptions{Provider: provider, VMs: vms, StateDirectory: settings.DiskDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestNetworkingStatusIncludesBridgeDHCPConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := &fakeNetworkProvider{status: networkingStatus{Bridges: []networkBridgeInfo{{Name: "br-lab", IsUp: true}}}}
-	manager, err := newNetworkManager(provider, vms, settings.DiskDir, dhcp)
+	manager, err := newNetworkManager(networkManagerOptions{Provider: provider, VMs: vms, DHCP: dhcp, StateDirectory: settings.DiskDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestNetworkingStatusLabelsDHCPLeasesWithVMNames(t *testing.T) {
 	dhcp.state.Leases["br-lab"] = map[string]dhcpLease{
 		"id:guest": {ClientKey: "id:guest", HardwareAddress: "52:54:00:44:81:f7", Address: "192.168.100.50", ExpiresAt: time.Now().Add(time.Hour)},
 	}
-	manager, err := newNetworkManager(&fakeNetworkProvider{status: networkingStatus{Bridges: []networkBridgeInfo{{Name: "br-lab"}}}}, vms, settings.DiskDir, dhcp)
+	manager, err := newNetworkManager(networkManagerOptions{Provider: &fakeNetworkProvider{status: networkingStatus{Bridges: []networkBridgeInfo{{Name: "br-lab"}}}}, VMs: vms, DHCP: dhcp, StateDirectory: settings.DiskDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestNetworkingRejectsAutoDNSWhenLegacyVMNameIsInvalid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := newNetworkManager(&fakeNetworkProvider{}, vms, settings.DiskDir, dhcp)
+	manager, err := newNetworkManager(networkManagerOptions{Provider: &fakeNetworkProvider{}, VMs: vms, DHCP: dhcp, StateDirectory: settings.DiskDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestNetworkManagerUpdatesBridgeDescriptionWithoutChangingServices(t *testin
 		t.Fatal(err)
 	}
 	provider := &fakeNetworkProvider{status: networkingStatus{Bridges: []networkBridgeInfo{{Name: "br0", Description: "Old description"}}}}
-	manager, err := newNetworkManager(provider, vms, settings.DiskDir, dhcp)
+	manager, err := newNetworkManager(networkManagerOptions{Provider: provider, VMs: vms, DHCP: dhcp, StateDirectory: settings.DiskDir})
 	if err != nil {
 		t.Fatal(err)
 	}

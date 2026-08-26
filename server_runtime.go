@@ -73,7 +73,7 @@ func RunServer(args []string, frontend fs.FS) error {
 	if err := ipmi.Reconcile(vms); err != nil {
 		slog.Warn("restore virtual BMC services", "error", err)
 	}
-	networking, err := newNetworkManager(networkProvider, manager, settings.DiskDir, dhcp)
+	networking, err := newNetworkManager(networkManagerOptions{Provider: networkProvider, VMs: manager, DHCP: dhcp, StateDirectory: settings.DiskDir})
 	if err != nil {
 		return err
 	}

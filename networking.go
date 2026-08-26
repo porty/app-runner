@@ -163,17 +163,23 @@ type networkManager struct {
 	dhcp               *dhcpManager
 }
 
-func newNetworkManager(provider networkProvider, vms *vmManager, diskDirectory string, dhcp ...*dhcpManager) (*networkManager, error) {
+// networkManagerOptions wires the network manager to its collaborators.
+type networkManagerOptions struct {
+	Provider       networkProvider
+	VMs            *vmManager
+	DHCP           *dhcpManager
+	StateDirectory string
+}
+
+func newNetworkManager(options networkManagerOptions) (*networkManager, error) {
 	manager := &networkManager{
-		provider:           provider,
-		vms:                vms,
-		statePath:          filepath.Join(diskDirectory, "pending-network-change.json"),
+		provider:           options.Provider,
+		vms:                options.VMs,
+		dhcp:               options.DHCP,
+		statePath:          filepath.Join(options.StateDirectory, "pending-network-change.json"),
 		now:                time.Now,
 		newID:              randomID,
 		confirmationWindow: networkConfirmationWindow,
-	}
-	if len(dhcp) != 0 {
-		manager.dhcp = dhcp[0]
 	}
 	if err := manager.recoverPendingChange(); err != nil {
 		return nil, err

@@ -19,16 +19,9 @@ type appRuntime struct {
 	capabilities func() hostCapabilities
 }
 
-func newHTTPHandler(frontend fs.FS, runtimes ...appRuntime) http.Handler {
-	var runtime appRuntime
-	if len(runtimes) != 0 {
-		runtime = runtimes[0]
-	}
+func newHTTPHandler(frontend fs.FS, runtime appRuntime) http.Handler {
 	mux := http.NewServeMux()
-	service := newAppRunnerService(runtime.manager, runtime.capabilities, runtime.networking)
-	service.storage = runtime.storage
-	service.templates = runtime.templates
-	rpcServer := apprunnerv1.NewAppRunnerServiceServer(service)
+	rpcServer := apprunnerv1.NewAppRunnerServiceServer(newAppRunnerService(runtime))
 	mux.Handle(rpcServer.PathPrefix(), rpcServer)
 	if runtime.storage != nil {
 		// Large browser uploads stay multipart HTTP; storage control operations use Twirp.
