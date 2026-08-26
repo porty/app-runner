@@ -182,7 +182,15 @@ type vmManager struct {
 	newID             func() (string, error)
 	buildCloudInitISO cloudInitISOBuilder
 	vms               []virtualMachine
+	// exits holds, per running VM, a channel closed once its process exit
+	// has been observed and its runtime files cleaned up.
+	exits            map[string]chan struct{}
+	forceStopTimeout time.Duration
 }
+
+// defaultForceStopTimeout bounds how long a forced stop waits for the killed
+// process to be reaped before reporting the VM stopped anyway.
+const defaultForceStopTimeout = 10 * time.Second
 
 func newVMManager(settings config, store virtualMachineStore, hypervisor hypervisor, capabilities func() hostCapabilities) (*vmManager, error) {
 	vms, err := store.Load()
@@ -190,12 +198,14 @@ func newVMManager(settings config, store virtualMachineStore, hypervisor hypervi
 		return nil, err
 	}
 	manager := &vmManager{
-		settings:     settings,
-		store:        store,
-		hypervisor:   hypervisor,
-		capabilities: capabilities,
-		now:          time.Now,
-		newID:        randomID,
+		settings:         settings,
+		store:            store,
+		hypervisor:       hypervisor,
+		capabilities:     capabilities,
+		now:              time.Now,
+		newID:            randomID,
+		exits:            make(map[string]chan struct{}),
+		forceStopTimeout: defaultForceStopTimeout,
 		buildCloudInitISO: func(ctx context.Context, destination string, options cloudInitISOOptions) error {
 			return createCloudInitISO(ctx, settings.XorrisoBinary, destination, options)
 		},
@@ -553,8 +563,11 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 		}
 	}
 
+	exited := make(chan struct{})
+	m.exits[id] = exited
 	pid, err := m.hypervisor.Start(vm, func(exitedPID int, exitErr error) { m.processExited(id, exitedPID, exitErr) })
 	if err != nil {
+		delete(m.exits, id)
 		if m.networkLifecycle != nil {
 			m.networkLifecycle.Release(vm)
 		}
@@ -593,30 +606,66 @@ func (m *vmManager) Stop(id string, force bool) (virtualMachine, error) {
 		return virtualMachine{}, errVMNotRunning
 	}
 
-	var err error
 	if force {
-		err = m.hypervisor.ForceStop(m.vms[index])
-		if err == nil {
-			stoppedVM := m.vms[index]
-			m.vms[index].Status = vmStatusStopped
-			m.vms[index].PID = 0
-			if m.networkLifecycle != nil {
-				m.networkLifecycle.Release(stoppedVM)
-			}
-		}
-	} else {
-		err = m.hypervisor.GracefulStop(m.vms[index])
-		if err == nil {
-			m.vms[index].Status = vmStatusStopping
-		}
+		return m.forceStopLocked(index)
 	}
-	if err != nil {
+	if err := m.hypervisor.GracefulStop(m.vms[index]); err != nil {
 		return virtualMachine{}, err
 	}
+	m.vms[index].Status = vmStatusStopping
 	if err := m.store.Save(m.vms); err != nil {
 		return virtualMachine{}, err
 	}
 	return m.vms[index], nil
+}
+
+// forceStopLocked kills the VM process and waits, with the manager unlocked,
+// until its exit has been processed so that runtime sockets are gone and a
+// following Start cannot race the dying process. The lock is held on entry
+// and on return.
+func (m *vmManager) forceStopLocked(index int) (virtualMachine, error) {
+	id := m.vms[index].ID
+	if err := m.hypervisor.ForceStop(m.vms[index]); err != nil {
+		return virtualMachine{}, err
+	}
+	m.vms[index].Status = vmStatusStopping
+	if err := m.store.Save(m.vms); err != nil {
+		return virtualMachine{}, err
+	}
+	exited := m.exits[id]
+	m.mu.Unlock()
+	if exited != nil {
+		select {
+		case <-exited:
+		case <-time.After(m.forceStopTimeout):
+		}
+	}
+	m.mu.Lock()
+	index = m.indexByID(id)
+	if index == -1 {
+		return virtualMachine{}, errVMNotFound
+	}
+	if m.vms[index].Status != vmStatusStopped {
+		stoppedVM := m.vms[index]
+		m.vms[index].Status = vmStatusStopped
+		m.vms[index].PID = 0
+		m.signalExitLocked(id)
+		if m.networkLifecycle != nil {
+			m.networkLifecycle.Release(stoppedVM)
+		}
+		if err := m.store.Save(m.vms); err != nil {
+			return virtualMachine{}, err
+		}
+	}
+	return m.vms[index], nil
+}
+
+// signalExitLocked wakes anything waiting for the VM's process to exit.
+func (m *vmManager) signalExitLocked(id string) {
+	if exited := m.exits[id]; exited != nil {
+		close(exited)
+		delete(m.exits, id)
+	}
 }
 
 func (m *vmManager) Delete(id string) error {
@@ -1140,6 +1189,7 @@ func (m *vmManager) processExited(id string, expectedPID int, exitErr error) {
 	exitedVM := m.vms[index]
 	m.vms[index].PID = 0
 	m.vms[index].Status = vmStatusStopped
+	m.signalExitLocked(id)
 	if exitErr != nil && !wasStopping {
 		m.vms[index].LastError = exitErr.Error()
 	}
@@ -1160,6 +1210,7 @@ func (m *vmManager) reconcileLocked() error {
 			stoppedVM := *vm
 			vm.PID = 0
 			vm.Status = vmStatusStopped
+			m.signalExitLocked(vm.ID)
 			if m.networkLifecycle != nil {
 				m.networkLifecycle.Release(stoppedVM)
 			}

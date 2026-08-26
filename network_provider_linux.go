@@ -145,11 +145,7 @@ func (p *linuxNetworkProvider) ValidateBridgeDHCP(name string, network dhcpRange
 		if parseErr != nil || !existing.Addr().Is4() {
 			continue
 		}
-		existing = existing.Masked()
-		if !network.Prefix.Contains(existing.Addr()) && !existing.Contains(network.Prefix.Addr()) {
-			continue
-		}
-		if address.LinkIndex == bridge.Attrs().Index && address.IP.String() == network.Server.String() && existing.Bits() == network.Prefix.Bits() {
+		if !dhcpAddressConflicts(network, address.LinkIndex == bridge.Attrs().Index, existing) {
 			continue
 		}
 		interfaceName := strconv.Itoa(address.LinkIndex)
@@ -159,6 +155,26 @@ func (p *linuxNetworkProvider) ValidateBridgeDHCP(name string, network dhcpRange
 		return fmt.Errorf("DHCP range %s conflicts with existing address %s on interface %s", network.Prefix, address.IPNet, interfaceName)
 	}
 	return nil
+}
+
+// dhcpAddressConflicts reports whether an existing IPv4 address (with its
+// prefix length) prevents serving the DHCP range. Addresses on other
+// interfaces or with a different prefix length conflict whenever the subnets
+// overlap. On the bridge itself the server address is expected, and other
+// host-side service addresses in the subnet, such as virtual BMC endpoints,
+// are fine as long as they sit outside the lease pool.
+func dhcpAddressConflicts(network dhcpRange, onBridge bool, existing netip.Prefix) bool {
+	subnet := existing.Masked()
+	if !network.Prefix.Contains(subnet.Addr()) && !subnet.Contains(network.Prefix.Addr()) {
+		return false
+	}
+	if !onBridge || existing.Bits() != network.Prefix.Bits() {
+		return true
+	}
+	if existing.Addr() == network.Server {
+		return false
+	}
+	return addressInDHCPPool(network, existing.Addr()) || !network.Prefix.Contains(existing.Addr())
 }
 
 func (p *linuxNetworkProvider) EnsureBridgeDHCPAddress(name string, network dhcpRange) error {
