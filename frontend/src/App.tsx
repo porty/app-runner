@@ -5,7 +5,6 @@ import {
   Button,
   Card,
   CardContent,
-  Chip,
   CircularProgress,
   Collapse,
   Divider,
@@ -43,7 +42,6 @@ import {
 } from '@mui/icons-material'
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 
-import { echo, ping, type PingResponse } from './api'
 import CloudInitPage from './CloudInitPage'
 import BridgeSettingsPage from './BridgeSettingsPage'
 import CreateVirtualMachinePage from './CreateVirtualMachinePage'
@@ -69,7 +67,7 @@ interface AppProps {
 interface NavigationGroup {
   label: string
   icon: ReactNode
-  children: Array<{ label: string; path: string; icon: ReactNode }>
+  children: Array<{ label: string; path: string; icon: ReactNode; disabled?: boolean }>
 }
 
 const navigation: NavigationGroup[] = [
@@ -78,7 +76,7 @@ const navigation: NavigationGroup[] = [
     icon: <DashboardRounded />,
     children: [
       { label: 'Overview', path: '/', icon: <AppsRounded /> },
-      { label: 'Activity', path: '/activity', icon: <PlayArrowRounded /> },
+      { label: 'Activity', path: '/activity', icon: <PlayArrowRounded />, disabled: true },
     ],
   },
   {
@@ -86,7 +84,7 @@ const navigation: NavigationGroup[] = [
     icon: <MemoryRounded />,
     children: [
       { label: 'Virtual machines', path: '/compute/virtual-machines', icon: <CloudQueueRounded /> },
-      { label: 'Containers', path: '/compute/containers', icon: <Inventory2Rounded /> },
+      { label: 'Containers', path: '/compute/containers', icon: <Inventory2Rounded />, disabled: true },
     ],
   },
   {
@@ -96,7 +94,7 @@ const navigation: NavigationGroup[] = [
       { label: 'Storage', path: '/configuration/storage', icon: <StorageRounded /> },
       { label: 'Cloud Init', path: '/configuration/cloud-init', icon: <CloudSyncRounded /> },
       { label: 'Networking', path: '/configuration/networking', icon: <LanRounded /> },
-      { label: 'Preferences', path: '/configuration/preferences', icon: <TuneRounded /> },
+      { label: 'Preferences', path: '/configuration/preferences', icon: <TuneRounded />, disabled: true },
     ],
   },
 ]
@@ -180,11 +178,12 @@ function Sidebar({ expanded, onToggle }: { expanded: boolean; onToggle: () => vo
                       key={item.path}
                       component={NavLink}
                       to={item.path}
+                      disabled={item.disabled}
                       selected={location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)}
                       sx={{ minHeight: 40, pl: 3.25, borderRadius: 2, my: 0.25 }}
                     >
                       <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
-                      <ListItemText primary={item.label} slotProps={{ primary: { variant: 'body2' } }} />
+                      <ListItemText primary={item.label} secondary={item.disabled ? 'Coming later' : undefined} slotProps={{ primary: { variant: 'body2' }, secondary: { variant: 'caption' } }} />
                     </ListItemButton>
                   ))}
                 </List>
@@ -208,112 +207,28 @@ function Sidebar({ expanded, onToggle }: { expanded: boolean; onToggle: () => vo
 }
 
 function Overview() {
-  const [pingResult, setPingResult] = useState<PingResponse | null>(null)
-  const [echoMessage, setEchoMessage] = useState('Hello from the browser')
-  const [echoResult, setEchoResult] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  const testConnection = async () => {
-    setLoading(true)
-    setError('')
-    try {
-      setPingResult(await ping())
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Connection failed')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const sendEcho = async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const result = await echo(echoMessage)
-      setEchoResult(result.message)
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Echo failed')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const destinations = [
+    { label: 'Virtual machines', description: 'Create, start, and manage QEMU/KVM workloads.', path: '/compute/virtual-machines', icon: <CloudQueueRounded /> },
+    { label: 'Networking', description: 'Inspect bridges, diagnostics, and managed guest network services.', path: '/configuration/networking', icon: <LanRounded /> },
+    { label: 'Storage', description: 'Browse ISO images, cloud images, and virtual machine disks.', path: '/configuration/storage', icon: <StorageRounded /> },
+    { label: 'Cloud Init', description: 'Maintain reusable first-boot user-data templates.', path: '/configuration/cloud-init', icon: <CloudSyncRounded /> },
+  ]
 
   return (
-    <Page title="Overview" description="A first look at the App Runner control plane.">
-      <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2.5}>
-        <Card variant="outlined" sx={{ flex: 1 }}>
-          <CardContent sx={{ p: 3 }}>
-            <Stack
-              direction="row"
-              spacing={2}
-              sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
-            >
-              <Box>
-                <Typography variant="overline" color="text.secondary">
-                  Backend connection
-                </Typography>
-                <Typography variant="h6" sx={{ mt: 0.5 }}>
-                  Twirp RPC
-                </Typography>
-              </Box>
-              <Chip
-                label={pingResult ? 'Connected' : 'Not tested'}
-                color={pingResult ? 'success' : 'default'}
-                size="small"
-              />
-            </Stack>
-            <Typography color="text.secondary" sx={{ mt: 1, mb: 3 }}>
-              Call the embedded Go service through the same API used by future management screens.
-            </Typography>
-            <Button variant="contained" onClick={testConnection} disabled={loading}>
-              {loading ? 'Calling backend…' : 'Test connection'}
-            </Button>
-            {pingResult && (
-              <Box sx={{ mt: 2.5, p: 2, bgcolor: 'action.hover', borderRadius: 2 }}>
-                <Typography variant="body2" sx={{ fontWeight: 650 }}>
-                  {pingResult.message}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Server time: {pingResult.server_time}
-                </Typography>
-              </Box>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card variant="outlined" sx={{ flex: 1 }}>
-          <CardContent sx={{ p: 3 }}>
-            <Typography variant="overline" color="text.secondary">
-              Round-trip test
-            </Typography>
-            <Typography variant="h6" sx={{ mt: 0.5 }}>
-              Echo a message
-            </Typography>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mt: 3 }}>
-              <TextField
-                fullWidth
-                size="small"
-                label="Message"
-                value={echoMessage}
-                onChange={(event) => setEchoMessage(event.target.value)}
-              />
-              <Button variant="outlined" onClick={sendEcho} disabled={loading || !echoMessage.trim()}>
-                Send
-              </Button>
-            </Stack>
-            {echoResult && (
-              <Typography sx={{ mt: 2 }}>
-                Response: <strong>{echoResult}</strong>
-              </Typography>
-            )}
-            {error && (
-              <Typography color="error" variant="body2" sx={{ mt: 2 }}>
-                {error}
-              </Typography>
-            )}
-          </CardContent>
-        </Card>
+    <Page title="Overview" description="A local control plane for virtual machines on this host.">
+      <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2.5} sx={{ flexWrap: 'wrap' }}>
+        {destinations.map((destination) => (
+          <Card key={destination.path} variant="outlined" sx={{ flex: '1 1 260px' }}>
+            <CardContent sx={{ p: 3 }}>
+              <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 1 }}>
+                {destination.icon}
+                <Typography variant="h6">{destination.label}</Typography>
+              </Stack>
+              <Typography color="text.secondary" sx={{ mb: 2.5 }}>{destination.description}</Typography>
+              <Button component={NavLink} to={destination.path} variant="outlined">Open</Button>
+            </CardContent>
+          </Card>
+        ))}
       </Stack>
     </Page>
   )

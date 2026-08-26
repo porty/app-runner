@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	apprunnerv1 "github.com/roflware/app-runner/internal/gen/apprunner/v1"
@@ -17,30 +16,14 @@ type appRunnerService struct {
 	storage      *storageService
 	templates    *cloudInitTemplateManager
 	capabilities func() hostCapabilities
-	now          func() time.Time
 }
 
 func newAppRunnerService(manager *vmManager, capabilities func() hostCapabilities, networking ...*networkManager) *appRunnerService {
-	service := &appRunnerService{manager: manager, capabilities: capabilities, now: time.Now}
+	service := &appRunnerService{manager: manager, capabilities: capabilities}
 	if len(networking) != 0 {
 		service.networking = networking[0]
 	}
 	return service
-}
-
-func (s *appRunnerService) Ping(context.Context, *apprunnerv1.PingRequest) (*apprunnerv1.PingResponse, error) {
-	return &apprunnerv1.PingResponse{
-		Message:    "App Runner backend is ready",
-		ServerTime: s.now().UTC().Format(time.RFC3339),
-	}, nil
-}
-
-func (s *appRunnerService) Echo(_ context.Context, request *apprunnerv1.EchoRequest) (*apprunnerv1.EchoResponse, error) {
-	message := strings.TrimSpace(request.GetMessage())
-	if message == "" {
-		return nil, twirp.InvalidArgumentError("message", "a message is required")
-	}
-	return &apprunnerv1.EchoResponse{Message: message}, nil
 }
 
 func (s *appRunnerService) GetHostStatus(context.Context, *apprunnerv1.GetHostStatusRequest) (*apprunnerv1.GetHostStatusResponse, error) {
