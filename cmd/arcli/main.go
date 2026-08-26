@@ -11,10 +11,13 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
 	apprunnerv1 "github.com/roflware/app-runner/internal/gen/apprunner/v1"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,7 +36,7 @@ func run(args []string, output io.Writer) error {
 	server := global.String("server", defaultServer, "App Runner server URL")
 	timeout := global.Duration("timeout", 30*time.Second, "request timeout")
 	format := global.String("o", "table", "output format: table, json, or yaml")
-	if err := global.Parse(args); errors.Is(err, flag.ErrHelp) {
+	if err := global.Parse(hoistGlobalFlags(args)); errors.Is(err, flag.ErrHelp) {
 		usage(output)
 		return nil
 	} else if err != nil {
@@ -47,10 +50,9 @@ func run(args []string, output io.Writer) error {
 		usage(output)
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
-	defer cancel()
+	ctx := context.Background()
 	out := &printer{Writer: output, format: *format}
-	client := apprunnerv1.NewAppRunnerServiceJSONClient(strings.TrimRight(*server, "/"), http.DefaultClient)
+	client := apprunnerv1.NewAppRunnerServiceJSONClient(strings.TrimRight(*server, "/"), &http.Client{Timeout: *timeout})
 	switch args[0] {
 	case "host":
 		return host(ctx, client, args[1:], out)
@@ -82,9 +84,41 @@ Commands:
   net <operation>                Inspect and manage host networking
   cloud-init <operation>         Manage reusable cloud-init templates
 
-Run "arcli <command> help" for a command's operations. Successful output is a
-table by default; pass -o json or -o yaml for machine-readable output.
+Run "arcli <command> help" for a command's operations. Global flags may appear
+before or after the command. Successful output is a table by default; pass
+-o json or -o yaml for machine-readable output.
 `)
+}
+
+var globalFlagNames = map[string]bool{"server": true, "timeout": true, "o": true}
+
+// hoistGlobalFlags moves the global flags in front of the command so they may
+// be written anywhere on the command line. Sub-commands do not reuse their
+// names.
+func hoistGlobalFlags(args []string) []string {
+	var globals, rest []string
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--" {
+			rest = append(rest, args[index:]...)
+			break
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			rest = append(rest, arg)
+			continue
+		}
+		name, _, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if !globalFlagNames[name] {
+			rest = append(rest, arg)
+			continue
+		}
+		globals = append(globals, arg)
+		if !hasValue && index+1 < len(args) {
+			index++
+			globals = append(globals, args[index])
+		}
+	}
+	return append(globals, rest...)
 }
 
 type printer struct {
@@ -93,23 +127,54 @@ type printer struct {
 }
 
 func write(output *printer, value any) error {
-	switch output.format {
-	case "json":
-		return json.NewEncoder(output).Encode(value)
-	case "yaml":
-		return writeYAML(output, value)
-	default:
-		return writeTable(output, value)
-	}
-}
-
-// writeYAML round-trips value through its JSON encoding so YAML output uses
-// the same field names as the JSON output.
-func writeYAML(output io.Writer, value any) error {
-	encoded, err := json.Marshal(value)
+	encoded, err := encodeJSON(value)
 	if err != nil {
 		return err
 	}
+	switch output.format {
+	case "json":
+		_, err := output.Write(append(encoded, '\n'))
+		return err
+	case "yaml":
+		return writeYAML(output, encoded)
+	default:
+		return writeTable(output, encoded)
+	}
+}
+
+// encodeJSON renders API messages the way the server does, with proto field
+// names and enum names, so output can be compared against the raw API.
+// Slices of messages are encoded element by element; anything else uses
+// encoding/json.
+func encodeJSON(value any) ([]byte, error) {
+	if message, ok := value.(proto.Message); ok {
+		data, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(message)
+		if err != nil {
+			return nil, err
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, data); err != nil {
+			return nil, err
+		}
+		return compact.Bytes(), nil
+	}
+	if reflected := reflect.ValueOf(value); reflected.Kind() == reflect.Slice {
+		items := make([]json.RawMessage, reflected.Len())
+		for index := range items {
+			item, err := encodeJSON(reflected.Index(index).Interface())
+			if err != nil {
+				return nil, err
+			}
+			items[index] = item
+		}
+		return json.Marshal(items)
+	}
+	return json.Marshal(value)
+}
+
+// writeYAML converts the JSON encoding so YAML output uses the same field
+// names as the JSON output.
+func writeYAML(output io.Writer, encoded []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.UseNumber()
 	var plain any
@@ -151,11 +216,7 @@ func yamlNumbers(value any) any {
 	}
 }
 
-func writeTable(output io.Writer, value any) error {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
+func writeTable(output io.Writer, encoded []byte) error {
 	switch encoded = bytes.TrimSpace(encoded); {
 	case bytes.HasPrefix(encoded, []byte("[")):
 		var items []json.RawMessage
@@ -291,6 +352,25 @@ func flags(name string) *flag.FlagSet {
 	return f
 }
 
+// parseFlags parses a sub-command's flags wherever they appear, so
+// "vm stop ID --force" and "vm stop --force ID" both work; f.Args() then
+// holds only the positional arguments.
+func parseFlags(f *flag.FlagSet, args []string) error {
+	var positional []string
+	for {
+		if err := f.Parse(args); err != nil {
+			return err
+		}
+		args = f.Args()
+		if len(args) == 0 {
+			break
+		}
+		positional = append(positional, args[0])
+		args = args[1:]
+	}
+	return f.Parse(append([]string{"--"}, positional...))
+}
+
 func host(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) != 1 || args[0] != "status" {
 		return errors.New("usage: arcli host status")
@@ -342,7 +422,7 @@ func storage(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 		directory := f.String("directory", "", "destination directory")
 		url := f.String("url", "", "source URL")
 		filename := f.String("filename", "", "destination filename")
-		if err := f.Parse(args[1:]); err != nil {
+		if err := parseFlags(f, args[1:]); err != nil {
 			return err
 		}
 		if *root == "" || *url == "" {
@@ -360,7 +440,7 @@ func storage(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 
 func vm(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) == 0 || args[0] == "help" {
-		_, err := fmt.Fprintln(output, "usage: arcli vm list|get|create|clone|start|stop|reboot|delete|update|network|disk|cdrom|cloud-init|ipmi")
+		_, err := fmt.Fprintln(output, "usage: arcli vm list|get|address|create|clone|start|stop|reboot|delete|update|network|disk|cdrom|cloud-init|ipmi\nVM arguments accept a virtual machine ID or name.")
 		return err
 	}
 	switch args[0] {
@@ -374,18 +454,28 @@ func vm(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, outp
 		if e := require(args[1:], 1, "usage: arcli vm get ID"); e != nil {
 			return e
 		}
-		r, e := c.GetVM(ctx, &apprunnerv1.GetVMRequest{Id: args[1]})
+		id, e := vmID(ctx, c, args[1])
+		if e != nil {
+			return e
+		}
+		r, e := c.GetVM(ctx, &apprunnerv1.GetVMRequest{Id: id})
 		if e != nil {
 			return e
 		}
 		return write(output, r.GetVirtualMachine())
+	case "address":
+		return vmAddress(ctx, c, args[1:], output)
 	case "create":
 		return createVM(ctx, c, args[1:], output)
 	case "clone":
 		if e := require(args[1:], 2, "usage: arcli vm clone ID NAME"); e != nil {
 			return e
 		}
-		r, e := c.CloneVM(ctx, &apprunnerv1.CloneVMRequest{Id: args[1], Name: args[2]})
+		id, e := vmID(ctx, c, args[1])
+		if e != nil {
+			return e
+		}
+		r, e := c.CloneVM(ctx, &apprunnerv1.CloneVMRequest{Id: id, Name: args[2]})
 		if e != nil {
 			return e
 		}
@@ -395,13 +485,17 @@ func vm(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, outp
 	case "stop":
 		f := flags("vm stop")
 		force := f.Bool("force", false, "force stop")
-		if e := f.Parse(args[1:]); e != nil {
+		if e := parseFlags(f, args[1:]); e != nil {
 			return e
 		}
 		if e := require(f.Args(), 1, "usage: arcli vm stop [--force] ID"); e != nil {
 			return e
 		}
-		r, e := c.StopVM(ctx, &apprunnerv1.StopVMRequest{Id: f.Args()[0], Force: *force})
+		id, e := vmID(ctx, c, f.Args()[0])
+		if e != nil {
+			return e
+		}
+		r, e := c.StopVM(ctx, &apprunnerv1.StopVMRequest{Id: id, Force: *force})
 		if e != nil {
 			return e
 		}
@@ -427,21 +521,25 @@ func vmAction(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 	if e := require(args[1:], 1, "usage: arcli vm "+args[0]+" ID"); e != nil {
 		return e
 	}
+	id, e := vmID(ctx, c, args[1])
+	if e != nil {
+		return e
+	}
 	switch args[0] {
 	case "start":
-		r, e := c.StartVM(ctx, &apprunnerv1.StartVMRequest{Id: args[1]})
+		r, e := c.StartVM(ctx, &apprunnerv1.StartVMRequest{Id: id})
 		if e != nil {
 			return e
 		}
 		return write(output, r.GetVirtualMachine())
 	case "reboot":
-		r, e := c.RebootVM(ctx, &apprunnerv1.RebootVMRequest{Id: args[1]})
+		r, e := c.RebootVM(ctx, &apprunnerv1.RebootVMRequest{Id: id})
 		if e != nil {
 			return e
 		}
 		return write(output, r.GetVirtualMachine())
 	default:
-		r, e := c.DeleteVM(ctx, &apprunnerv1.DeleteVMRequest{Id: args[1]})
+		r, e := c.DeleteVM(ctx, &apprunnerv1.DeleteVMRequest{Id: id})
 		if e != nil {
 			return e
 		}
@@ -460,11 +558,16 @@ func createVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 	bridge := f.String("bridge", "", "bridge name")
 	image := f.String("image", "", "source cloud image")
 	cloud := f.String("cloud-init-file", "", "cloud-init user-data file")
-	if e := f.Parse(args); e != nil {
+	template := f.String("cloud-init-template", "", "stored cloud-init template name")
+	start := f.Bool("start", false, "start the VM after creating it")
+	if e := parseFlags(f, args); e != nil {
 		return e
 	}
 	if *name == "" {
 		return errors.New("--name is required")
+	}
+	if *cloud != "" && *template != "" {
+		return errors.New("--cloud-init-file and --cloud-init-template are mutually exclusive")
 	}
 	mode, e := networkMode(*network)
 	if e != nil {
@@ -474,11 +577,122 @@ func createVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 	if e != nil {
 		return e
 	}
-	r, e := c.CreateVM(ctx, &apprunnerv1.CreateVMRequest{Name: *name, Cpus: uint32(*cpus), MemoryMib: uint32(*memory), DiskGib: uint32(*disk), IsoName: *iso, NetworkMode: mode, BridgeName: *bridge, CloudInitEnabled: *cloud != "", CloudInitUserData: userData, SourceImage: *image})
+	if *template != "" {
+		if userData, e = templateUserData(ctx, c, *template); e != nil {
+			return e
+		}
+	}
+	r, e := c.CreateVM(ctx, &apprunnerv1.CreateVMRequest{Name: *name, Cpus: uint32(*cpus), MemoryMib: uint32(*memory), DiskGib: uint32(*disk), IsoName: *iso, NetworkMode: mode, BridgeName: *bridge, CloudInitEnabled: *cloud != "" || *template != "", CloudInitUserData: userData, SourceImage: *image})
 	if e != nil {
 		return e
 	}
-	return write(output, r.GetVirtualMachine())
+	vm := r.GetVirtualMachine()
+	if *start {
+		started, e := c.StartVM(ctx, &apprunnerv1.StartVMRequest{Id: vm.GetId()})
+		if e != nil {
+			return e
+		}
+		vm = started.GetVirtualMachine()
+	}
+	return write(output, vm)
+}
+
+func templateUserData(ctx context.Context, c apprunnerv1.AppRunnerService, name string) (string, error) {
+	r, err := c.ListCloudInitTemplates(ctx, &apprunnerv1.ListCloudInitTemplatesRequest{})
+	if err != nil {
+		return "", err
+	}
+	for _, template := range r.GetTemplates() {
+		if template.GetName() == name {
+			return template.GetUserData(), nil
+		}
+	}
+	return "", fmt.Errorf("no cloud-init template is named %q", name)
+}
+
+// lookupVM resolves a virtual machine ID or (case-insensitive) name.
+func lookupVM(ctx context.Context, c apprunnerv1.AppRunnerService, reference string) (*apprunnerv1.VirtualMachine, error) {
+	r, err := c.ListVMs(ctx, &apprunnerv1.ListVMsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	var named *apprunnerv1.VirtualMachine
+	for _, vm := range r.GetVirtualMachines() {
+		if vm.GetId() == reference {
+			return vm, nil
+		}
+		if named == nil && strings.EqualFold(vm.GetName(), reference) {
+			named = vm
+		}
+	}
+	if named == nil {
+		return nil, fmt.Errorf("no virtual machine has the ID or name %q", reference)
+	}
+	return named, nil
+}
+
+func vmID(ctx context.Context, c apprunnerv1.AppRunnerService, reference string) (string, error) {
+	vm, err := lookupVM(ctx, c, reference)
+	if err != nil {
+		return "", err
+	}
+	return vm.GetId(), nil
+}
+
+// addressPollInterval is how often "vm address --wait" re-reads the leases.
+var addressPollInterval = 2 * time.Second
+
+// vmAddress prints the managed DHCP leases held by a bridged VM, optionally
+// waiting for the guest to obtain one.
+func vmAddress(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
+	f := flags("vm address")
+	wait := f.Duration("wait", 0, "wait up to this long for a DHCP lease")
+	if e := parseFlags(f, args); e != nil {
+		return e
+	}
+	if e := require(f.Args(), 1, "usage: arcli vm address [--wait DURATION] VM"); e != nil {
+		return e
+	}
+	vm, e := lookupVM(ctx, c, f.Args()[0])
+	if e != nil {
+		return e
+	}
+	if vm.GetNetworkMode() != apprunnerv1.NetworkMode_NETWORK_MODE_BRIDGE {
+		return fmt.Errorf("virtual machine %s uses user-mode NAT networking; the host does not track its addresses", vm.GetName())
+	}
+	deadline := time.Now().Add(*wait)
+	for {
+		leases, e := bridgeLeases(ctx, c, vm.GetBridgeName())
+		if e != nil {
+			return e
+		}
+		var matched []*apprunnerv1.DHCPLease
+		for _, lease := range leases {
+			if strings.EqualFold(lease.GetHardwareAddress(), vm.GetMacAddress()) {
+				matched = append(matched, lease)
+			}
+		}
+		if len(matched) > 0 {
+			return write(output, matched)
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("virtual machine %s (%s) holds no DHCP lease on bridge %s", vm.GetName(), vm.GetMacAddress(), vm.GetBridgeName())
+		}
+		time.Sleep(addressPollInterval)
+	}
+}
+
+func bridgeLeases(ctx context.Context, c apprunnerv1.AppRunnerService, bridge string) ([]*apprunnerv1.DHCPLease, error) {
+	r, err := c.GetNetworkingStatus(ctx, &apprunnerv1.GetNetworkingStatusRequest{})
+	if err != nil {
+		return nil, err
+	}
+	for _, candidate := range r.GetStatus().GetBridges() {
+		if candidate.GetName() == bridge {
+			return candidate.GetDhcp().GetLeases(), nil
+		}
+	}
+	return nil, fmt.Errorf("bridge %q was not found", bridge)
 }
 func updateVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	f := flags("vm update")
@@ -486,13 +700,17 @@ func updateVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 	description := f.String("description", "", "description")
 	cpus := f.Uint("cpus", 0, "vCPUs")
 	memory := f.Uint("memory", 0, "memory MiB")
-	if e := f.Parse(args); e != nil {
+	if e := parseFlags(f, args); e != nil {
 		return e
 	}
 	if e := require(f.Args(), 1, "usage: arcli vm update ID --name NAME --cpus N --memory MIB"); e != nil {
 		return e
 	}
-	r, e := c.UpdateVM(ctx, &apprunnerv1.UpdateVMRequest{Id: f.Args()[0], Name: *name, Description: *description, Cpus: uint32(*cpus), MemoryMib: uint32(*memory)})
+	id, e := vmID(ctx, c, f.Args()[0])
+	if e != nil {
+		return e
+	}
+	r, e := c.UpdateVM(ctx, &apprunnerv1.UpdateVMRequest{Id: id, Name: *name, Description: *description, Cpus: uint32(*cpus), MemoryMib: uint32(*memory)})
 	if e != nil {
 		return e
 	}
@@ -503,17 +721,21 @@ func vmNetwork(ctx context.Context, c apprunnerv1.AppRunnerService, args []strin
 	network := f.String("network", "nat", "nat or bridge")
 	bridge := f.String("bridge", "", "bridge name")
 	mac := f.String("mac", "", "MAC address")
-	if e := f.Parse(args); e != nil {
+	if e := parseFlags(f, args); e != nil {
 		return e
 	}
 	if e := require(f.Args(), 1, "usage: arcli vm network ID --network nat|bridge [--bridge NAME] [--mac ADDRESS]"); e != nil {
+		return e
+	}
+	id, e := vmID(ctx, c, f.Args()[0])
+	if e != nil {
 		return e
 	}
 	mode, e := networkMode(*network)
 	if e != nil {
 		return e
 	}
-	r, e := c.UpdateVMNetwork(ctx, &apprunnerv1.UpdateVMNetworkRequest{Id: f.Args()[0], NetworkMode: mode, BridgeName: *bridge, MacAddress: *mac})
+	r, e := c.UpdateVMNetwork(ctx, &apprunnerv1.UpdateVMNetworkRequest{Id: id, NetworkMode: mode, BridgeName: *bridge, MacAddress: *mac})
 	if e != nil {
 		return e
 	}
@@ -529,13 +751,17 @@ func vmDisk(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, 
 	if args[0] == "add" {
 		f := flags("vm disk add")
 		size := f.Uint("size", 0, "disk GiB")
-		if e := f.Parse(args[1:]); e != nil {
+		if e := parseFlags(f, args[1:]); e != nil {
 			return e
 		}
 		if e := require(f.Args(), 1, "VM ID is required"); e != nil {
 			return e
 		}
-		r, e := c.AddVMDisk(ctx, &apprunnerv1.AddVMDiskRequest{Id: f.Args()[0], SizeGib: uint32(*size)})
+		id, e := vmID(ctx, c, f.Args()[0])
+		if e != nil {
+			return e
+		}
+		r, e := c.AddVMDisk(ctx, &apprunnerv1.AddVMDiskRequest{Id: id, SizeGib: uint32(*size)})
 		if e != nil {
 			return e
 		}
@@ -545,7 +771,11 @@ func vmDisk(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, 
 		if e := require(args[1:], 2, "usage: arcli vm disk remove ID DISK_ID"); e != nil {
 			return e
 		}
-		r, e := c.RemoveVMDisk(ctx, &apprunnerv1.RemoveVMDiskRequest{Id: args[1], DiskId: args[2]})
+		id, e := vmID(ctx, c, args[1])
+		if e != nil {
+			return e
+		}
+		r, e := c.RemoveVMDisk(ctx, &apprunnerv1.RemoveVMDiskRequest{Id: id, DiskId: args[2]})
 		if e != nil {
 			return e
 		}
@@ -562,11 +792,15 @@ func vmCDROM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 		if e := require(args[1:], 1, "usage: arcli vm cdrom add ID [ISO]"); e != nil {
 			return e
 		}
+		id, e := vmID(ctx, c, args[1])
+		if e != nil {
+			return e
+		}
 		iso := ""
 		if len(args) > 2 {
 			iso = args[2]
 		}
-		r, e := c.AddVMCDROM(ctx, &apprunnerv1.AddVMCDROMRequest{Id: args[1], IsoName: iso})
+		r, e := c.AddVMCDROM(ctx, &apprunnerv1.AddVMCDROMRequest{Id: id, IsoName: iso})
 		if e != nil {
 			return e
 		}
@@ -575,7 +809,11 @@ func vmCDROM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 		if e := require(args[1:], 3, "usage: arcli vm cdrom set ID CDROM_ID ISO"); e != nil {
 			return e
 		}
-		r, e := c.UpdateVMCDROM(ctx, &apprunnerv1.UpdateVMCDROMRequest{Id: args[1], CdromId: args[2], IsoName: args[3]})
+		id, e := vmID(ctx, c, args[1])
+		if e != nil {
+			return e
+		}
+		r, e := c.UpdateVMCDROM(ctx, &apprunnerv1.UpdateVMCDROMRequest{Id: id, CdromId: args[2], IsoName: args[3]})
 		if e != nil {
 			return e
 		}
@@ -584,7 +822,11 @@ func vmCDROM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 		if e := require(args[1:], 2, "usage: arcli vm cdrom remove ID CDROM_ID"); e != nil {
 			return e
 		}
-		r, e := c.RemoveVMCDROM(ctx, &apprunnerv1.RemoveVMCDROMRequest{Id: args[1], CdromId: args[2]})
+		id, e := vmID(ctx, c, args[1])
+		if e != nil {
+			return e
+		}
+		r, e := c.RemoveVMCDROM(ctx, &apprunnerv1.RemoveVMCDROMRequest{Id: id, CdromId: args[2]})
 		if e != nil {
 			return e
 		}
@@ -597,17 +839,21 @@ func vmCloudInit(ctx context.Context, c apprunnerv1.AppRunnerService, args []str
 	f := flags("vm cloud-init")
 	enabled := f.Bool("enabled", true, "enable cloud-init")
 	file := f.String("file", "", "user-data file")
-	if e := f.Parse(args); e != nil {
+	if e := parseFlags(f, args); e != nil {
 		return e
 	}
 	if e := require(f.Args(), 1, "usage: arcli vm cloud-init ID --enabled --file USER_DATA"); e != nil {
+		return e
+	}
+	id, e := vmID(ctx, c, f.Args()[0])
+	if e != nil {
 		return e
 	}
 	data, e := readOptional(*file)
 	if e != nil {
 		return e
 	}
-	r, e := c.ConfigureVMCloudInit(ctx, &apprunnerv1.ConfigureVMCloudInitRequest{Id: f.Args()[0], Enabled: *enabled, UserData: data})
+	r, e := c.ConfigureVMCloudInit(ctx, &apprunnerv1.ConfigureVMCloudInitRequest{Id: id, Enabled: *enabled, UserData: data})
 	if e != nil {
 		return e
 	}
@@ -620,13 +866,17 @@ func vmIPMI(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, 
 	address := f.String("address", "", "IP address")
 	username := f.String("username", "", "username")
 	password := f.String("password", "", "password")
-	if e := f.Parse(args); e != nil {
+	if e := parseFlags(f, args); e != nil {
 		return e
 	}
 	if e := require(f.Args(), 1, "usage: arcli vm ipmi ID --enabled --bridge NAME --address IP --username USER --password PASS"); e != nil {
 		return e
 	}
-	r, e := c.ConfigureVMIPMI(ctx, &apprunnerv1.ConfigureVMIPMIRequest{Id: f.Args()[0], Enabled: *enabled, BridgeName: *bridge, Address: *address, Username: *username, Password: *password})
+	id, e := vmID(ctx, c, f.Args()[0])
+	if e != nil {
+		return e
+	}
+	r, e := c.ConfigureVMIPMI(ctx, &apprunnerv1.ConfigureVMIPMIRequest{Id: id, Enabled: *enabled, BridgeName: *bridge, Address: *address, Username: *username, Password: *password})
 	if e != nil {
 		return e
 	}
@@ -635,7 +885,7 @@ func vmIPMI(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, 
 
 func network(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) == 0 || args[0] == "help" {
-		_, err := fmt.Fprintln(output, "usage: arcli net status|apply|confirm|revert|dhcp")
+		_, err := fmt.Fprintln(output, "usage: arcli net status|leases|apply|confirm|revert|dhcp")
 		return err
 	}
 	switch args[0] {
@@ -651,7 +901,7 @@ func network(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 		bridge := f.String("bridge", "", "bridge name")
 		iface := f.String("interface", "", "interface name")
 		migrate := f.Bool("migrate-addresses", false, "migrate addresses")
-		if e := f.Parse(args[1:]); e != nil {
+		if e := parseFlags(f, args[1:]); e != nil {
 			return e
 		}
 		typ, e := networkChange(*kind)
@@ -679,6 +929,15 @@ func network(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 			return e
 		}
 		return write(output, r.GetStatus())
+	case "leases":
+		if e := require(args[1:], 1, "usage: arcli net leases BRIDGE"); e != nil {
+			return e
+		}
+		leases, e := bridgeLeases(ctx, c, args[1])
+		if e != nil {
+			return e
+		}
+		return write(output, leases)
 	case "dhcp":
 		return networkDHCP(ctx, c, args[1:], output)
 	default:
@@ -699,7 +958,7 @@ func networkDHCP(ctx context.Context, c apprunnerv1.AppRunnerService, args []str
 		autoDNS := f.Bool("auto-dns", true, "use host resolvers")
 		suffix := f.String("dns-suffix", "", "DNS suffix")
 		description := f.String("description", "", "description")
-		if e := f.Parse(args[1:]); e != nil {
+		if e := parseFlags(f, args[1:]); e != nil {
 			return e
 		}
 		if e := require(f.Args(), 1, "bridge name is required"); e != nil {
@@ -760,7 +1019,7 @@ func cloudInit(ctx context.Context, c apprunnerv1.AppRunnerService, args []strin
 		f := flags("cloud-init " + args[0])
 		file := f.String("file", "", "user-data file")
 		newName := f.String("new-name", "", "new template name")
-		if e := f.Parse(args[1:]); e != nil {
+		if e := parseFlags(f, args[1:]); e != nil {
 			return e
 		}
 		if e := require(f.Args(), 1, "template name is required"); e != nil {
