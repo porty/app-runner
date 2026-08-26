@@ -245,3 +245,32 @@ func TestSubcommandFlagsAfterPositionalArguments(t *testing.T) {
 		t.Errorf("output = %q, want %q", got, want)
 	}
 }
+
+func TestVMUpdateKeepsUnspecifiedFields(t *testing.T) {
+	var request struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Cpus        uint32 `json:"cpus"`
+		MemoryMib   uint32 `json:"memory_mib"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, r *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/ListVMs") {
+			_, _ = response.Write([]byte(`{"virtual_machines":[{"id":"vm-1","name":"example","description":"lab","cpus":4,"memory_mib":6144}]}`))
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		_, _ = response.Write([]byte(`{"virtual_machine":{"id":"vm-1","name":"example","cpus":4,"memory_mib":8192}}`))
+	}))
+	t.Cleanup(server.Close)
+	var output bytes.Buffer
+	if err := run([]string{"--server", server.URL, "-o", "json", "vm", "update", "example", "--memory", "8192"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if request.ID != "vm-1" || request.Name != "example" || request.Description != "lab" || request.Cpus != 4 || request.MemoryMib != 8192 {
+		t.Errorf("request = %+v, want current values with memory 8192", request)
+	}
+}
