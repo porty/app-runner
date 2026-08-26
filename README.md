@@ -21,7 +21,7 @@ bin/arcli vm start vm-id
 bin/arcli net status
 ```
 
-Run `arcli --help` for its command groups. Successful commands write a table by default; pass `-o json` or `-o yaml` so their results can be piped to other tools.
+Run `arcli --help` for its command groups. Successful commands write a table by default; pass `-o json` or `-o yaml` so their results can be piped to other tools. VM operations accept an ID or a name, `arcli vm address --wait 2m NAME` waits for a bridged VM's DHCP lease, and `arcli net leases BRIDGE` lists a bridge's leases.
 
 Cloud-init support uses `xorriso` to generate per-VM NoCloud ISO images. The binary defaults to `xorriso` and can be changed with the `xorriso_binary` configuration setting or `-xorriso` command-line flag. Reusable user-data templates are stored privately in `disk/cloud-init-templates.json`.
 
