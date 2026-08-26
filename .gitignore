@@ -1,5 +1,7 @@
 /bin/
 /disk/
+/state/
+/run/
 /frontend/dist/
 /cmd/app-runner/frontend/dist/
 /frontend/node_modules/

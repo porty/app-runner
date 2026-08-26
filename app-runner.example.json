@@ -2,6 +2,8 @@
   "listen": "127.0.0.1:8080",
   "iso_dir": "iso",
   "disk_dir": "disk",
+  "state_dir": "state",
+  "run_dir": "run",
   "qemu_binary": "qemu-system-x86_64",
   "qemu_img_binary": "qemu-img",
   "xorriso_binary": "xorriso",

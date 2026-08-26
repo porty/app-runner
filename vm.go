@@ -354,24 +354,28 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 	if createDiskErr != nil {
 		return virtualMachine{}, fmt.Errorf("create system disk: %w", createDiskErr)
 	}
+	if err := os.MkdirAll(m.settings.vmStateDir(vm.ID), 0o750); err != nil {
+		_ = removeIfExists(diskPath)
+		return virtualMachine{}, fmt.Errorf("create VM state directory: %w", err)
+	}
 	if vm.Firmware == vmFirmwareUEFI {
 		if err := copyVMFile(ctx, m.settings.UEFIVarsPath, m.uefiVarsPath(vm.ID)); err != nil {
 			_ = removeIfExists(diskPath)
+			_ = os.RemoveAll(m.settings.vmStateDir(vm.ID))
 			return virtualMachine{}, fmt.Errorf("create UEFI variable store: %w", err)
 		}
 	}
 	if vm.CloudInit.Enabled {
 		if err := m.buildCloudInitISO(ctx, m.cloudInitISOPath(vm.ID), cloudInitOptions(vm)); err != nil {
 			_ = removeIfExists(diskPath)
-			_ = removeIfExists(m.uefiVarsPath(vm.ID))
+			_ = os.RemoveAll(m.settings.vmStateDir(vm.ID))
 			return virtualMachine{}, err
 		}
 	}
 	m.vms = append(m.vms, vm)
 	if err := m.store.Save(m.vms); err != nil {
 		_ = os.Remove(diskPath)
-		_ = removeIfExists(m.cloudInitISOPath(vm.ID))
-		_ = removeIfExists(m.uefiVarsPath(vm.ID))
+		_ = os.RemoveAll(m.settings.vmStateDir(vm.ID))
 		m.vms = m.vms[:len(m.vms)-1]
 		return virtualMachine{}, err
 	}
@@ -453,14 +457,21 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 		clone.CDROMs = append(clone.CDROMs, vmCDROM{ID: cdromID, ISOName: sourceCDROM.ISOName})
 	}
 
+	if err := os.MkdirAll(m.settings.vmStateDir(clone.ID), 0o750); err != nil {
+		return virtualMachine{}, fmt.Errorf("create VM state directory: %w", err)
+	}
 	createdPaths := make([]string, 0, len(clone.Disks))
+	removeCreated := func() {
+		for _, path := range createdPaths {
+			_ = removeIfExists(path)
+		}
+		_ = os.RemoveAll(m.settings.vmStateDir(clone.ID))
+	}
 	for diskIndex, sourceDisk := range source.Disks {
 		destinationDisk := clone.Disks[diskIndex]
 		destinationPath := m.vmDiskPath(clone.ID, destinationDisk)
 		if err := copyVMFile(ctx, m.vmDiskPath(source.ID, sourceDisk), destinationPath); err != nil {
-			for _, path := range createdPaths {
-				_ = removeIfExists(path)
-			}
+			removeCreated()
 			return virtualMachine{}, fmt.Errorf("copy disk %s: %w", sourceDisk.ID, err)
 		}
 		createdPaths = append(createdPaths, destinationPath)
@@ -468,30 +479,22 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 	if clone.CloudInit.Enabled {
 		cloudInitPath := m.cloudInitISOPath(clone.ID)
 		if err := m.buildCloudInitISO(ctx, cloudInitPath, cloudInitOptions(clone)); err != nil {
-			for _, path := range createdPaths {
-				_ = removeIfExists(path)
-			}
+			removeCreated()
 			return virtualMachine{}, err
 		}
-		createdPaths = append(createdPaths, cloudInitPath)
 	}
 	if clone.Firmware == vmFirmwareUEFI {
 		uefiVarsPath := m.uefiVarsPath(clone.ID)
 		if err := copyVMFile(ctx, m.uefiVarsPath(source.ID), uefiVarsPath); err != nil {
-			for _, path := range createdPaths {
-				_ = removeIfExists(path)
-			}
+			removeCreated()
 			return virtualMachine{}, fmt.Errorf("clone UEFI variable store: %w", err)
 		}
-		createdPaths = append(createdPaths, uefiVarsPath)
 	}
 
 	m.vms = append(m.vms, clone)
 	if err := m.store.Save(m.vms); err != nil {
 		m.vms = m.vms[:len(m.vms)-1]
-		for _, path := range createdPaths {
-			_ = removeIfExists(path)
-		}
+		removeCreated()
 		return virtualMachine{}, err
 	}
 	return clone, nil
@@ -695,11 +698,8 @@ func (m *vmManager) Delete(id string) error {
 			return err
 		}
 	}
-	if err := removeIfExists(m.cloudInitISOPath(vm.ID)); err != nil {
-		return fmt.Errorf("remove cloud-init ISO: %w", err)
-	}
-	if err := removeIfExists(m.uefiVarsPath(vm.ID)); err != nil {
-		return fmt.Errorf("remove UEFI variable store: %w", err)
+	if err := os.RemoveAll(m.settings.vmStateDir(vm.ID)); err != nil {
+		return fmt.Errorf("remove VM state: %w", err)
 	}
 	m.vms = append(m.vms[:index], m.vms[index+1:]...)
 	return m.store.Save(m.vms)
@@ -1356,23 +1356,23 @@ func (m *vmManager) vmDiskPath(vmID string, disk vmDisk) string {
 }
 
 func (m *vmManager) isoPath(name string) string {
-	return filepath.Join(m.settings.ISODir, name)
+	return m.settings.isoPath(name)
 }
 
 func (m *vmManager) qmpSocketPath(id string) string {
-	return filepath.Join(m.settings.DiskDir, id+".qmp.sock")
+	return m.settings.qmpSocketPath(id)
 }
 
 func (m *vmManager) vncSocketPath(id string) string {
-	return filepath.Join(m.settings.DiskDir, id+".vnc.sock")
+	return m.settings.vncSocketPath(id)
 }
 
 func (m *vmManager) cloudInitISOPath(id string) string {
-	return filepath.Join(m.settings.DiskDir, id+"-cloud-init.iso")
+	return m.settings.cloudInitISOPath(id)
 }
 
 func (m *vmManager) uefiVarsPath(id string) string {
-	return filepath.Join(m.settings.DiskDir, id+"-uefi-vars.fd")
+	return m.settings.uefiVarsPath(id)
 }
 
 func cloudInitOptions(vm virtualMachine) cloudInitISOOptions {
@@ -1380,6 +1380,9 @@ func cloudInitOptions(vm virtualMachine) cloudInitISOOptions {
 }
 
 func (m *vmManager) stageCloudInitISO(ctx context.Context, vm virtualMachine) (commit func(), rollback func(), err error) {
+	if err := os.MkdirAll(m.settings.vmStateDir(vm.ID), 0o750); err != nil {
+		return nil, nil, fmt.Errorf("create VM state directory: %w", err)
+	}
 	path := m.cloudInitISOPath(vm.ID)
 	stagedPath := path + ".new"
 	backupPath := path + ".previous"

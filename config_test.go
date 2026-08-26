@@ -22,6 +22,9 @@ func TestLoadConfigUsesDefaultsAndCLIOverrides(t *testing.T) {
 	if settings.DiskDir != filepath.Join(workingDirectory, "disk") {
 		t.Fatalf("unexpected disk directory: %q", settings.DiskDir)
 	}
+	if settings.StateDir != filepath.Join(workingDirectory, "state") || settings.RunDir != filepath.Join(workingDirectory, "run") {
+		t.Fatalf("unexpected state/run directories: %q %q", settings.StateDir, settings.RunDir)
+	}
 	if settings.XorrisoBinary != "xorriso" {
 		t.Fatalf("unexpected xorriso binary: %q", settings.XorrisoBinary)
 	}
@@ -60,7 +63,7 @@ func TestPrepareDirectoriesCreatesStorage(t *testing.T) {
 	if err := prepareDirectories(settings); err != nil {
 		t.Fatalf("prepareDirectories returned an error: %v", err)
 	}
-	for _, directory := range []string{settings.ISODir, settings.DiskDir} {
+	for _, directory := range []string{settings.ISODir, settings.DiskDir, settings.StateDir, settings.RunDir} {
 		info, err := os.Stat(directory)
 		if err != nil || !info.IsDir() {
 			t.Fatalf("storage directory was not created: %s", directory)

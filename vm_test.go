@@ -518,7 +518,7 @@ func TestVMManagerPersistsDefinitions(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(settings.ISODir, "installer.iso"), []byte("iso"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	store := newJSONVMStore(settings.DiskDir)
+	store := newJSONVMStore(settings.StateDir)
 	hypervisor := newFakeHypervisor()
 	capabilities := func() hostCapabilities {
 		return hostCapabilities{QEMUAvailable: true, KVMAvailable: true, BridgeAvailable: true}
