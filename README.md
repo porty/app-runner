@@ -21,7 +21,7 @@ bin/arcli vm start vm-id
 bin/arcli net status
 ```
 
-Run `arcli --help` for its command groups. Successful commands write a table by default; pass `-o json` or `-o yaml` so their results can be piped to other tools. VM operations accept an ID or a name, `arcli vm address --wait 2m NAME` waits for a bridged VM's DHCP lease, and `arcli net leases BRIDGE` lists a bridge's leases. `arcli net bridge configure BRIDGE --dhcp [--nat] [--dns] [--auto-dns]` manages a bridge's guest network services; NAT and DNS stay off unless requested.
+Run `arcli --help` for its command groups. Successful commands write a table by default; pass `-o json` or `-o yaml` so their results can be piped to other tools. VM operations accept an ID or a name, `arcli vm address --wait 2m NAME` waits for a bridged VM's DHCP lease, and `arcli net leases BRIDGE` lists a bridge's leases. `arcli net bridge configure BRIDGE --dhcp [--nat] [--dns] [--auto-dns]` manages a bridge's guest network services; NAT and DNS stay off unless requested. `arcli vm stop --force-after 60s NAME` asks the guest to shut down and forces it off if it is still running afterwards.
 
 A virtual machine has zero or more disks, CD-ROM drives, and network interfaces; nothing is implied. `arcli vm create --name NAME --disk 20 --cdrom installer.iso --nic bridge:br0` creates a conventional installer VM, while `--disk 40:ubuntu.img` creates a linked overlay of a cloud image. Devices are managed afterwards with `arcli vm disk|cdrom|nic`.
 
