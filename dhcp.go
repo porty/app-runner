@@ -488,7 +488,11 @@ func (m *dhcpManager) Reconcile(vms []virtualMachine) error {
 	return result
 }
 
-func (m *dhcpManager) Close() error {
+// Shutdown closes the DHCP and DNS listeners when the backend exits. NAT
+// rules and IPv4 forwarding are intentionally left in place: guests keep
+// running across a backend restart and still need them, and the next start
+// re-applies or removes them once it knows which VMs are still up.
+func (m *dhcpManager) Shutdown() error {
 	m.mu.Lock()
 	runtimes := m.runtimes
 	m.runtimes = make(map[string]*dhcpRuntime)
@@ -501,9 +505,6 @@ func (m *dhcpManager) Close() error {
 		if err := runtime.server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			result = errors.Join(result, err)
 		}
-	}
-	if m.nat != nil {
-		result = errors.Join(result, m.nat.Close())
 	}
 	if m.dns != nil {
 		result = errors.Join(result, m.dns.Close())

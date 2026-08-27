@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/google/nftables"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -496,7 +497,73 @@ func inspectNetworkAccess() networkAccessDiagnostics {
 		configDiagnostic.Detail = "/etc/qemu/bridge.conf is readable; each bridge is evaluated separately below."
 	}
 	result.diagnostics = append(result.diagnostics, configDiagnostic)
+	result.diagnostics = append(result.diagnostics, hostFirewallDiagnostic(result.canManage, listNFTables))
 	return result
+}
+
+func listNFTables() ([]*nftables.Table, error) {
+	return (&nftables.Conn{}).ListTables()
+}
+
+// hostFirewallDiagnostic reports whether the host has the iptables-nft/UFW
+// `ip filter` table that managed NAT bridges add their tagged accept rules
+// to. Native nftables firewalls use other tables, which App Runner does not
+// edit, so their policies may need manual allowances.
+func hostFirewallDiagnostic(canManage bool, list func() ([]*nftables.Table, error)) networkDiagnostic {
+	diagnostic := networkDiagnostic{Key: "host_firewall", Label: "Host firewall filter table", Status: diagnosticInfo}
+	if !canManage {
+		diagnostic.Detail = "Not inspected: listing nftables tables requires CAP_NET_ADMIN."
+		return diagnostic
+	}
+	tables, err := list()
+	if err != nil {
+		diagnostic.Detail = fmt.Sprintf("nftables tables could not be listed: %v", err)
+		return diagnostic
+	}
+	names := make([]string, 0, len(tables))
+	filterFound := false
+	for _, table := range tables {
+		if table.Name == appRunnerNATTable {
+			continue
+		}
+		names = append(names, nftablesFamilyName(table.Family)+"/"+table.Name)
+		if table.Family == nftables.TableFamilyIPv4 && table.Name == "filter" {
+			filterFound = true
+		}
+	}
+	sort.Strings(names)
+	switch {
+	case filterFound:
+		diagnostic.Status = diagnosticPass
+		diagnostic.Detail = "An `ip filter` table exists; managed NAT bridges add tagged DHCP, DNS, and forwarding accept rules to its INPUT and FORWARD chains."
+	case len(names) == 0:
+		diagnostic.Status = diagnosticPass
+		diagnostic.Detail = "No host firewall tables are present; managed NAT rules live only in App Runner's own nftables table."
+	default:
+		diagnostic.Status = diagnosticWarning
+		diagnostic.Detail = fmt.Sprintf("No `ip filter` table was found among %s. App Runner only edits iptables-nft/UFW tables, so a native nftables firewall may still drop guest DHCP, DNS, or forwarded traffic on managed NAT bridges.", strings.Join(names, ", "))
+		diagnostic.Remediation = "Allow inbound UDP 67, UDP 53, and TCP 53 from each managed bridge and forwarding for its subnet in the host firewall."
+	}
+	return diagnostic
+}
+
+func nftablesFamilyName(family nftables.TableFamily) string {
+	switch family {
+	case nftables.TableFamilyIPv4:
+		return "ip"
+	case nftables.TableFamilyIPv6:
+		return "ip6"
+	case nftables.TableFamilyINet:
+		return "inet"
+	case nftables.TableFamilyARP:
+		return "arp"
+	case nftables.TableFamilyBridge:
+		return "bridge"
+	case nftables.TableFamilyNetdev:
+		return "netdev"
+	default:
+		return fmt.Sprintf("family-%d", family)
+	}
 }
 
 func bridgeDiagnostics(access networkAccessDiagnostics, bridge networkBridgeInfo) ([]networkDiagnostic, bool) {
