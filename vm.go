@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/netip"
 	"os"
@@ -61,40 +62,48 @@ func (e *fieldError) Error() string {
 	return fmt.Sprintf("%s: %s", e.field, e.message)
 }
 
+// virtualMachine is the persistent definition of a QEMU virtual machine. A VM
+// may have any number of disks, CD-ROM drives, and network interfaces,
+// including none; nothing about its devices is implied.
 type virtualMachine struct {
 	ID          string       `json:"id"`
 	Name        string       `json:"name"`
 	Description string       `json:"description,omitempty"`
 	CPUs        uint32       `json:"cpus"`
 	MemoryMiB   uint32       `json:"memory_mib"`
-	DiskGiB     uint32       `json:"disk_gib"`
-	ISOName     string       `json:"iso_name"`
-	NetworkMode networkMode  `json:"network_mode"`
-	BridgeName  string       `json:"bridge_name,omitempty"`
-	MACAddress  string       `json:"mac_address,omitempty"`
+	Firmware    vmFirmware   `json:"firmware"`
 	Status      vmStatus     `json:"status"`
 	CreatedAt   time.Time    `json:"created_at"`
 	LastError   string       `json:"last_error,omitempty"`
 	PID         int          `json:"pid,omitempty"`
+	Disks       []vmDisk     `json:"disks"`
+	CDROMs      []vmCDROM    `json:"cdroms"`
+	NICs        []vmNIC      `json:"nics"`
+	CloudInit   vmCloudInit  `json:"cloud_init,omitempty"`
 	IPMI        vmIPMIConfig `json:"ipmi,omitempty"`
 	IPMIRunning bool         `json:"-"`
 	IPMIError   string       `json:"-"`
-	Disks       []vmDisk     `json:"disks,omitempty"`
-	CDROMs      []vmCDROM    `json:"cdroms,omitempty"`
-	CloudInit   vmCloudInit  `json:"cloud_init,omitempty"`
-	SourceImage string       `json:"source_image,omitempty"`
-	Firmware    vmFirmware   `json:"firmware,omitempty"`
 }
 
+// vmDisk is a qcow2 disk image. Disks are attached in list order, so the
+// first disk is the one firmware boots from. SourceImage names a cloud image
+// inside ISO storage that the disk is a linked overlay of.
 type vmDisk struct {
-	ID      string `json:"id"`
-	SizeGiB uint32 `json:"size_gib"`
-	System  bool   `json:"system,omitempty"`
+	ID          string `json:"id"`
+	SizeGiB     uint32 `json:"size_gib"`
+	SourceImage string `json:"source_image,omitempty"`
 }
 
 type vmCDROM struct {
 	ID      string `json:"id"`
 	ISOName string `json:"iso_name,omitempty"`
+}
+
+type vmNIC struct {
+	ID         string      `json:"id"`
+	Mode       networkMode `json:"mode"`
+	BridgeName string      `json:"bridge_name,omitempty"`
+	MACAddress string      `json:"mac_address"`
 }
 
 type vmCloudInit struct {
@@ -112,6 +121,23 @@ type vmIPMIConfig struct {
 	BootPersistent bool   `json:"boot_persistent,omitempty"`
 }
 
+// vmDiskSpec, vmCDROMSpec, and vmNICSpec describe devices to add; identities
+// are assigned by the manager.
+type vmDiskSpec struct {
+	SizeGiB     uint32
+	SourceImage string
+}
+
+type vmCDROMSpec struct {
+	ISOName string
+}
+
+type vmNICSpec struct {
+	Mode       networkMode
+	BridgeName string
+	MACAddress string
+}
+
 type vmIPMIController interface {
 	Configure(virtualMachine) error
 	Disable(virtualMachine)
@@ -120,14 +146,14 @@ type vmIPMIController interface {
 
 type createVMOptions struct {
 	Name        string
+	Description string
 	CPUs        uint32
 	MemoryMiB   uint32
-	DiskGiB     uint32
-	ISOName     string
-	NetworkMode networkMode
-	BridgeName  string
+	Firmware    vmFirmware
+	Disks       []vmDiskSpec
+	CDROMs      []vmCDROMSpec
+	NICs        []vmNICSpec
 	CloudInit   vmCloudInit
-	SourceImage string
 }
 
 type isoImage struct {
@@ -141,11 +167,8 @@ type diskImage struct {
 }
 
 type hostCapabilities struct {
-	QEMUAvailable   bool
-	KVMAvailable    bool
-	BridgeAvailable bool
-	BridgeName      string
-	BridgeWarning   string
+	QEMUAvailable bool
+	KVMAvailable  bool
 }
 
 type hypervisor interface {
@@ -167,6 +190,15 @@ type virtualMachineStore interface {
 type vmNetworkLifecycle interface {
 	Prepare(virtualMachine) error
 	Release(virtualMachine)
+}
+
+// vmManagerOptions wires the VM manager to the host facilities it drives.
+type vmManagerOptions struct {
+	Settings         config
+	Store            virtualMachineStore
+	Hypervisor       hypervisor
+	Capabilities     func() hostCapabilities
+	BridgeCapability func(string) (bool, string)
 }
 
 type vmManager struct {
@@ -192,16 +224,18 @@ type vmManager struct {
 // process to be reaped before reporting the VM stopped anyway.
 const defaultForceStopTimeout = 10 * time.Second
 
-func newVMManager(settings config, store virtualMachineStore, hypervisor hypervisor, capabilities func() hostCapabilities) (*vmManager, error) {
-	vms, err := store.Load()
+func newVMManager(options vmManagerOptions) (*vmManager, error) {
+	vms, err := options.Store.Load()
 	if err != nil {
 		return nil, err
 	}
+	settings := options.Settings
 	manager := &vmManager{
 		settings:         settings,
-		store:            store,
-		hypervisor:       hypervisor,
-		capabilities:     capabilities,
+		store:            options.Store,
+		hypervisor:       options.Hypervisor,
+		capabilities:     options.Capabilities,
+		bridgeCapability: options.BridgeCapability,
 		now:              time.Now,
 		newID:            randomID,
 		exits:            make(map[string]chan struct{}),
@@ -211,46 +245,42 @@ func newVMManager(settings config, store virtualMachineStore, hypervisor hypervi
 		},
 		vms: vms,
 	}
-	manager.bridgeCapability = func(name string) (bool, string) {
-		status := capabilities()
-		if name == status.BridgeName {
-			return status.BridgeAvailable, status.BridgeWarning
-		}
-		return detectBridgeCapability(name)
+	if manager.bridgeCapability == nil {
+		manager.bridgeCapability = func(string) (bool, string) { return false, "bridge networking is not configured" }
+	}
+	if err := manager.validateStoredDefinitions(); err != nil {
+		return nil, err
 	}
 	manager.mu.Lock()
-	definitionsChanged := false
-	for index := range manager.vms {
-		if len(manager.vms[index].Disks) == 0 {
-			manager.vms[index].Disks = []vmDisk{{ID: "system", SizeGiB: manager.vms[index].DiskGiB, System: true}}
-			definitionsChanged = true
-		}
-		if len(manager.vms[index].CDROMs) == 0 && manager.vms[index].ISOName != "" {
-			manager.vms[index].CDROMs = []vmCDROM{{ID: "cdrom0", ISOName: manager.vms[index].ISOName}}
-			definitionsChanged = true
-		}
-		if manager.vms[index].NetworkMode == networkModeBridge && manager.vms[index].BridgeName == "" {
-			manager.vms[index].BridgeName = settings.BridgeName
-			definitionsChanged = true
-		}
-		if manager.vms[index].NetworkMode == networkModeNAT && manager.vms[index].BridgeName != "" {
-			manager.vms[index].BridgeName = ""
-			definitionsChanged = true
-		}
-		if manager.vms[index].MACAddress == "" {
-			manager.vms[index].MACAddress = vmMACAddress(manager.vms[index].ID)
-			definitionsChanged = true
-		}
-	}
 	err = manager.reconcileLocked()
-	if err == nil && definitionsChanged {
-		err = manager.store.Save(manager.vms)
-	}
 	manager.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
 	return manager, nil
+}
+
+func (m *vmManager) validateStoredDefinitions() error {
+	for index := range m.vms {
+		vm := &m.vms[index]
+		if vm.ID == "" {
+			return fmt.Errorf("stored virtual machine %q has no ID", vm.Name)
+		}
+		if vm.Firmware == "" {
+			vm.Firmware = vmFirmwareBIOS
+		}
+		for _, disk := range vm.Disks {
+			if disk.ID == "" {
+				return fmt.Errorf("virtual machine %s has a disk without an ID", vm.Name)
+			}
+		}
+		for _, nic := range vm.NICs {
+			if nic.ID == "" || nic.MACAddress == "" {
+				return fmt.Errorf("virtual machine %s has a network interface without an ID or MAC address", vm.Name)
+			}
+		}
+	}
+	return nil
 }
 
 func (m *vmManager) List() ([]virtualMachine, error) {
@@ -259,7 +289,10 @@ func (m *vmManager) List() ([]virtualMachine, error) {
 	if err := m.reconcileLocked(); err != nil {
 		return nil, err
 	}
-	result := slices.Clone(m.vms)
+	result := make([]virtualMachine, 0, len(m.vms))
+	for _, vm := range m.vms {
+		result = append(result, cloneVirtualMachine(vm))
+	}
 	if m.ipmi != nil {
 		for index := range result {
 			result[index].IPMIRunning, result[index].IPMIError = m.ipmi.Status(result[index].ID)
@@ -281,28 +314,67 @@ func (m *vmManager) Get(id string) (virtualMachine, error) {
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
 	}
-	result := m.vms[index]
+	result := cloneVirtualMachine(m.vms[index])
 	if m.ipmi != nil {
 		result.IPMIRunning, result.IPMIError = m.ipmi.Status(result.ID)
 	}
 	return result, nil
 }
 
+// cloneVirtualMachine copies a definition so callers cannot alias the
+// manager's device slices.
+func cloneVirtualMachine(vm virtualMachine) virtualMachine {
+	vm.Disks = slices.Clone(vm.Disks)
+	vm.CDROMs = slices.Clone(vm.CDROMs)
+	vm.NICs = slices.Clone(vm.NICs)
+	return vm
+}
+
 func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtualMachine, error) {
 	options.Name = strings.TrimSpace(options.Name)
-	options.ISOName = strings.TrimSpace(options.ISOName)
-	options.SourceImage = strings.TrimSpace(options.SourceImage)
-	if options.SourceImage != "" {
-		options.SourceImage = filepath.ToSlash(filepath.Clean(filepath.FromSlash(options.SourceImage)))
+	options.Description = strings.TrimSpace(options.Description)
+	if err := validateVMIdentityAndResources(options.Name, options.Description, options.CPUs, options.MemoryMiB); err != nil {
+		return virtualMachine{}, err
 	}
-	if err := m.validateCreateOptions(options); err != nil {
+	for index := range options.Disks {
+		options.Disks[index].SourceImage = normalizeStorageName(options.Disks[index].SourceImage)
+		if err := m.validateDiskSpec(options.Disks[index]); err != nil {
+			return virtualMachine{}, err
+		}
+	}
+	for index := range options.CDROMs {
+		options.CDROMs[index].ISOName = normalizeStorageName(options.CDROMs[index].ISOName)
+		if err := m.validateOptionalISO(options.CDROMs[index].ISOName); err != nil {
+			return virtualMachine{}, err
+		}
+	}
+	for index := range options.NICs {
+		normalized, err := normalizeNICSpec(options.NICs[index])
+		if err != nil {
+			return virtualMachine{}, err
+		}
+		options.NICs[index] = normalized
+	}
+	if err := validateCloudInit(options.CloudInit); err != nil {
 		return virtualMachine{}, err
 	}
 	if !options.CloudInit.Enabled {
 		options.CloudInit = vmCloudInit{}
 	}
-	if options.NetworkMode == networkModeNAT {
-		options.BridgeName = ""
+	firmware := options.Firmware
+	if firmware == "" {
+		firmware = vmFirmwareBIOS
+		for _, disk := range options.Disks {
+			if disk.SourceImage != "" {
+				firmware = vmFirmwareUEFI
+			}
+		}
+	}
+	if firmware != vmFirmwareBIOS && firmware != vmFirmwareUEFI {
+		return virtualMachine{}, &fieldError{field: "firmware", message: "must be bios or uefi"}
+	}
+	if firmware == vmFirmwareUEFI && (!regularFile(m.settings.UEFICodePath) || !regularFile(m.settings.UEFIVarsPath)) {
+		return virtualMachine{}, &fieldError{field: "firmware", message: "UEFI firmware is unavailable; configure uefi_code_path and uefi_vars_path"}
 	}
 
 	m.mu.Lock()
@@ -320,66 +392,94 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 	vm := virtualMachine{
 		ID:          id,
 		Name:        options.Name,
+		Description: options.Description,
 		CPUs:        options.CPUs,
 		MemoryMiB:   options.MemoryMiB,
-		DiskGiB:     options.DiskGiB,
-		ISOName:     options.ISOName,
-		NetworkMode: options.NetworkMode,
-		BridgeName:  options.BridgeName,
-		MACAddress:  vmMACAddress(id),
+		Firmware:    firmware,
 		Status:      vmStatusStopped,
 		CreatedAt:   m.now().UTC(),
-		Disks:       []vmDisk{{ID: "system", SizeGiB: options.DiskGiB, System: true}},
-		CDROMs:      []vmCDROM{{ID: "cdrom0", ISOName: options.ISOName}},
+		Disks:       make([]vmDisk, 0, len(options.Disks)),
+		CDROMs:      make([]vmCDROM, 0, len(options.CDROMs)),
+		NICs:        make([]vmNIC, 0, len(options.NICs)),
 		CloudInit:   options.CloudInit,
-		SourceImage: options.SourceImage,
-		Firmware:    vmFirmwareBIOS,
 	}
-	if vm.SourceImage != "" {
-		vm.ISOName = ""
-		vm.CDROMs = nil
-		vm.Firmware = vmFirmwareUEFI
-	}
-	diskPath := m.diskPath(vm.ID)
-	var createDiskErr error
-	if vm.SourceImage != "" {
-		sourcePath, err := m.resolveISOStorageFile(vm.SourceImage, ".img", ".qcow2")
+	for _, spec := range options.Disks {
+		diskID, err := randomID()
 		if err != nil {
-			return virtualMachine{}, &fieldError{field: "source_image", message: err.Error()}
+			return virtualMachine{}, fmt.Errorf("generate disk ID: %w", err)
 		}
-		createDiskErr = m.hypervisor.CreateLinkedDisk(ctx, diskPath, sourcePath, vm.DiskGiB)
-	} else {
-		createDiskErr = m.hypervisor.CreateDisk(ctx, diskPath, vm.DiskGiB)
+		vm.Disks = append(vm.Disks, vmDisk{ID: diskID, SizeGiB: spec.SizeGiB, SourceImage: spec.SourceImage})
 	}
-	if createDiskErr != nil {
-		return virtualMachine{}, fmt.Errorf("create system disk: %w", createDiskErr)
+	for _, spec := range options.CDROMs {
+		cdromID, err := randomID()
+		if err != nil {
+			return virtualMachine{}, fmt.Errorf("generate CD-ROM ID: %w", err)
+		}
+		vm.CDROMs = append(vm.CDROMs, vmCDROM{ID: cdromID, ISOName: spec.ISOName})
+	}
+	for _, spec := range options.NICs {
+		nic, err := m.newNICLocked(vm, spec)
+		if err != nil {
+			return virtualMachine{}, err
+		}
+		vm.NICs = append(vm.NICs, nic)
+	}
+
+	created := make([]string, 0, len(vm.Disks))
+	cleanup := func() {
+		for _, path := range created {
+			_ = removeIfExists(path)
+		}
+		_ = os.RemoveAll(m.settings.vmStateDir(vm.ID))
+	}
+	for _, disk := range vm.Disks {
+		if err := m.createDiskFile(ctx, vm.ID, disk); err != nil {
+			cleanup()
+			return virtualMachine{}, err
+		}
+		created = append(created, m.vmDiskPath(vm.ID, disk))
 	}
 	if err := os.MkdirAll(m.settings.vmStateDir(vm.ID), 0o750); err != nil {
-		_ = removeIfExists(diskPath)
+		cleanup()
 		return virtualMachine{}, fmt.Errorf("create VM state directory: %w", err)
 	}
 	if vm.Firmware == vmFirmwareUEFI {
 		if err := copyVMFile(ctx, m.settings.UEFIVarsPath, m.uefiVarsPath(vm.ID)); err != nil {
-			_ = removeIfExists(diskPath)
-			_ = os.RemoveAll(m.settings.vmStateDir(vm.ID))
+			cleanup()
 			return virtualMachine{}, fmt.Errorf("create UEFI variable store: %w", err)
 		}
 	}
 	if vm.CloudInit.Enabled {
 		if err := m.buildCloudInitISO(ctx, m.cloudInitISOPath(vm.ID), cloudInitOptions(vm)); err != nil {
-			_ = removeIfExists(diskPath)
-			_ = os.RemoveAll(m.settings.vmStateDir(vm.ID))
+			cleanup()
 			return virtualMachine{}, err
 		}
 	}
 	m.vms = append(m.vms, vm)
 	if err := m.store.Save(m.vms); err != nil {
-		_ = os.Remove(diskPath)
-		_ = os.RemoveAll(m.settings.vmStateDir(vm.ID))
 		m.vms = m.vms[:len(m.vms)-1]
+		cleanup()
 		return virtualMachine{}, err
 	}
-	return vm, nil
+	return cloneVirtualMachine(vm), nil
+}
+
+func (m *vmManager) createDiskFile(ctx context.Context, vmID string, disk vmDisk) error {
+	path := m.vmDiskPath(vmID, disk)
+	if disk.SourceImage == "" {
+		if err := m.hypervisor.CreateDisk(ctx, path, disk.SizeGiB); err != nil {
+			return fmt.Errorf("create disk: %w", err)
+		}
+		return nil
+	}
+	sourcePath, err := m.resolveISOStorageFile(disk.SourceImage, ".img", ".qcow2")
+	if err != nil {
+		return &fieldError{field: "source_image", message: err.Error()}
+	}
+	if err := m.hypervisor.CreateLinkedDisk(ctx, path, sourcePath, disk.SizeGiB); err != nil {
+		return fmt.Errorf("create linked disk: %w", err)
+	}
+	return nil
 }
 
 func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine, error) {
@@ -413,12 +513,6 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 	if m.indexByID(cloneID) != -1 {
 		return virtualMachine{}, errors.New("generated cloned virtual machine ID already exists")
 	}
-	cloneMAC := vmMACAddress(cloneID)
-	for _, existing := range m.vms {
-		if strings.EqualFold(existing.MACAddress, cloneMAC) {
-			return virtualMachine{}, errors.New("generated cloned virtual machine MAC address already exists")
-		}
-	}
 
 	clone := virtualMachine{
 		ID:          cloneID,
@@ -426,26 +520,19 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 		Description: source.Description,
 		CPUs:        source.CPUs,
 		MemoryMiB:   source.MemoryMiB,
-		DiskGiB:     source.DiskGiB,
-		ISOName:     source.ISOName,
-		NetworkMode: source.NetworkMode,
-		BridgeName:  source.BridgeName,
-		MACAddress:  cloneMAC,
+		Firmware:    source.Firmware,
 		Status:      vmStatusStopped,
 		CreatedAt:   m.now().UTC(),
 		Disks:       make([]vmDisk, 0, len(source.Disks)),
 		CDROMs:      make([]vmCDROM, 0, len(source.CDROMs)),
+		NICs:        make([]vmNIC, 0, len(source.NICs)),
 		CloudInit:   source.CloudInit,
-		SourceImage: source.SourceImage,
-		Firmware:    source.Firmware,
 	}
 	for _, sourceDisk := range source.Disks {
 		clonedDisk := sourceDisk
-		if !sourceDisk.System {
-			clonedDisk.ID, err = randomID()
-			if err != nil {
-				return virtualMachine{}, fmt.Errorf("generate cloned disk ID: %w", err)
-			}
+		clonedDisk.ID, err = randomID()
+		if err != nil {
+			return virtualMachine{}, fmt.Errorf("generate cloned disk ID: %w", err)
 		}
 		clone.Disks = append(clone.Disks, clonedDisk)
 	}
@@ -455,6 +542,13 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 			return virtualMachine{}, fmt.Errorf("generate cloned CD-ROM ID: %w", err)
 		}
 		clone.CDROMs = append(clone.CDROMs, vmCDROM{ID: cdromID, ISOName: sourceCDROM.ISOName})
+	}
+	for _, sourceNIC := range source.NICs {
+		nic, err := m.newNICLocked(clone, vmNICSpec{Mode: sourceNIC.Mode, BridgeName: sourceNIC.BridgeName})
+		if err != nil {
+			return virtualMachine{}, err
+		}
+		clone.NICs = append(clone.NICs, nic)
 	}
 
 	if err := os.MkdirAll(m.settings.vmStateDir(clone.ID), 0o750); err != nil {
@@ -468,8 +562,7 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 		_ = os.RemoveAll(m.settings.vmStateDir(clone.ID))
 	}
 	for diskIndex, sourceDisk := range source.Disks {
-		destinationDisk := clone.Disks[diskIndex]
-		destinationPath := m.vmDiskPath(clone.ID, destinationDisk)
+		destinationPath := m.vmDiskPath(clone.ID, clone.Disks[diskIndex])
 		if err := copyVMFile(ctx, m.vmDiskPath(source.ID, sourceDisk), destinationPath); err != nil {
 			removeCreated()
 			return virtualMachine{}, fmt.Errorf("copy disk %s: %w", sourceDisk.ID, err)
@@ -477,15 +570,13 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 		createdPaths = append(createdPaths, destinationPath)
 	}
 	if clone.CloudInit.Enabled {
-		cloudInitPath := m.cloudInitISOPath(clone.ID)
-		if err := m.buildCloudInitISO(ctx, cloudInitPath, cloudInitOptions(clone)); err != nil {
+		if err := m.buildCloudInitISO(ctx, m.cloudInitISOPath(clone.ID), cloudInitOptions(clone)); err != nil {
 			removeCreated()
 			return virtualMachine{}, err
 		}
 	}
 	if clone.Firmware == vmFirmwareUEFI {
-		uefiVarsPath := m.uefiVarsPath(clone.ID)
-		if err := copyVMFile(ctx, m.uefiVarsPath(source.ID), uefiVarsPath); err != nil {
+		if err := copyVMFile(ctx, m.uefiVarsPath(source.ID), m.uefiVarsPath(clone.ID)); err != nil {
 			removeCreated()
 			return virtualMachine{}, fmt.Errorf("clone UEFI variable store: %w", err)
 		}
@@ -497,7 +588,7 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 		removeCreated()
 		return virtualMachine{}, err
 	}
-	return clone, nil
+	return cloneVirtualMachine(clone), nil
 }
 
 func (m *vmManager) Start(id string) (virtualMachine, error) {
@@ -521,8 +612,8 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 	if !capabilities.KVMAvailable {
 		return virtualMachine{}, fmt.Errorf("%w: KVM is not available to the current user", errHostUnavailable)
 	}
-	if vm.NetworkMode == networkModeBridge {
-		available, warning := m.bridgeCapability(vm.BridgeName)
+	for _, bridge := range vm.bridges() {
+		available, warning := m.bridgeCapability(bridge)
 		if !available {
 			return virtualMachine{}, fmt.Errorf("%w: %s", errBridgeUnavailable, warning)
 		}
@@ -530,6 +621,11 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 	for _, disk := range vm.Disks {
 		if _, err := os.Stat(m.vmDiskPath(vm.ID, disk)); err != nil {
 			return virtualMachine{}, fmt.Errorf("disk %s is unavailable: %w", disk.ID, err)
+		}
+		if disk.SourceImage != "" {
+			if _, err := m.resolveISOStorageFile(disk.SourceImage, ".img", ".qcow2"); err != nil {
+				return virtualMachine{}, fmt.Errorf("cloud image %s for disk %s is unavailable: %w", disk.SourceImage, disk.ID, err)
+			}
 		}
 	}
 	for _, cdrom := range vm.CDROMs {
@@ -543,11 +639,6 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 	if vm.CloudInit.Enabled {
 		if _, err := os.Stat(m.cloudInitISOPath(vm.ID)); err != nil {
 			return virtualMachine{}, fmt.Errorf("cloud-init ISO is unavailable: %w", err)
-		}
-	}
-	if vm.SourceImage != "" {
-		if _, err := m.resolveISOStorageFile(vm.SourceImage, ".img", ".qcow2"); err != nil {
-			return virtualMachine{}, fmt.Errorf("cloud image is unavailable: %w", err)
 		}
 	}
 	if vm.Firmware == vmFirmwareUEFI {
@@ -576,7 +667,7 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 		}
 		m.vms[index].Status = vmStatusError
 		m.vms[index].LastError = err.Error()
-		_ = m.store.Save(m.vms)
+		m.saveLocked()
 		return virtualMachine{}, fmt.Errorf("start virtual machine: %w", err)
 	}
 	m.vms[index].PID = pid
@@ -592,7 +683,7 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 		}
 		return virtualMachine{}, err
 	}
-	return m.vms[index], nil
+	return cloneVirtualMachine(m.vms[index]), nil
 }
 
 func (m *vmManager) Stop(id string, force bool) (virtualMachine, error) {
@@ -619,7 +710,7 @@ func (m *vmManager) Stop(id string, force bool) (virtualMachine, error) {
 	if err := m.store.Save(m.vms); err != nil {
 		return virtualMachine{}, err
 	}
-	return m.vms[index], nil
+	return cloneVirtualMachine(m.vms[index]), nil
 }
 
 // forceStopLocked kills the VM process and waits, with the manager unlocked,
@@ -660,7 +751,7 @@ func (m *vmManager) forceStopLocked(index int) (virtualMachine, error) {
 			return virtualMachine{}, err
 		}
 	}
-	return m.vms[index], nil
+	return cloneVirtualMachine(m.vms[index]), nil
 }
 
 // signalExitLocked wakes anything waiting for the VM's process to exit.
@@ -746,7 +837,7 @@ func (m *vmManager) Update(id, name, description string, cpus, memoryMiB uint32)
 		return virtualMachine{}, err
 	}
 	commitCloudInit()
-	return m.vms[index], nil
+	return cloneVirtualMachine(m.vms[index]), nil
 }
 
 func (m *vmManager) ConfigureCloudInit(ctx context.Context, id string, configuration vmCloudInit) (virtualMachine, error) {
@@ -767,7 +858,7 @@ func (m *vmManager) ConfigureCloudInit(ctx context.Context, id string, configura
 	}
 	previous := m.vms[index]
 	if previous.CloudInit == configuration {
-		return previous, nil
+		return cloneVirtualMachine(previous), nil
 	}
 	if vmIsActive(previous) {
 		return virtualMachine{}, errDeviceRunningVM
@@ -785,27 +876,15 @@ func (m *vmManager) ConfigureCloudInit(ctx context.Context, id string, configura
 		return virtualMachine{}, err
 	}
 	commit()
-	return candidate, nil
+	return cloneVirtualMachine(candidate), nil
 }
 
-func (m *vmManager) UpdateNetwork(id string, mode networkMode, bridgeName, macAddress string) (virtualMachine, error) {
-	bridgeName = strings.TrimSpace(bridgeName)
-	if mode != networkModeNAT && mode != networkModeBridge {
-		return virtualMachine{}, &fieldError{field: "network_mode", message: "must be NAT or bridge"}
+// AddNIC attaches a network interface to a stopped VM.
+func (m *vmManager) AddNIC(id string, spec vmNICSpec) (virtualMachine, error) {
+	spec, err := normalizeNICSpec(spec)
+	if err != nil {
+		return virtualMachine{}, err
 	}
-	if mode == networkModeBridge {
-		if err := validateInterfaceName(bridgeName); err != nil {
-			return virtualMachine{}, &fieldError{field: "bridge_name", message: err.Error()}
-		}
-	} else {
-		bridgeName = ""
-	}
-	parsedMAC, err := net.ParseMAC(strings.TrimSpace(macAddress))
-	if err != nil || len(parsedMAC) != 6 || parsedMAC[0]&1 != 0 {
-		return virtualMachine{}, &fieldError{field: "mac_address", message: "must be a valid unicast MAC address"}
-	}
-	macAddress = parsedMAC.String()
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.reconcileLocked(); err != nil {
@@ -815,30 +894,145 @@ func (m *vmManager) UpdateNetwork(id string, mode networkMode, bridgeName, macAd
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
 	}
-	current := m.vms[index]
-	changed := current.NetworkMode != mode || current.BridgeName != bridgeName || !strings.EqualFold(current.MACAddress, macAddress)
-	if changed && vmIsActive(current) {
+	if vmIsActive(m.vms[index]) {
 		return virtualMachine{}, errDeviceRunningVM
 	}
-	for candidateIndex, candidate := range m.vms {
-		if candidateIndex != index && strings.EqualFold(candidate.MACAddress, macAddress) {
-			return virtualMachine{}, &fieldError{field: "mac_address", message: "is already assigned to another virtual machine"}
-		}
-	}
-	previous := m.vms[index]
-	m.vms[index].NetworkMode = mode
-	m.vms[index].BridgeName = bridgeName
-	m.vms[index].MACAddress = macAddress
-	if err := m.store.Save(m.vms); err != nil {
-		m.vms[index] = previous
+	nic, err := m.newNICLocked(m.vms[index], spec)
+	if err != nil {
 		return virtualMachine{}, err
 	}
-	return m.vms[index], nil
+	previous := slices.Clone(m.vms[index].NICs)
+	m.vms[index].NICs = append(m.vms[index].NICs, nic)
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms[index].NICs = previous
+		return virtualMachine{}, err
+	}
+	return cloneVirtualMachine(m.vms[index]), nil
 }
 
-func (m *vmManager) AddDisk(ctx context.Context, id string, sizeGiB uint32) (virtualMachine, error) {
-	if sizeGiB < 1 || sizeGiB > 2048 {
-		return virtualMachine{}, &fieldError{field: "size_gib", message: "must be between 1 and 2048"}
+// UpdateNIC changes a network interface. Saving an unchanged interface is
+// allowed while the VM runs; any real change requires it to be stopped.
+func (m *vmManager) UpdateNIC(id, nicID string, spec vmNICSpec) (virtualMachine, error) {
+	spec, err := normalizeNICSpec(spec)
+	if err != nil {
+		return virtualMachine{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.reconcileLocked(); err != nil {
+		return virtualMachine{}, err
+	}
+	index := m.indexByID(id)
+	if index == -1 {
+		return virtualMachine{}, errVMNotFound
+	}
+	nicIndex := slices.IndexFunc(m.vms[index].NICs, func(nic vmNIC) bool { return nic.ID == nicID })
+	if nicIndex == -1 {
+		return virtualMachine{}, &fieldError{field: "nic_id", message: "network interface was not found"}
+	}
+	current := m.vms[index].NICs[nicIndex]
+	updated := vmNIC{ID: current.ID, Mode: spec.Mode, BridgeName: spec.BridgeName, MACAddress: spec.MACAddress}
+	if updated.MACAddress == "" {
+		updated.MACAddress = current.MACAddress
+	}
+	if updated == current {
+		return cloneVirtualMachine(m.vms[index]), nil
+	}
+	if vmIsActive(m.vms[index]) {
+		return virtualMachine{}, errDeviceRunningVM
+	}
+	if !strings.EqualFold(updated.MACAddress, current.MACAddress) && m.macAddressInUseLocked(updated.MACAddress) {
+		return virtualMachine{}, &fieldError{field: "mac_address", message: "is already assigned to another network interface"}
+	}
+	previous := slices.Clone(m.vms[index].NICs)
+	m.vms[index].NICs = slices.Clone(m.vms[index].NICs)
+	m.vms[index].NICs[nicIndex] = updated
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms[index].NICs = previous
+		return virtualMachine{}, err
+	}
+	return cloneVirtualMachine(m.vms[index]), nil
+}
+
+func (m *vmManager) RemoveNIC(id, nicID string) (virtualMachine, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.reconcileLocked(); err != nil {
+		return virtualMachine{}, err
+	}
+	index := m.indexByID(id)
+	if index == -1 {
+		return virtualMachine{}, errVMNotFound
+	}
+	if vmIsActive(m.vms[index]) {
+		return virtualMachine{}, errDeviceRunningVM
+	}
+	nicIndex := slices.IndexFunc(m.vms[index].NICs, func(nic vmNIC) bool { return nic.ID == nicID })
+	if nicIndex == -1 {
+		return virtualMachine{}, &fieldError{field: "nic_id", message: "network interface was not found"}
+	}
+	previous := slices.Clone(m.vms[index].NICs)
+	m.vms[index].NICs = slices.Delete(slices.Clone(m.vms[index].NICs), nicIndex, nicIndex+1)
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms[index].NICs = previous
+		return virtualMachine{}, err
+	}
+	return cloneVirtualMachine(m.vms[index]), nil
+}
+
+// newNICLocked allocates an interface identity for a spec, generating a
+// stable MAC address when none is requested.
+func (m *vmManager) newNICLocked(vm virtualMachine, spec vmNICSpec) (vmNIC, error) {
+	nicID, err := randomID()
+	if err != nil {
+		return vmNIC{}, fmt.Errorf("generate network interface ID: %w", err)
+	}
+	nic := vmNIC{ID: nicID, Mode: spec.Mode, BridgeName: spec.BridgeName, MACAddress: spec.MACAddress}
+	if nic.MACAddress == "" {
+		nic.MACAddress = nicMACAddress(vm.ID, nicID)
+	}
+	if m.macAddressInUseLocked(nic.MACAddress) || vm.hasMACAddress(nic.MACAddress) {
+		return vmNIC{}, &fieldError{field: "mac_address", message: "is already assigned to another network interface"}
+	}
+	return nic, nil
+}
+
+func (m *vmManager) macAddressInUseLocked(macAddress string) bool {
+	for _, vm := range m.vms {
+		if vm.hasMACAddress(macAddress) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeNICSpec(spec vmNICSpec) (vmNICSpec, error) {
+	spec.BridgeName = strings.TrimSpace(spec.BridgeName)
+	spec.MACAddress = strings.TrimSpace(spec.MACAddress)
+	switch spec.Mode {
+	case networkModeNAT:
+		spec.BridgeName = ""
+	case networkModeBridge:
+		if err := validateInterfaceName(spec.BridgeName); err != nil {
+			return vmNICSpec{}, &fieldError{field: "bridge_name", message: err.Error()}
+		}
+	default:
+		return vmNICSpec{}, &fieldError{field: "mode", message: "must be NAT or bridge"}
+	}
+	if spec.MACAddress != "" {
+		parsed, err := net.ParseMAC(spec.MACAddress)
+		if err != nil || len(parsed) != 6 || parsed[0]&1 != 0 {
+			return vmNICSpec{}, &fieldError{field: "mac_address", message: "must be a valid unicast MAC address"}
+		}
+		spec.MACAddress = parsed.String()
+	}
+	return spec, nil
+}
+
+func (m *vmManager) AddDisk(ctx context.Context, id string, spec vmDiskSpec) (virtualMachine, error) {
+	spec.SourceImage = normalizeStorageName(spec.SourceImage)
+	if err := m.validateDiskSpec(spec); err != nil {
+		return virtualMachine{}, err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -853,18 +1047,18 @@ func (m *vmManager) AddDisk(ctx context.Context, id string, sizeGiB uint32) (vir
 	if err != nil {
 		return virtualMachine{}, fmt.Errorf("generate disk ID: %w", err)
 	}
-	disk := vmDisk{ID: diskID, SizeGiB: sizeGiB}
-	path := m.vmDiskPath(id, disk)
-	if err := m.hypervisor.CreateDisk(ctx, path, sizeGiB); err != nil {
-		return virtualMachine{}, fmt.Errorf("create disk: %w", err)
-	}
-	m.vms[index].Disks = append(m.vms[index].Disks, disk)
-	if err := m.store.Save(m.vms); err != nil {
-		m.vms[index].Disks = m.vms[index].Disks[:len(m.vms[index].Disks)-1]
-		_ = removeIfExists(path)
+	disk := vmDisk{ID: diskID, SizeGiB: spec.SizeGiB, SourceImage: spec.SourceImage}
+	if err := m.createDiskFile(ctx, id, disk); err != nil {
 		return virtualMachine{}, err
 	}
-	return m.vms[index], nil
+	previous := slices.Clone(m.vms[index].Disks)
+	m.vms[index].Disks = append(m.vms[index].Disks, disk)
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms[index].Disks = previous
+		_ = removeIfExists(m.vmDiskPath(id, disk))
+		return virtualMachine{}, err
+	}
+	return cloneVirtualMachine(m.vms[index]), nil
 }
 
 func (m *vmManager) RemoveDisk(id, diskID string) (virtualMachine, error) {
@@ -882,16 +1076,13 @@ func (m *vmManager) RemoveDisk(id, diskID string) (virtualMachine, error) {
 		return virtualMachine{}, &fieldError{field: "disk_id", message: "disk was not found"}
 	}
 	disk := m.vms[index].Disks[diskIndex]
-	if disk.System {
-		return virtualMachine{}, &fieldError{field: "disk_id", message: "the system disk cannot be removed"}
-	}
 	path := m.vmDiskPath(id, disk)
 	stagedPath := path + ".removing"
-	if err := os.Rename(path, stagedPath); err != nil {
+	if err := os.Rename(path, stagedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return virtualMachine{}, fmt.Errorf("stage disk removal: %w", err)
 	}
 	previous := slices.Clone(m.vms[index].Disks)
-	m.vms[index].Disks = append(m.vms[index].Disks[:diskIndex], m.vms[index].Disks[diskIndex+1:]...)
+	m.vms[index].Disks = slices.Delete(slices.Clone(m.vms[index].Disks), diskIndex, diskIndex+1)
 	if err := m.store.Save(m.vms); err != nil {
 		m.vms[index].Disks = previous
 		_ = os.Rename(stagedPath, path)
@@ -900,10 +1091,11 @@ func (m *vmManager) RemoveDisk(id, diskID string) (virtualMachine, error) {
 	if err := removeIfExists(stagedPath); err != nil {
 		return virtualMachine{}, fmt.Errorf("remove disk: %w", err)
 	}
-	return m.vms[index], nil
+	return cloneVirtualMachine(m.vms[index]), nil
 }
 
 func (m *vmManager) AddCDROM(id, isoName string) (virtualMachine, error) {
+	isoName = normalizeStorageName(isoName)
 	if err := m.validateOptionalISO(isoName); err != nil {
 		return virtualMachine{}, err
 	}
@@ -920,15 +1112,17 @@ func (m *vmManager) AddCDROM(id, isoName string) (virtualMachine, error) {
 	if err != nil {
 		return virtualMachine{}, fmt.Errorf("generate CD-ROM ID: %w", err)
 	}
+	previous := slices.Clone(m.vms[index].CDROMs)
 	m.vms[index].CDROMs = append(m.vms[index].CDROMs, vmCDROM{ID: cdromID, ISOName: isoName})
 	if err := m.store.Save(m.vms); err != nil {
-		m.vms[index].CDROMs = m.vms[index].CDROMs[:len(m.vms[index].CDROMs)-1]
+		m.vms[index].CDROMs = previous
 		return virtualMachine{}, err
 	}
-	return m.vms[index], nil
+	return cloneVirtualMachine(m.vms[index]), nil
 }
 
 func (m *vmManager) UpdateCDROM(id, cdromID, isoName string) (virtualMachine, error) {
+	isoName = normalizeStorageName(isoName)
 	if err := m.validateOptionalISO(isoName); err != nil {
 		return virtualMachine{}, err
 	}
@@ -944,7 +1138,7 @@ func (m *vmManager) UpdateCDROM(id, cdromID, isoName string) (virtualMachine, er
 	}
 	previousISO := m.vms[index].CDROMs[cdromIndex].ISOName
 	if previousISO == isoName {
-		return m.vms[index], nil
+		return cloneVirtualMachine(m.vms[index]), nil
 	}
 	if vmIsActive(m.vms[index]) {
 		path := ""
@@ -955,15 +1149,10 @@ func (m *vmManager) UpdateCDROM(id, cdromID, isoName string) (virtualMachine, er
 			return virtualMachine{}, fmt.Errorf("change live CD-ROM media: %w", err)
 		}
 	}
+	m.vms[index].CDROMs = slices.Clone(m.vms[index].CDROMs)
 	m.vms[index].CDROMs[cdromIndex].ISOName = isoName
-	if cdromIndex == 0 {
-		m.vms[index].ISOName = isoName
-	}
 	if err := m.store.Save(m.vms); err != nil {
 		m.vms[index].CDROMs[cdromIndex].ISOName = previousISO
-		if cdromIndex == 0 {
-			m.vms[index].ISOName = previousISO
-		}
 		if vmIsActive(m.vms[index]) {
 			previousPath := ""
 			if previousISO != "" {
@@ -973,7 +1162,7 @@ func (m *vmManager) UpdateCDROM(id, cdromID, isoName string) (virtualMachine, er
 		}
 		return virtualMachine{}, err
 	}
-	return m.vms[index], nil
+	return cloneVirtualMachine(m.vms[index]), nil
 }
 
 func (m *vmManager) RemoveCDROM(id, cdromID string) (virtualMachine, error) {
@@ -991,19 +1180,12 @@ func (m *vmManager) RemoveCDROM(id, cdromID string) (virtualMachine, error) {
 		return virtualMachine{}, &fieldError{field: "cdrom_id", message: "CD-ROM device was not found"}
 	}
 	previous := slices.Clone(m.vms[index].CDROMs)
-	previousISO := m.vms[index].ISOName
-	m.vms[index].CDROMs = append(m.vms[index].CDROMs[:cdromIndex], m.vms[index].CDROMs[cdromIndex+1:]...)
-	if len(m.vms[index].CDROMs) == 0 {
-		m.vms[index].ISOName = ""
-	} else {
-		m.vms[index].ISOName = m.vms[index].CDROMs[0].ISOName
-	}
+	m.vms[index].CDROMs = slices.Delete(slices.Clone(m.vms[index].CDROMs), cdromIndex, cdromIndex+1)
 	if err := m.store.Save(m.vms); err != nil {
 		m.vms[index].CDROMs = previous
-		m.vms[index].ISOName = previousISO
 		return virtualMachine{}, err
 	}
-	return m.vms[index], nil
+	return cloneVirtualMachine(m.vms[index]), nil
 }
 
 func (m *vmManager) ConfigureIPMI(id string, config vmIPMIConfig) (virtualMachine, error) {
@@ -1050,7 +1232,7 @@ func (m *vmManager) ConfigureIPMI(id string, config vmIPMIConfig) (virtualMachin
 		}
 		return virtualMachine{}, err
 	}
-	return m.vms[index], nil
+	return cloneVirtualMachine(m.vms[index]), nil
 }
 
 func validateIPMIConfig(config vmIPMIConfig) error {
@@ -1103,7 +1285,7 @@ func (m *vmManager) Reboot(id string) (virtualMachine, error) {
 	if err := m.hypervisor.Reset(m.vms[index]); err != nil {
 		return virtualMachine{}, fmt.Errorf("reboot virtual machine: %w", err)
 	}
-	return m.vms[index], nil
+	return cloneVirtualMachine(m.vms[index]), nil
 }
 
 func (m *vmManager) ListISOs() ([]isoImage, error) {
@@ -1115,9 +1297,6 @@ func (m *vmManager) ListISOs() ([]isoImage, error) {
 	for _, entry := range entries {
 		images = append(images, isoImage{Name: entry.Name, SizeBytes: entry.SizeBytes})
 	}
-	sort.Slice(images, func(left, right int) bool {
-		return strings.ToLower(images[left].Name) < strings.ToLower(images[right].Name)
-	})
 	return images, nil
 }
 
@@ -1193,9 +1372,17 @@ func (m *vmManager) processExited(id string, expectedPID int, exitErr error) {
 	if exitErr != nil && !wasStopping {
 		m.vms[index].LastError = exitErr.Error()
 	}
-	_ = m.store.Save(m.vms)
+	m.saveLocked()
 	if m.networkLifecycle != nil {
 		m.networkLifecycle.Release(exitedVM)
+	}
+}
+
+// saveLocked persists definitions where the caller has no way to report a
+// failure to a user; the error is logged instead of silently dropped.
+func (m *vmManager) saveLocked() {
+	if err := m.store.Save(m.vms); err != nil {
+		slog.Error("persist virtual machine definitions", "error", err)
 	}
 }
 
@@ -1223,40 +1410,16 @@ func (m *vmManager) reconcileLocked() error {
 	return nil
 }
 
-func (m *vmManager) validateCreateOptions(options createVMOptions) error {
-	if err := validateVMIdentityAndResources(options.Name, "", options.CPUs, options.MemoryMiB); err != nil {
-		return err
+func (m *vmManager) validateDiskSpec(spec vmDiskSpec) error {
+	if spec.SizeGiB < 1 || spec.SizeGiB > 2048 {
+		return &fieldError{field: "size_gib", message: "must be between 1 and 2048"}
 	}
-	if options.DiskGiB < 1 || options.DiskGiB > 2048 {
-		return &fieldError{field: "disk_gib", message: "must be between 1 and 2048"}
-	}
-	if options.NetworkMode != networkModeNAT && options.NetworkMode != networkModeBridge {
-		return &fieldError{field: "network_mode", message: "must be NAT or bridge"}
-	}
-	if options.NetworkMode == networkModeBridge {
-		if err := validateInterfaceName(options.BridgeName); err != nil {
-			return &fieldError{field: "bridge_name", message: err.Error()}
-		}
-	}
-	if options.SourceImage != "" && options.ISOName != "" {
-		return &fieldError{field: "source_image", message: "cannot be combined with an installation ISO"}
-	}
-	if options.SourceImage != "" {
-		if _, err := m.resolveISOStorageFile(options.SourceImage, ".img", ".qcow2"); err != nil {
+	if spec.SourceImage != "" {
+		if _, err := m.resolveISOStorageFile(spec.SourceImage, ".img", ".qcow2"); err != nil {
 			return &fieldError{field: "source_image", message: err.Error()}
 		}
-		if !regularFile(m.settings.UEFICodePath) || !regularFile(m.settings.UEFIVarsPath) {
-			return &fieldError{field: "source_image", message: "UEFI firmware is unavailable; configure uefi_code_path and uefi_vars_path"}
-		}
-		return validateCloudInit(options.CloudInit)
 	}
-	if options.ISOName == "" {
-		return &fieldError{field: "iso_name", message: "an installation ISO is required"}
-	}
-	if err := m.validateOptionalISO(options.ISOName); err != nil {
-		return err
-	}
-	return validateCloudInit(options.CloudInit)
+	return nil
 }
 
 func validateCloudInit(configuration vmCloudInit) error {
@@ -1298,6 +1461,15 @@ func (m *vmManager) validateOptionalISO(isoName string) error {
 	return nil
 }
 
+// normalizeStorageName cleans a relative path inside ISO storage.
+func normalizeStorageName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	return filepath.ToSlash(filepath.Clean(filepath.FromSlash(name)))
+}
+
 func (m *vmManager) resolveISOStorageFile(name string, extensions ...string) (string, error) {
 	cleanName := filepath.Clean(filepath.FromSlash(strings.TrimSpace(name)))
 	if cleanName == "." || filepath.IsAbs(cleanName) || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(filepath.Separator)) {
@@ -1319,20 +1491,44 @@ func (m *vmManager) resolveISOStorageFile(name string, extensions ...string) (st
 	}
 	resolved, err := filepath.EvalSymlinks(filepath.Join(root, cleanName))
 	if err != nil {
-		return "", errors.New("the selected source image does not exist")
+		return "", errors.New("the selected file does not exist")
 	}
 	relativePath, err := filepath.Rel(root, resolved)
 	if err != nil || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
 		return "", errors.New("must name a file inside the configured ISO directory")
 	}
 	if !regularFile(resolved) {
-		return "", errors.New("the selected source image is not a regular file")
+		return "", errors.New("the selected file is not a regular file")
 	}
 	return resolved, nil
 }
 
 func vmIsActive(vm virtualMachine) bool {
 	return vm.Status == vmStatusRunning || vm.Status == vmStatusStopping
+}
+
+// bridges lists the distinct host bridges the VM's interfaces attach to.
+func (vm virtualMachine) bridges() []string {
+	var result []string
+	for _, nic := range vm.NICs {
+		if nic.Mode == networkModeBridge && nic.BridgeName != "" && !slices.Contains(result, nic.BridgeName) {
+			result = append(result, nic.BridgeName)
+		}
+	}
+	return result
+}
+
+func (vm virtualMachine) usesBridge(bridge string) bool {
+	return slices.Contains(vm.bridges(), bridge)
+}
+
+func (vm virtualMachine) hasMACAddress(macAddress string) bool {
+	for _, nic := range vm.NICs {
+		if strings.EqualFold(nic.MACAddress, macAddress) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *vmManager) indexByID(id string) int {
@@ -1344,15 +1540,8 @@ func (m *vmManager) indexByID(id string) int {
 	return -1
 }
 
-func (m *vmManager) diskPath(id string) string {
-	return filepath.Join(m.settings.DiskDir, id+".qcow2")
-}
-
 func (m *vmManager) vmDiskPath(vmID string, disk vmDisk) string {
-	if disk.System {
-		return m.diskPath(vmID)
-	}
-	return filepath.Join(m.settings.DiskDir, vmID+"-"+disk.ID+".qcow2")
+	return m.settings.vmDiskPath(vmID, disk.ID)
 }
 
 func (m *vmManager) isoPath(name string) string {
@@ -1434,8 +1623,10 @@ func randomID() (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-func vmMACAddress(id string) string {
-	digest := sha256.Sum256([]byte(id))
+// nicMACAddress derives a stable locally administered QEMU-prefixed MAC
+// address from the VM and interface identities.
+func nicMACAddress(vmID, nicID string) string {
+	digest := sha256.Sum256([]byte(vmID + "/" + nicID))
 	address := net.HardwareAddr{0x52, 0x54, 0x00, digest[0], digest[1], digest[2]}
 	return address.String()
 }

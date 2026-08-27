@@ -101,6 +101,10 @@ func (h *fakeHypervisor) ChangeCDROMMedia(_ virtualMachine, cdromID, isoPath str
 	return nil
 }
 
+func testCapabilities() hostCapabilities {
+	return hostCapabilities{QEMUAvailable: true, KVMAvailable: true}
+}
+
 func newTestVMManager(t *testing.T) (*vmManager, *fakeHypervisor, config) {
 	t.Helper()
 	workingDirectory := t.TempDir()
@@ -112,32 +116,49 @@ func newTestVMManager(t *testing.T) (*vmManager, *fakeHypervisor, config) {
 		t.Fatal(err)
 	}
 	hypervisor := newFakeHypervisor()
-	manager, err := newVMManager(settings, &memoryVMStore{}, hypervisor, func() hostCapabilities {
-		return hostCapabilities{QEMUAvailable: true, KVMAvailable: true, BridgeAvailable: true, BridgeName: "br0"}
+	manager, err := newVMManager(vmManagerOptions{
+		Settings: settings, Store: &memoryVMStore{}, Hypervisor: hypervisor, Capabilities: testCapabilities,
+		BridgeCapability: func(string) (bool, string) { return true, "" },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	manager.newID = func() (string, error) { return "vm-id", nil }
-	manager.bridgeCapability = func(string) (bool, string) { return true, "" }
 	manager.now = func() time.Time { return time.Date(2026, 8, 19, 1, 2, 3, 0, time.UTC) }
 	return manager, hypervisor, settings
 }
 
+// installerVMOptions describes a conventional VM: one disk, one installer
+// CD-ROM, and one NAT interface.
+func installerVMOptions(name string) createVMOptions {
+	return createVMOptions{
+		Name: name, CPUs: 2, MemoryMiB: 2048,
+		Disks:  []vmDiskSpec{{SizeGiB: 20}},
+		CDROMs: []vmCDROMSpec{{ISOName: "installer.iso"}},
+		NICs:   []vmNICSpec{{Mode: networkModeNAT}},
+	}
+}
+
+func bridgedVMOptions(name, bridge string) createVMOptions {
+	options := installerVMOptions(name)
+	options.NICs = []vmNICSpec{{Mode: networkModeBridge, BridgeName: bridge}}
+	return options
+}
+
 func TestVMManagerLifecycle(t *testing.T) {
-	manager, hypervisor, settings := newTestVMManager(t)
-	vm, err := manager.Create(context.Background(), createVMOptions{
-		Name: "Development", CPUs: 2, MemoryMiB: 2048, DiskGiB: 20,
-		ISOName: "installer.iso", NetworkMode: networkModeNAT,
-	})
+	manager, hypervisor, _ := newTestVMManager(t)
+	vm, err := manager.Create(context.Background(), installerVMOptions("Development"))
 	if err != nil {
 		t.Fatalf("Create returned an error: %v", err)
 	}
-	if vm.Status != vmStatusStopped || vm.ID != "vm-id" {
+	if vm.Status != vmStatusStopped || vm.ID != "vm-id" || vm.Firmware != vmFirmwareBIOS {
 		t.Fatalf("unexpected created VM: %#v", vm)
 	}
-	if _, err := os.Stat(filepath.Join(settings.DiskDir, "vm-id.qcow2")); err != nil {
-		t.Fatalf("system disk was not created: %v", err)
+	if len(vm.Disks) != 1 || len(vm.CDROMs) != 1 || len(vm.NICs) != 1 || vm.NICs[0].MACAddress == "" {
+		t.Fatalf("created VM does not expose its devices: %#v", vm)
+	}
+	if _, err := os.Stat(manager.vmDiskPath(vm.ID, vm.Disks[0])); err != nil {
+		t.Fatalf("disk was not created: %v", err)
 	}
 
 	vm, err = manager.Start(vm.ID)
@@ -170,6 +191,26 @@ func TestVMManagerLifecycle(t *testing.T) {
 	}
 }
 
+func TestVMManagerAllowsVMsWithoutDevices(t *testing.T) {
+	manager, _, _ := newTestVMManager(t)
+	vm, err := manager.Create(context.Background(), createVMOptions{Name: "bare", CPUs: 1, MemoryMiB: 512})
+	if err != nil {
+		t.Fatalf("Create returned an error: %v", err)
+	}
+	if len(vm.Disks) != 0 || len(vm.CDROMs) != 0 || len(vm.NICs) != 0 {
+		t.Fatalf("device-less VM gained implied devices: %#v", vm)
+	}
+	if _, err := manager.Start(vm.ID); err != nil {
+		t.Fatalf("device-less VM could not start: %v", err)
+	}
+	if _, err := manager.Stop(vm.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Delete(vm.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestVMManagerCreatesCloudImageVMAsLinkedUEFIDisk(t *testing.T) {
 	manager, hypervisor, settings := newTestVMManager(t)
 	cloudImageDirectory := filepath.Join(settings.ISODir, "cloud")
@@ -180,8 +221,8 @@ func TestVMManagerCreatesCloudImageVMAsLinkedUEFIDisk(t *testing.T) {
 	if err := os.WriteFile(cloudImagePath, []byte("backing qcow2"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	manager.settings.UEFICodePath = filepath.Join(settings.DiskDir, "OVMF_CODE.fd")
-	manager.settings.UEFIVarsPath = filepath.Join(settings.DiskDir, "OVMF_VARS.fd")
+	manager.settings.UEFICodePath = filepath.Join(settings.StateDir, "OVMF_CODE.fd")
+	manager.settings.UEFIVarsPath = filepath.Join(settings.StateDir, "OVMF_VARS.fd")
 	if err := os.WriteFile(manager.settings.UEFICodePath, []byte("code"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -190,8 +231,9 @@ func TestVMManagerCreatesCloudImageVMAsLinkedUEFIDisk(t *testing.T) {
 	}
 
 	vm, err := manager.Create(context.Background(), createVMOptions{
-		Name: "ubuntu-cloud", CPUs: 2, MemoryMiB: 2048, DiskGiB: 20,
-		SourceImage: "cloud/ubuntu.img", NetworkMode: networkModeNAT,
+		Name: "ubuntu-cloud", CPUs: 2, MemoryMiB: 2048,
+		Disks:     []vmDiskSpec{{SizeGiB: 20, SourceImage: "cloud/ubuntu.img"}},
+		NICs:      []vmNICSpec{{Mode: networkModeNAT}},
 		CloudInit: vmCloudInit{Enabled: true, UserData: "#cloud-config\n"},
 	})
 	if err != nil {
@@ -200,7 +242,7 @@ func TestVMManagerCreatesCloudImageVMAsLinkedUEFIDisk(t *testing.T) {
 	if hypervisor.linkedSource != cloudImagePath {
 		t.Fatalf("linked backing path = %q, want %q", hypervisor.linkedSource, cloudImagePath)
 	}
-	if vm.SourceImage != "cloud/ubuntu.img" || vm.Firmware != vmFirmwareUEFI || vm.ISOName != "" || len(vm.CDROMs) != 0 {
+	if vm.Disks[0].SourceImage != "cloud/ubuntu.img" || vm.Firmware != vmFirmwareUEFI || len(vm.CDROMs) != 0 {
 		t.Fatalf("unexpected cloud-image VM: %#v", vm)
 	}
 	contents, err := os.ReadFile(manager.uefiVarsPath(vm.ID))
@@ -243,10 +285,7 @@ func TestVMManagerListsNestedCloudDiskImages(t *testing.T) {
 
 func TestVMManagerRebootsOnlyRunningVMs(t *testing.T) {
 	manager, hypervisor, _ := newTestVMManager(t)
-	vm, err := manager.Create(context.Background(), createVMOptions{
-		Name: "reboot-vm", CPUs: 2, MemoryMiB: 2048, DiskGiB: 20,
-		ISOName: "installer.iso", NetworkMode: networkModeNAT,
-	})
+	vm, err := manager.Create(context.Background(), installerVMOptions("reboot-vm"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,11 +311,9 @@ func TestVMManagerManagesCloudInitISOThroughoutVMLifecycle(t *testing.T) {
 		contents := strings.Join([]string{options.InstanceID, options.Hostname, options.UserData}, "\n")
 		return os.WriteFile(destination, []byte(contents), 0o640)
 	}
-	vm, err := manager.Create(context.Background(), createVMOptions{
-		Name: "cloud-vm", CPUs: 2, MemoryMiB: 2048, DiskGiB: 20,
-		ISOName: "installer.iso", NetworkMode: networkModeNAT,
-		CloudInit: vmCloudInit{Enabled: true, UserData: "#cloud-config\npackages: [curl]\n"},
-	})
+	options := installerVMOptions("cloud-vm")
+	options.CloudInit = vmCloudInit{Enabled: true, UserData: "#cloud-config\npackages: [curl]\n"}
+	vm, err := manager.Create(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,10 +378,7 @@ func TestVMManagerClonesStoppedVMWithIndependentIdentityAndDisks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(settings.ISODir, "tools.iso"), []byte("tools"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	source, err := manager.Create(context.Background(), createVMOptions{
-		Name: "source-vm", CPUs: 4, MemoryMiB: 4096, DiskGiB: 20,
-		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br0",
-	})
+	source, err := manager.Create(context.Background(), bridgedVMOptions("source-vm", "br0"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +386,7 @@ func TestVMManagerClonesStoppedVMWithIndependentIdentityAndDisks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err = manager.AddDisk(context.Background(), source.ID, 5)
+	source, err = manager.AddDisk(context.Background(), source.ID, vmDiskSpec{SizeGiB: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,16 +413,19 @@ func TestVMManagerClonesStoppedVMWithIndependentIdentityAndDisks(t *testing.T) {
 	if clone.ID != "clone-id" || clone.Name != "source-vm-copy" || clone.Status != vmStatusStopped {
 		t.Fatalf("unexpected cloned VM identity: %#v", clone)
 	}
-	if clone.MACAddress == source.MACAddress || clone.MACAddress != vmMACAddress(clone.ID) {
-		t.Fatalf("clone did not receive a new MAC address: source=%s clone=%s", source.MACAddress, clone.MACAddress)
+	if len(clone.NICs) != 1 || clone.NICs[0].MACAddress == source.NICs[0].MACAddress || clone.NICs[0].ID == source.NICs[0].ID {
+		t.Fatalf("clone did not receive a new interface identity: source=%#v clone=%#v", source.NICs, clone.NICs)
+	}
+	if clone.NICs[0].MACAddress != nicMACAddress(clone.ID, clone.NICs[0].ID) {
+		t.Fatalf("clone MAC address is not derived from its identity: %#v", clone.NICs[0])
 	}
 	if clone.CreatedAt.Equal(source.CreatedAt) || clone.Description != source.Description || clone.CPUs != source.CPUs || clone.MemoryMiB != source.MemoryMiB {
 		t.Fatalf("clone definition was not copied with a new timestamp: %#v", clone)
 	}
-	if clone.NetworkMode != source.NetworkMode || clone.BridgeName != source.BridgeName || clone.IPMI.Enabled {
+	if clone.NICs[0].Mode != source.NICs[0].Mode || clone.NICs[0].BridgeName != source.NICs[0].BridgeName || clone.IPMI.Enabled {
 		t.Fatalf("clone network identity was not reset correctly: %#v", clone)
 	}
-	if len(clone.Disks) != len(source.Disks) || clone.Disks[0].ID != "system" || clone.Disks[1].ID == source.Disks[1].ID {
+	if len(clone.Disks) != len(source.Disks) || clone.Disks[0].ID == source.Disks[0].ID || clone.Disks[1].ID == source.Disks[1].ID {
 		t.Fatalf("clone disk definitions are incorrect: source=%#v clone=%#v", source.Disks, clone.Disks)
 	}
 	if len(clone.CDROMs) != len(source.CDROMs) || clone.CDROMs[0].ID == source.CDROMs[0].ID || clone.CDROMs[1].ISOName != "tools.iso" {
@@ -420,14 +457,11 @@ func TestVMManagerClonesStoppedVMWithIndependentIdentityAndDisks(t *testing.T) {
 
 func TestVMManagerRemovesPartialCloneWhenDiskCopyFails(t *testing.T) {
 	manager, _, settings := newTestVMManager(t)
-	source, err := manager.Create(context.Background(), createVMOptions{
-		Name: "source-vm", CPUs: 2, MemoryMiB: 2048, DiskGiB: 20,
-		ISOName: "installer.iso", NetworkMode: networkModeNAT,
-	})
+	source, err := manager.Create(context.Background(), installerVMOptions("source-vm"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err = manager.AddDisk(context.Background(), source.ID, 5)
+	source, err = manager.AddDisk(context.Background(), source.ID, vmDiskSpec{SizeGiB: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,8 +473,11 @@ func TestVMManagerRemovesPartialCloneWhenDiskCopyFails(t *testing.T) {
 	if _, err := manager.Clone(context.Background(), source.ID, "source-copy"); err == nil {
 		t.Fatal("clone unexpectedly succeeded with a missing source disk")
 	}
-	if _, err := os.Stat(filepath.Join(settings.DiskDir, "clone-id.qcow2")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("partial system disk was not cleaned up: %v", err)
+	if leftovers, _ := filepath.Glob(filepath.Join(settings.DiskDir, "clone-id-*.qcow2")); len(leftovers) != 0 {
+		t.Fatalf("partial disks were not cleaned up: %v", leftovers)
+	}
+	if _, err := os.Stat(settings.vmStateDir("clone-id")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial state directory was not cleaned up: %v", err)
 	}
 	vms, err := manager.List()
 	if err != nil || len(vms) != 1 {
@@ -453,19 +490,14 @@ func TestVMManagerUpdatesSettingsAndDevices(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(settings.ISODir, "tools.iso"), []byte("iso"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	vm, err := manager.Create(context.Background(), createVMOptions{
-		Name: "settings-vm", CPUs: 2, MemoryMiB: 2048, DiskGiB: 20,
-		ISOName: "installer.iso", NetworkMode: networkModeNAT,
-	})
+	vm, err := manager.Create(context.Background(), installerVMOptions("settings-vm"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(vm.Disks) != 1 || !vm.Disks[0].System || len(vm.CDROMs) != 1 {
-		t.Fatalf("created VM does not expose its devices: %#v", vm)
-	}
-	vm, err = manager.UpdateNetwork(vm.ID, networkModeBridge, "br0", "52:54:00:aa:bb:cc")
-	if err != nil || vm.NetworkMode != networkModeBridge || vm.BridgeName != "br0" || vm.MACAddress != "52:54:00:aa:bb:cc" {
-		t.Fatalf("network settings were not updated: %#v, %v", vm, err)
+	nic := vm.NICs[0]
+	vm, err = manager.UpdateNIC(vm.ID, nic.ID, vmNICSpec{Mode: networkModeBridge, BridgeName: "br0", MACAddress: "52:54:00:aa:bb:cc"})
+	if err != nil || vm.NICs[0].Mode != networkModeBridge || vm.NICs[0].BridgeName != "br0" || vm.NICs[0].MACAddress != "52:54:00:aa:bb:cc" {
+		t.Fatalf("network interface was not updated: %#v, %v", vm.NICs, err)
 	}
 	vm, err = manager.Start(vm.ID)
 	if err != nil {
@@ -479,19 +511,22 @@ func TestVMManagerUpdatesSettingsAndDevices(t *testing.T) {
 	if err != nil || hypervisor.changedCDROM != vm.CDROMs[0].ID || hypervisor.changedISO != filepath.Join(settings.ISODir, "tools.iso") {
 		t.Fatalf("live CD-ROM update was not applied: %#v, %v", hypervisor, err)
 	}
-	if _, err := manager.AddDisk(context.Background(), vm.ID, 5); !errors.Is(err, errDeviceRunningVM) {
+	if _, err := manager.AddDisk(context.Background(), vm.ID, vmDiskSpec{SizeGiB: 5}); !errors.Is(err, errDeviceRunningVM) {
 		t.Fatalf("adding a running disk returned %v", err)
 	}
-	if _, err := manager.UpdateNetwork(vm.ID, networkModeNAT, "", vm.MACAddress); !errors.Is(err, errDeviceRunningVM) {
+	if _, err := manager.UpdateNIC(vm.ID, nic.ID, vmNICSpec{Mode: networkModeNAT}); !errors.Is(err, errDeviceRunningVM) {
 		t.Fatalf("changing a running NIC returned %v", err)
 	}
-	if _, err := manager.UpdateNetwork(vm.ID, vm.NetworkMode, vm.BridgeName, vm.MACAddress); err != nil {
+	if _, err := manager.UpdateNIC(vm.ID, nic.ID, vmNICSpec{Mode: networkModeBridge, BridgeName: "br0", MACAddress: "52:54:00:aa:bb:cc"}); err != nil {
 		t.Fatalf("saving an unchanged running NIC returned %v", err)
+	}
+	if _, err := manager.AddNIC(vm.ID, vmNICSpec{Mode: networkModeNAT}); !errors.Is(err, errDeviceRunningVM) {
+		t.Fatalf("adding a NIC to a running VM returned %v", err)
 	}
 	if _, err := manager.Stop(vm.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	vm, err = manager.AddDisk(context.Background(), vm.ID, 5)
+	vm, err = manager.AddDisk(context.Background(), vm.ID, vmDiskSpec{SizeGiB: 5})
 	if err != nil || len(vm.Disks) != 2 {
 		t.Fatalf("data disk was not added: %#v, %v", vm, err)
 	}
@@ -507,6 +542,24 @@ func TestVMManagerUpdatesSettingsAndDevices(t *testing.T) {
 	if err != nil || len(vm.CDROMs) != 2 || vm.CDROMs[1].ISOName != "" {
 		t.Fatalf("empty CD-ROM was not added: %#v, %v", vm, err)
 	}
+	vm, err = manager.AddNIC(vm.ID, vmNICSpec{Mode: networkModeBridge, BridgeName: "br1"})
+	if err != nil || len(vm.NICs) != 2 || vm.NICs[1].MACAddress == "" || vm.NICs[1].MACAddress == vm.NICs[0].MACAddress {
+		t.Fatalf("second NIC was not added with its own MAC address: %#v, %v", vm.NICs, err)
+	}
+	if bridges := vm.bridges(); !slices.Equal(bridges, []string{"br0", "br1"}) {
+		t.Fatalf("bridges = %v, want [br0 br1]", bridges)
+	}
+	if _, err := manager.AddNIC(vm.ID, vmNICSpec{Mode: networkModeNAT, MACAddress: "52:54:00:AA:BB:CC"}); err == nil {
+		t.Fatal("duplicate MAC address was accepted")
+	}
+	vm, err = manager.RemoveNIC(vm.ID, vm.NICs[0].ID)
+	if err != nil || len(vm.NICs) != 1 || vm.NICs[0].BridgeName != "br1" {
+		t.Fatalf("NIC was not removed: %#v, %v", vm.NICs, err)
+	}
+	vm, err = manager.RemoveDisk(vm.ID, vm.Disks[0].ID)
+	if err != nil || len(vm.Disks) != 0 {
+		t.Fatalf("last disk could not be removed: %#v, %v", vm.Disks, err)
+	}
 }
 
 func TestVMManagerPersistsDefinitions(t *testing.T) {
@@ -520,63 +573,30 @@ func TestVMManagerPersistsDefinitions(t *testing.T) {
 	}
 	store := newJSONVMStore(settings.StateDir)
 	hypervisor := newFakeHypervisor()
-	capabilities := func() hostCapabilities {
-		return hostCapabilities{QEMUAvailable: true, KVMAvailable: true, BridgeAvailable: true}
-	}
-	manager, err := newVMManager(settings, store, hypervisor, capabilities)
+	options := vmManagerOptions{Settings: settings, Store: store, Hypervisor: hypervisor, Capabilities: testCapabilities}
+	manager, err := newVMManager(options)
 	if err != nil {
 		t.Fatal(err)
 	}
 	manager.newID = func() (string, error) { return "persistent-id", nil }
-	if _, err := manager.Create(context.Background(), createVMOptions{
-		Name: "Persistent", CPUs: 1, MemoryMiB: 1024, DiskGiB: 10,
-		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br0",
-	}); err != nil {
+	if _, err := manager.Create(context.Background(), bridgedVMOptions("Persistent", "br0")); err != nil {
 		t.Fatal(err)
 	}
 
-	reloaded, err := newVMManager(settings, store, hypervisor, capabilities)
+	reloaded, err := newVMManager(options)
 	if err != nil {
 		t.Fatal(err)
 	}
 	vms, err := reloaded.List()
-	if err != nil || len(vms) != 1 || vms[0].ID != "persistent-id" {
+	if err != nil || len(vms) != 1 || vms[0].ID != "persistent-id" || len(vms[0].NICs) != 1 || vms[0].NICs[0].BridgeName != "br0" {
 		t.Fatalf("VM definition was not reloaded: %#v, %v", vms, err)
-	}
-}
-
-func TestVMManagerMigratesLegacyBridgeName(t *testing.T) {
-	workingDirectory := t.TempDir()
-	settings := defaultConfig(workingDirectory)
-	settings.BridgeName = "legacy0"
-	if err := prepareDirectories(settings); err != nil {
-		t.Fatal(err)
-	}
-	store := &memoryVMStore{vms: []virtualMachine{{
-		ID: "legacy-vm", Name: "Legacy", NetworkMode: networkModeBridge, Status: vmStatusStopped,
-	}}}
-	manager, err := newVMManager(settings, store, newFakeHypervisor(), func() hostCapabilities {
-		return hostCapabilities{QEMUAvailable: true, KVMAvailable: true, BridgeName: "legacy0"}
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	vms, err := manager.List()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if vms[0].BridgeName != "legacy0" || store.vms[0].BridgeName != "legacy0" {
-		t.Fatalf("legacy bridge name was not persisted: %#v", vms[0])
 	}
 }
 
 func TestVMManagerRejectsUnavailableBridgeAtStart(t *testing.T) {
 	manager, _, _ := newTestVMManager(t)
 	manager.bridgeCapability = func(string) (bool, string) { return false, "bridge br0 is unavailable" }
-	vm, err := manager.Create(context.Background(), createVMOptions{
-		Name: "bridge-vm", CPUs: 1, MemoryMiB: 1024, DiskGiB: 10,
-		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br0",
-	})
+	vm, err := manager.Create(context.Background(), bridgedVMOptions("bridge-vm", "br0"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,14 +609,11 @@ func TestVMManagerCoordinatesBridgeNetworkLifecycle(t *testing.T) {
 	manager, _, _ := newTestVMManager(t)
 	lifecycle := &fakeVMNetworkLifecycle{}
 	manager.networkLifecycle = lifecycle
-	vm, err := manager.Create(context.Background(), createVMOptions{
-		Name: "dhcp-vm", CPUs: 1, MemoryMiB: 1024, DiskGiB: 10,
-		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br0",
-	})
+	vm, err := manager.Create(context.Background(), bridgedVMOptions("dhcp-vm", "br0"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if vm.MACAddress == "" {
+	if vm.NICs[0].MACAddress == "" {
 		t.Fatal("created VM did not receive a stable MAC address")
 	}
 	if _, err := manager.Start(vm.ID); err != nil {
@@ -661,10 +678,7 @@ func TestVMManagerReportsSymlinkedISOTargetSize(t *testing.T) {
 func TestVMManagerRejectsNamesThatCannotBeDNSLabels(t *testing.T) {
 	manager, _, _ := newTestVMManager(t)
 	for _, name := range []string{"has spaces", "-leading", "trailing-", "under_score"} {
-		_, err := manager.Create(context.Background(), createVMOptions{
-			Name: name, CPUs: 1, MemoryMiB: 512, DiskGiB: 1,
-			ISOName: "installer.iso", NetworkMode: networkModeNAT,
-		})
+		_, err := manager.Create(context.Background(), installerVMOptions(name))
 		var fieldErr *fieldError
 		if !errors.As(err, &fieldErr) || fieldErr.field != "name" {
 			t.Fatalf("invalid DNS name %q was not rejected as a name field error: %v", name, err)
@@ -672,9 +686,30 @@ func TestVMManagerRejectsNamesThatCannotBeDNSLabels(t *testing.T) {
 	}
 }
 
+func TestVMManagerRejectsInvalidDevices(t *testing.T) {
+	manager, _, _ := newTestVMManager(t)
+	for name, options := range map[string]createVMOptions{
+		"oversized disk":       {Name: "a", CPUs: 1, MemoryMiB: 512, Disks: []vmDiskSpec{{SizeGiB: 4096}}},
+		"missing cloud image":  {Name: "b", CPUs: 1, MemoryMiB: 512, Disks: []vmDiskSpec{{SizeGiB: 10, SourceImage: "missing.img"}}},
+		"missing ISO":          {Name: "c", CPUs: 1, MemoryMiB: 512, CDROMs: []vmCDROMSpec{{ISOName: "missing.iso"}}},
+		"bridge without name":  {Name: "d", CPUs: 1, MemoryMiB: 512, NICs: []vmNICSpec{{Mode: networkModeBridge}}},
+		"unknown network mode": {Name: "e", CPUs: 1, MemoryMiB: 512, NICs: []vmNICSpec{{Mode: "vlan"}}},
+		"multicast MAC":        {Name: "f", CPUs: 1, MemoryMiB: 512, NICs: []vmNICSpec{{Mode: networkModeNAT, MACAddress: "01:00:00:00:00:01"}}},
+	} {
+		_, err := manager.Create(context.Background(), options)
+		var fieldErr *fieldError
+		if !errors.As(err, &fieldErr) {
+			t.Errorf("%s was not rejected as a field error: %v", name, err)
+		}
+	}
+	if vms, _ := manager.List(); len(vms) != 0 {
+		t.Fatalf("rejected VMs were created: %#v", vms)
+	}
+}
+
 func TestForceStopWaitsForExitBeforeRestart(t *testing.T) {
 	manager, hypervisor, _ := newTestVMManager(t)
-	vm, err := manager.Create(context.Background(), createVMOptions{Name: "cycle", CPUs: 1, MemoryMiB: 512, DiskGiB: 5, ISOName: "installer.iso", NetworkMode: networkModeNAT})
+	vm, err := manager.Create(context.Background(), installerVMOptions("cycle"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -703,7 +738,7 @@ func TestForceStopWaitsForExitBeforeRestart(t *testing.T) {
 func TestForceStopTimesOutWithoutExitCallback(t *testing.T) {
 	manager, hypervisor, _ := newTestVMManager(t)
 	manager.forceStopTimeout = 10 * time.Millisecond
-	vm, err := manager.Create(context.Background(), createVMOptions{Name: "stuck", CPUs: 1, MemoryMiB: 512, DiskGiB: 5, ISOName: "installer.iso", NetworkMode: networkModeNAT})
+	vm, err := manager.Create(context.Background(), installerVMOptions("stuck"))
 	if err != nil {
 		t.Fatal(err)
 	}

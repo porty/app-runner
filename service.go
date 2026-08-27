@@ -29,11 +29,8 @@ func newAppRunnerService(runtime appRuntime) *appRunnerService {
 func (s *appRunnerService) GetHostStatus(context.Context, *apprunnerv1.GetHostStatusRequest) (*apprunnerv1.GetHostStatusResponse, error) {
 	status := s.capabilities()
 	return &apprunnerv1.GetHostStatusResponse{Status: &apprunnerv1.HostStatus{
-		QemuAvailable:   status.QEMUAvailable,
-		KvmAvailable:    status.KVMAvailable,
-		BridgeAvailable: status.BridgeAvailable,
-		BridgeName:      status.BridgeName,
-		BridgeWarning:   status.BridgeWarning,
+		QemuAvailable: status.QEMUAvailable,
+		KvmAvailable:  status.KVMAvailable,
 	}}, nil
 }
 
@@ -82,17 +79,25 @@ func (s *appRunnerService) GetVM(_ context.Context, request *apprunnerv1.GetVMRe
 }
 
 func (s *appRunnerService) CreateVM(ctx context.Context, request *apprunnerv1.CreateVMRequest) (*apprunnerv1.CreateVMResponse, error) {
-	mode, err := networkModeFromProto(request.GetNetworkMode())
-	if err != nil {
-		return nil, err
+	options := createVMOptions{
+		Name: request.GetName(), Description: request.GetDescription(), CPUs: request.GetCpus(), MemoryMiB: request.GetMemoryMib(),
+		Firmware:  firmwareFromProto(request.GetFirmware()),
+		CloudInit: vmCloudInit{Enabled: request.GetCloudInitEnabled(), UserData: request.GetCloudInitUserData()},
 	}
-	vm, err := s.manager.Create(ctx, createVMOptions{
-		Name: request.GetName(), CPUs: request.GetCpus(), MemoryMiB: request.GetMemoryMib(),
-		DiskGiB: request.GetDiskGib(), ISOName: request.GetIsoName(), NetworkMode: mode,
-		BridgeName:  request.GetBridgeName(),
-		CloudInit:   vmCloudInit{Enabled: request.GetCloudInitEnabled(), UserData: request.GetCloudInitUserData()},
-		SourceImage: request.GetSourceImage(),
-	})
+	for _, disk := range request.GetDisks() {
+		options.Disks = append(options.Disks, diskSpecFromProto(disk))
+	}
+	for _, cdrom := range request.GetCdroms() {
+		options.CDROMs = append(options.CDROMs, vmCDROMSpec{ISOName: cdrom.GetIsoName()})
+	}
+	for _, nic := range request.GetNics() {
+		spec, err := nicSpecFromProto(nic)
+		if err != nil {
+			return nil, err
+		}
+		options.NICs = append(options.NICs, spec)
+	}
+	vm, err := s.manager.Create(ctx, options)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -139,20 +144,40 @@ func (s *appRunnerService) UpdateVM(_ context.Context, request *apprunnerv1.Upda
 	return &apprunnerv1.UpdateVMResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
 }
 
-func (s *appRunnerService) UpdateVMNetwork(_ context.Context, request *apprunnerv1.UpdateVMNetworkRequest) (*apprunnerv1.UpdateVMNetworkResponse, error) {
-	mode, err := networkModeFromProto(request.GetNetworkMode())
+func (s *appRunnerService) AddVMNIC(_ context.Context, request *apprunnerv1.AddVMNICRequest) (*apprunnerv1.AddVMNICResponse, error) {
+	spec, err := nicSpecFromProto(request.GetNic())
 	if err != nil {
 		return nil, err
 	}
-	vm, err := s.manager.UpdateNetwork(request.GetId(), mode, request.GetBridgeName(), request.GetMacAddress())
+	vm, err := s.manager.AddNIC(request.GetId(), spec)
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return &apprunnerv1.UpdateVMNetworkResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+	return &apprunnerv1.AddVMNICResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+}
+
+func (s *appRunnerService) UpdateVMNIC(_ context.Context, request *apprunnerv1.UpdateVMNICRequest) (*apprunnerv1.UpdateVMNICResponse, error) {
+	spec, err := nicSpecFromProto(request.GetNic())
+	if err != nil {
+		return nil, err
+	}
+	vm, err := s.manager.UpdateNIC(request.GetId(), request.GetNicId(), spec)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.UpdateVMNICResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
+}
+
+func (s *appRunnerService) RemoveVMNIC(_ context.Context, request *apprunnerv1.RemoveVMNICRequest) (*apprunnerv1.RemoveVMNICResponse, error) {
+	vm, err := s.manager.RemoveNIC(request.GetId(), request.GetNicId())
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &apprunnerv1.RemoveVMNICResponse{VirtualMachine: virtualMachineToProto(vm)}, nil
 }
 
 func (s *appRunnerService) AddVMDisk(ctx context.Context, request *apprunnerv1.AddVMDiskRequest) (*apprunnerv1.AddVMDiskResponse, error) {
-	vm, err := s.manager.AddDisk(ctx, request.GetId(), request.GetSizeGib())
+	vm, err := s.manager.AddDisk(ctx, request.GetId(), diskSpecFromProto(request.GetDisk()))
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -369,29 +394,74 @@ func virtualMachineToProto(vm virtualMachine) *apprunnerv1.VirtualMachine {
 	case vmStatusError:
 		status = apprunnerv1.VMStatus_VM_STATUS_ERROR
 	}
-	mode := apprunnerv1.NetworkMode_NETWORK_MODE_NAT
-	if vm.NetworkMode == networkModeBridge {
-		mode = apprunnerv1.NetworkMode_NETWORK_MODE_BRIDGE
-	}
 	result := &apprunnerv1.VirtualMachine{
-		Id: vm.ID, Name: vm.Name, Cpus: vm.CPUs, MemoryMib: vm.MemoryMiB, DiskGib: vm.DiskGiB,
-		IsoName: vm.ISOName, NetworkMode: mode, Status: status, BridgeName: vm.BridgeName,
-		CreatedAt: vm.CreatedAt.Format(time.RFC3339), LastError: vm.LastError, Description: vm.Description, MacAddress: vm.MACAddress,
+		Id: vm.ID, Name: vm.Name, Description: vm.Description, Cpus: vm.CPUs, MemoryMib: vm.MemoryMiB,
+		Firmware: firmwareToProto(vm.Firmware), Status: status,
+		CreatedAt: vm.CreatedAt.Format(time.RFC3339), LastError: vm.LastError,
 		ConsolePath: "/console/" + vm.ID,
 		Ipmi: &apprunnerv1.VMIPMIStatus{
 			Enabled: vm.IPMI.Enabled, BridgeName: vm.IPMI.BridgeName, Address: vm.IPMI.Address,
 			Port: ipmiPort, Username: vm.IPMI.Username, Running: vm.IPMIRunning, LastError: vm.IPMIError,
 		},
-		CloudInit:   &apprunnerv1.VMCloudInit{Enabled: vm.CloudInit.Enabled, UserData: vm.CloudInit.UserData},
-		SourceImage: vm.SourceImage, Firmware: string(vm.Firmware),
+		CloudInit: &apprunnerv1.VMCloudInit{Enabled: vm.CloudInit.Enabled, UserData: vm.CloudInit.UserData},
 	}
 	for _, disk := range vm.Disks {
-		result.Disks = append(result.Disks, &apprunnerv1.VMDisk{Id: disk.ID, SizeGib: disk.SizeGiB, System: disk.System})
+		result.Disks = append(result.Disks, &apprunnerv1.VMDisk{Id: disk.ID, SizeGib: disk.SizeGiB, SourceImage: disk.SourceImage})
 	}
 	for _, cdrom := range vm.CDROMs {
 		result.Cdroms = append(result.Cdroms, &apprunnerv1.VMCDROM{Id: cdrom.ID, IsoName: cdrom.ISOName})
 	}
+	for _, nic := range vm.NICs {
+		result.Nics = append(result.Nics, &apprunnerv1.VMNIC{
+			Id: nic.ID, Mode: networkModeToProto(nic.Mode), BridgeName: nic.BridgeName, MacAddress: nic.MACAddress,
+		})
+	}
 	return result
+}
+
+func firmwareToProto(firmware vmFirmware) apprunnerv1.VMFirmware {
+	switch firmware {
+	case vmFirmwareBIOS:
+		return apprunnerv1.VMFirmware_VM_FIRMWARE_BIOS
+	case vmFirmwareUEFI:
+		return apprunnerv1.VMFirmware_VM_FIRMWARE_UEFI
+	default:
+		return apprunnerv1.VMFirmware_VM_FIRMWARE_UNSPECIFIED
+	}
+}
+
+func firmwareFromProto(firmware apprunnerv1.VMFirmware) vmFirmware {
+	switch firmware {
+	case apprunnerv1.VMFirmware_VM_FIRMWARE_BIOS:
+		return vmFirmwareBIOS
+	case apprunnerv1.VMFirmware_VM_FIRMWARE_UEFI:
+		return vmFirmwareUEFI
+	default:
+		return ""
+	}
+}
+
+func networkModeToProto(mode networkMode) apprunnerv1.NetworkMode {
+	switch mode {
+	case networkModeNAT:
+		return apprunnerv1.NetworkMode_NETWORK_MODE_NAT
+	case networkModeBridge:
+		return apprunnerv1.NetworkMode_NETWORK_MODE_BRIDGE
+	default:
+		return apprunnerv1.NetworkMode_NETWORK_MODE_UNSPECIFIED
+	}
+}
+
+func diskSpecFromProto(disk *apprunnerv1.VMDiskSpec) vmDiskSpec {
+	return vmDiskSpec{SizeGiB: disk.GetSizeGib(), SourceImage: disk.GetSourceImage()}
+}
+
+func nicSpecFromProto(nic *apprunnerv1.VMNICSpec) (vmNICSpec, error) {
+	mode, err := networkModeFromProto(nic.GetMode())
+	if err != nil {
+		return vmNICSpec{}, err
+	}
+	return vmNICSpec{Mode: mode, BridgeName: nic.GetBridgeName(), MACAddress: nic.GetMacAddress()}, nil
 }
 
 func cloudInitTemplateToProto(template cloudInitTemplate) *apprunnerv1.CloudInitTemplate {
@@ -408,7 +478,7 @@ func networkModeFromProto(mode apprunnerv1.NetworkMode) (networkMode, error) {
 	case apprunnerv1.NetworkMode_NETWORK_MODE_BRIDGE:
 		return networkModeBridge, nil
 	default:
-		return "", twirp.InvalidArgumentError("network_mode", "must be NAT or bridge")
+		return "", twirp.InvalidArgumentError("mode", "must be NAT or bridge")
 	}
 }
 

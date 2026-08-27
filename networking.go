@@ -201,26 +201,25 @@ func (m *networkManager) Status() (networkingStatus, error) {
 		bridgeIndexes[status.Bridges[index].Name] = index
 	}
 	for _, vm := range vms {
-		if vm.NetworkMode != networkModeBridge || vm.BridgeName == "" {
-			continue
-		}
-		index, found := bridgeIndexes[vm.BridgeName]
-		if !found {
-			status.Bridges = append(status.Bridges, networkBridgeInfo{
-				Name: vm.BridgeName,
-				Diagnostics: []networkDiagnostic{{
-					Key: "bridge_missing", Label: "Bridge exists", Status: diagnosticFail,
-					Detail:      "This bridge is referenced by a managed VM but does not exist on the host.",
-					Remediation: fmt.Sprintf("Create bridge `%s` or move the VM to another bridge.", vm.BridgeName),
-				}},
+		for _, bridge := range vm.bridges() {
+			index, found := bridgeIndexes[bridge]
+			if !found {
+				status.Bridges = append(status.Bridges, networkBridgeInfo{
+					Name: bridge,
+					Diagnostics: []networkDiagnostic{{
+						Key: "bridge_missing", Label: "Bridge exists", Status: diagnosticFail,
+						Detail:      "This bridge is referenced by a managed VM but does not exist on the host.",
+						Remediation: fmt.Sprintf("Create bridge `%s` or move the VM to another bridge.", bridge),
+					}},
+				})
+				index = len(status.Bridges) - 1
+				bridgeIndexes[bridge] = index
+			}
+			status.Bridges[index].Workloads = append(status.Bridges[index].Workloads, workloadAttachment{
+				ID: vm.ID, Name: vm.Name, Type: "virtual_machine",
+				Running: vm.Status == vmStatusRunning || vm.Status == vmStatusStopping,
 			})
-			index = len(status.Bridges) - 1
-			bridgeIndexes[vm.BridgeName] = index
 		}
-		status.Bridges[index].Workloads = append(status.Bridges[index].Workloads, workloadAttachment{
-			ID: vm.ID, Name: vm.Name, Type: "virtual_machine",
-			Running: vm.Status == vmStatusRunning || vm.Status == vmStatusStopping,
-		})
 	}
 	for index := range status.Bridges {
 		sort.Slice(status.Bridges[index].Workloads, func(left, right int) bool {
@@ -230,7 +229,7 @@ func (m *networkManager) Status() (networkingStatus, error) {
 			status.Bridges[index].DHCP = m.dhcp.Status(status.Bridges[index].Name)
 			for leaseIndex := range status.Bridges[index].DHCP.Leases {
 				for _, vm := range vms {
-					if strings.EqualFold(vm.MACAddress, status.Bridges[index].DHCP.Leases[leaseIndex].HardwareAddress) {
+					if vm.hasMACAddress(status.Bridges[index].DHCP.Leases[leaseIndex].HardwareAddress) {
 						status.Bridges[index].DHCP.Leases[leaseIndex].VMName = vm.Name
 						break
 					}
@@ -282,7 +281,7 @@ func (m *networkManager) ConfigureBridgeSettings(bridge, description string, ena
 			return err
 		}
 		for _, vm := range vms {
-			if vm.NetworkMode != networkModeBridge || vm.BridgeName != bridge {
+			if !vm.usesBridge(bridge) {
 				continue
 			}
 			if err := validateDNSLabel(vm.Name); err != nil {
@@ -486,7 +485,7 @@ func (m *networkManager) validateWorkloadSafety(change networkChange) error {
 		return err
 	}
 	for _, vm := range vms {
-		if vm.NetworkMode != networkModeBridge || vm.BridgeName != change.BridgeName {
+		if !vm.usesBridge(change.BridgeName) {
 			continue
 		}
 		if change.Type == networkChangeDeleteBridge {

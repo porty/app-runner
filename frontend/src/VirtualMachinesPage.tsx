@@ -149,14 +149,16 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
 
       <TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 2, bgcolor: 'background.paper' }}>
         <Table>
-          <TableHead><TableRow><TableCell>Name</TableCell><TableCell>Status</TableCell><TableCell>Resources</TableCell><TableCell>Network</TableCell><TableCell>Boot source</TableCell><TableCell align="right">Actions</TableCell></TableRow></TableHead>
+          <TableHead><TableRow><TableCell>Name</TableCell><TableCell>Status</TableCell><TableCell>Resources</TableCell><TableCell>Network</TableCell><TableCell>Media</TableCell><TableCell align="right">Actions</TableCell></TableRow></TableHead>
           <TableBody>
             {virtualMachines.map((vm) => {
               const running = vm.status === 'VM_STATUS_RUNNING'
               const stopping = vm.status === 'VM_STATUS_STOPPING'
               const busy = busyID === vm.id
               const status = statusDetails[vm.status] ?? statusDetails.VM_STATUS_UNSPECIFIED
-              const ipAddress = addressesByMAC.get(vm.mac_address.toLowerCase())
+              const disks = vm.disks ?? []
+              const cdroms = vm.cdroms ?? []
+              const nics = vm.nics ?? []
               return (
                 <TableRow key={vm.id} hover>
                   <TableCell>
@@ -165,17 +167,29 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
                     {vm.last_error && <Typography variant="caption" color="error">{vm.last_error}</Typography>}
                   </TableCell>
                   <TableCell><Chip size="small" label={status.label} color={status.color} /></TableCell>
-                  <TableCell>{vm.cpus} vCPU · {formatMemory(vm.memory_mib)} · {(vm.disks ?? []).length || 1} disk{((vm.disks ?? []).length || 1) === 1 ? '' : 's'}</TableCell>
+                  <TableCell>{vm.cpus} vCPU · {formatMemory(vm.memory_mib)} · {disks.length} disk{disks.length === 1 ? '' : 's'}</TableCell>
                   <TableCell>
-                    <Typography variant="body2">{vm.network_mode === 'NETWORK_MODE_BRIDGE' ? `Bridge (${vm.bridge_name || 'missing'})` : 'NAT'}</Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{vm.mac_address}</Typography>
-                    {ipAddress && <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center', mt: 0.25 }}>
-                      <Typography variant="caption" sx={{ fontFamily: 'monospace', fontVariantNumeric: 'tabular-nums', width: '15ch', whiteSpace: 'nowrap' }}>{ipAddress}</Typography>
-                      <Tooltip title="Copy IP address"><IconButton size="small" aria-label={`Copy IP address ${ipAddress}`} onClick={() => void copyIPAddress(ipAddress)}><ContentCopyRounded fontSize="inherit" /></IconButton></Tooltip>
-                    </Stack>}
+                    {nics.length === 0 && <Typography variant="body2" color="text.secondary">No network interfaces</Typography>}
+                    {nics.map((nic) => {
+                      const ipAddress = addressesByMAC.get(nic.mac_address.toLowerCase())
+                      return (
+                        <Box key={nic.id} sx={{ mb: 0.5 }}>
+                          <Typography variant="body2">{nic.mode === 'NETWORK_MODE_BRIDGE' ? `Bridge (${nic.bridge_name || 'missing'})` : 'NAT'}</Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{nic.mac_address}</Typography>
+                          {ipAddress && <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center', mt: 0.25 }}>
+                            <Typography variant="caption" sx={{ fontFamily: 'monospace', fontVariantNumeric: 'tabular-nums', width: '15ch', whiteSpace: 'nowrap' }}>{ipAddress}</Typography>
+                            <Tooltip title="Copy IP address"><IconButton size="small" aria-label={`Copy IP address ${ipAddress}`} onClick={() => void copyIPAddress(ipAddress)}><ContentCopyRounded fontSize="inherit" /></IconButton></Tooltip>
+                          </Stack>}
+                        </Box>
+                      )
+                    })}
                     {vm.ipmi?.enabled && <Typography variant="caption" sx={{ display: 'block' }} color={vm.ipmi.running ? 'success.main' : 'error.main'}>IPMI {vm.ipmi.address}:{vm.ipmi.port || 623}{vm.ipmi.running ? '' : ` · ${vm.ipmi.last_error || 'not listening'}`}</Typography>}
                   </TableCell>
-                  <TableCell>{vm.source_image ? `Cloud image: ${vm.source_image}` : (vm.cdroms ?? []).map((cdrom) => cdrom.iso_name || 'Ejected').join(', ') || vm.iso_name || 'No CD-ROM'}</TableCell>
+                  <TableCell>
+                    {disks.length === 0 && cdroms.length === 0 && <Typography variant="body2" color="text.secondary">No media</Typography>}
+                    {disks.map((disk, index) => <Typography key={disk.id} variant="body2">{index === 0 ? 'Boot disk' : 'Disk'} {disk.size_gib} GiB{disk.source_image ? ` · ${disk.source_image}` : ''}</Typography>)}
+                    {cdroms.map((cdrom) => <Typography key={cdrom.id} variant="body2" color="text.secondary">CD-ROM · {cdrom.iso_name || 'empty'}</Typography>)}
+                  </TableCell>
                   <TableCell align="right">
                     <Stack direction="row" spacing={0.5} sx={{ justifyContent: 'flex-end' }}>
                       <Button component={Link} to={`/compute/virtual-machines/${vm.id}/settings`} size="small" startIcon={<SettingsRounded />} disabled={busy}>Settings</Button>
@@ -200,7 +214,7 @@ export default function VirtualMachinesPage({ refreshInterval }: { refreshInterv
         <DialogContent>
           <Stack spacing={2.25} sx={{ mt: 1 }}>
             <Alert severity="info">
-              All virtual disks will be fully copied. The clone receives a new MAC address and starts with IPMI disabled. Guest hostnames, machine IDs, SSH keys, and static IP settings remain unchanged inside the copied disks.
+              All virtual disks will be fully copied. The clone receives new MAC addresses and starts with IPMI disabled. Guest hostnames, machine IDs, SSH keys, and static IP settings remain unchanged inside the copied disks.
             </Alert>
             <TextField
               label="New virtual machine name"

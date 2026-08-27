@@ -301,13 +301,27 @@ func (m *dhcpManager) suggestCIDRLocked(bridge string) string {
 	return "10.0.0.0/24"
 }
 
+// Prepare starts the managed services for every bridge the VM attaches to
+// and records the VM as a user of each. A failure on a later bridge releases
+// the earlier ones so nothing is left half-started.
 func (m *dhcpManager) Prepare(vm virtualMachine) error {
-	if vm.NetworkMode != networkModeBridge || vm.BridgeName == "" {
-		return nil
+	prepared := make([]string, 0)
+	for _, bridge := range vm.bridges() {
+		if err := m.prepareBridge(bridge, vm); err != nil {
+			for _, previous := range prepared {
+				m.releaseBridge(previous, vm.ID)
+			}
+			return err
+		}
+		prepared = append(prepared, bridge)
 	}
+	return nil
+}
+
+func (m *dhcpManager) prepareBridge(bridge string, vm virtualMachine) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	config := m.state.Bridges[vm.BridgeName]
+	config := m.state.Bridges[bridge]
 	if !config.Enabled {
 		return nil
 	}
@@ -320,45 +334,45 @@ func (m *dhcpManager) Prepare(vm virtualMachine) error {
 			return fmt.Errorf("VM name %q cannot be published by Auto DNS: %w", vm.Name, err)
 		}
 	}
-	runtime := m.runtimes[vm.BridgeName]
+	runtime := m.runtimes[bridge]
 	if runtime != nil && runtime.running {
 		if config.DNS.Enabled {
 			if m.dns == nil {
 				return errors.New("DNS manager is not configured")
 			}
-			dnsRunning, _ := m.dns.Status(vm.BridgeName)
+			dnsRunning, _ := m.dns.Status(bridge)
 			if !dnsRunning {
-				if err := m.dns.Start(vm.BridgeName, parsed.Server, config.DNS, func() map[string]netip.Addr {
-					return m.autoDNSRecords(vm.BridgeName)
+				if err := m.dns.Start(bridge, parsed.Server, config.DNS, func() map[string]netip.Addr {
+					return m.autoDNSRecords(bridge)
 				}); err != nil {
-					m.errors[vm.BridgeName] = err.Error()
-					return fmt.Errorf("restart DNS for %s: %w", vm.BridgeName, err)
+					m.errors[bridge] = err.Error()
+					return fmt.Errorf("restart DNS for %s: %w", bridge, err)
 				}
 			}
 		}
 		runtime.users[vm.ID] = struct{}{}
 		runtime.vms[vm.ID] = vm
-		delete(m.errors, vm.BridgeName)
+		delete(m.errors, bridge)
 		return nil
 	}
 	if runtime == nil {
 		runtime = &dhcpRuntime{users: make(map[string]struct{}), vms: make(map[string]virtualMachine)}
 	}
-	if err := m.provider.EnsureBridgeDHCPAddress(vm.BridgeName, parsed); err != nil {
-		m.errors[vm.BridgeName] = err.Error()
+	if err := m.provider.EnsureBridgeDHCPAddress(bridge, parsed); err != nil {
+		m.errors[bridge] = err.Error()
 		return fmt.Errorf("prepare bridge DHCP address: %w", err)
 	}
 	natStarted := false
 	if config.NAT {
 		if m.nat == nil {
 			err := errors.New("NAT manager is not configured")
-			m.errors[vm.BridgeName] = err.Error()
+			m.errors[bridge] = err.Error()
 			return err
 		}
-		wasRunning := m.nat.Running(vm.BridgeName)
-		if err := m.nat.Start(vm.BridgeName, parsed.Prefix); err != nil {
-			m.errors[vm.BridgeName] = err.Error()
-			return fmt.Errorf("start NAT for %s: %w", vm.BridgeName, err)
+		wasRunning := m.nat.Running(bridge)
+		if err := m.nat.Start(bridge, parsed.Prefix); err != nil {
+			m.errors[bridge] = err.Error()
+			return fmt.Errorf("start NAT for %s: %w", bridge, err)
 		}
 		natStarted = !wasRunning
 	}
@@ -367,90 +381,95 @@ func (m *dhcpManager) Prepare(vm virtualMachine) error {
 		if m.dns == nil {
 			err := errors.New("DNS manager is not configured")
 			if natStarted {
-				err = errors.Join(err, m.nat.Stop(vm.BridgeName))
+				err = errors.Join(err, m.nat.Stop(bridge))
 			}
-			m.errors[vm.BridgeName] = err.Error()
+			m.errors[bridge] = err.Error()
 			return err
 		}
-		wasRunning, _ := m.dns.Status(vm.BridgeName)
-		if err := m.dns.Start(vm.BridgeName, parsed.Server, config.DNS, func() map[string]netip.Addr {
-			return m.autoDNSRecords(vm.BridgeName)
+		wasRunning, _ := m.dns.Status(bridge)
+		if err := m.dns.Start(bridge, parsed.Server, config.DNS, func() map[string]netip.Addr {
+			return m.autoDNSRecords(bridge)
 		}); err != nil {
 			if natStarted {
-				err = errors.Join(err, m.nat.Stop(vm.BridgeName))
+				err = errors.Join(err, m.nat.Stop(bridge))
 			}
-			m.errors[vm.BridgeName] = err.Error()
-			return fmt.Errorf("start DNS for %s: %w", vm.BridgeName, err)
+			m.errors[bridge] = err.Error()
+			return fmt.Errorf("start DNS for %s: %w", bridge, err)
 		}
 		dnsStarted = !wasRunning
 	}
 	handler := func(connection net.PacketConn, peer net.Addr, request *dhcpv4.DHCPv4) {
-		m.handlePacket(vm.BridgeName, parsed, config, connection, peer, request)
+		m.handlePacket(bridge, parsed, config, connection, peer, request)
 	}
-	server, err := m.newServer(vm.BridgeName, handler)
+	server, err := m.newServer(bridge, handler)
 	if err != nil {
 		if dnsStarted {
-			err = errors.Join(err, m.dns.Stop(vm.BridgeName))
+			err = errors.Join(err, m.dns.Stop(bridge))
 		}
 		if natStarted {
-			err = errors.Join(err, m.nat.Stop(vm.BridgeName))
+			err = errors.Join(err, m.nat.Stop(bridge))
 		}
-		m.errors[vm.BridgeName] = err.Error()
-		return fmt.Errorf("start DHCP listener on %s: %w", vm.BridgeName, err)
+		m.errors[bridge] = err.Error()
+		return fmt.Errorf("start DHCP listener on %s: %w", bridge, err)
 	}
 	runtime.users[vm.ID] = struct{}{}
 	runtime.vms[vm.ID] = vm
-	m.runtimes[vm.BridgeName] = runtime
+	m.runtimes[bridge] = runtime
 	runtime.server = server
 	runtime.running = true
 	runtime.nat = config.NAT
 	runtime.dns = config.DNS.Enabled
-	delete(m.errors, vm.BridgeName)
-	go m.serve(vm.BridgeName, runtime)
-	slog.Info("bridge DHCP server started", "bridge", vm.BridgeName, "cidr", parsed.Prefix.String(), "pool_start", parsed.PoolStart, "pool_end", parsed.PoolEnd)
+	delete(m.errors, bridge)
+	go m.serve(bridge, runtime)
+	slog.Info("bridge DHCP server started", "bridge", bridge, "cidr", parsed.Prefix.String(), "pool_start", parsed.PoolStart, "pool_end", parsed.PoolEnd)
 	return nil
 }
 
+// Release drops the VM from every bridge it used, stopping services on
+// bridges that no longer have any running VM.
 func (m *dhcpManager) Release(vm virtualMachine) {
-	if vm.NetworkMode != networkModeBridge || vm.BridgeName == "" {
-		return
+	for _, bridge := range vm.bridges() {
+		m.releaseBridge(bridge, vm.ID)
 	}
+}
+
+func (m *dhcpManager) releaseBridge(bridge, vmID string) {
 	m.mu.Lock()
-	runtime := m.runtimes[vm.BridgeName]
+	runtime := m.runtimes[bridge]
 	if runtime == nil {
 		m.mu.Unlock()
 		return
 	}
-	delete(runtime.users, vm.ID)
-	delete(runtime.vms, vm.ID)
+	delete(runtime.users, vmID)
+	delete(runtime.vms, vmID)
 	if len(runtime.users) != 0 {
 		m.mu.Unlock()
 		return
 	}
-	delete(m.runtimes, vm.BridgeName)
+	delete(m.runtimes, bridge)
 	m.mu.Unlock()
 	if runtime.server != nil {
 		if err := runtime.server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			slog.Warn("close bridge DHCP server", "bridge", vm.BridgeName, "error", err)
+			slog.Warn("close bridge DHCP server", "bridge", bridge, "error", err)
 		}
 	}
 	if runtime.dns && m.dns != nil {
-		if err := m.dns.Stop(vm.BridgeName); err != nil {
+		if err := m.dns.Stop(bridge); err != nil {
 			m.mu.Lock()
-			m.errors[vm.BridgeName] = err.Error()
+			m.errors[bridge] = err.Error()
 			m.mu.Unlock()
-			slog.Warn("stop bridge DNS", "bridge", vm.BridgeName, "error", err)
+			slog.Warn("stop bridge DNS", "bridge", bridge, "error", err)
 		}
 	}
 	if runtime.nat && m.nat != nil {
-		if err := m.nat.Stop(vm.BridgeName); err != nil {
+		if err := m.nat.Stop(bridge); err != nil {
 			m.mu.Lock()
-			m.errors[vm.BridgeName] = err.Error()
+			m.errors[bridge] = err.Error()
 			m.mu.Unlock()
-			slog.Warn("stop bridge NAT", "bridge", vm.BridgeName, "error", err)
+			slog.Warn("stop bridge NAT", "bridge", bridge, "error", err)
 		}
 	}
-	slog.Info("bridge DHCP server stopped", "bridge", vm.BridgeName)
+	slog.Info("bridge DHCP server stopped", "bridge", bridge)
 }
 
 func (m *dhcpManager) Reconcile(vms []virtualMachine) error {
@@ -527,8 +546,14 @@ func (m *dhcpManager) autoDNSRecords(bridge string) map[string]netip.Addr {
 		}
 	}
 	for _, vm := range runtime.vms {
-		if address, found := addressesByMAC[strings.ToLower(vm.MACAddress)]; found {
-			result[strings.ToLower(vm.Name)] = address
+		for _, nic := range vm.NICs {
+			if nic.Mode != networkModeBridge || nic.BridgeName != bridge {
+				continue
+			}
+			if address, found := addressesByMAC[strings.ToLower(nic.MACAddress)]; found {
+				result[strings.ToLower(vm.Name)] = address
+				break
+			}
 		}
 	}
 	return result

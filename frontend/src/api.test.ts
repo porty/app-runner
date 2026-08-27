@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMCloudInit, configureVMIPMI, createCloudInitTemplate, createVM, deleteCloudInitTemplate, downloadStorageFile, getNetworkingStatus, listCloudInitTemplates, listDiskImages, listStorage, listVMs, rebootVM, updateCloudInitTemplate, uploadStorageFiles } from './api'
+import { addVMNIC, applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMCloudInit, configureVMIPMI, createCloudInitTemplate, createVM, deleteCloudInitTemplate, downloadStorageFile, getNetworkingStatus, listCloudInitTemplates, listDiskImages, listStorage, listVMs, rebootVM, updateCloudInitTemplate, uploadStorageFiles } from './api'
 
 describe('Twirp API client', () => {
   afterEach(() => {
@@ -51,9 +51,9 @@ describe('Twirp API client', () => {
       name: 'Development',
       cpus: 2,
       memory_mib: 2048,
-      disk_gib: 20,
-      iso_name: 'installer.iso',
-      network_mode: 'NETWORK_MODE_NAT' as const,
+      disks: [{ id: 'd0', size_gib: 20 }],
+      cdroms: [{ id: 'c0', iso_name: 'installer.iso' }],
+      nics: [{ id: 'n0', mode: 'NETWORK_MODE_NAT' as const, mac_address: '52:54:00:00:00:01' }],
       status: 'VM_STATUS_STOPPED' as const,
       created_at: '2026-08-19T05:30:00Z',
       console_path: '/console/vm-id',
@@ -66,34 +66,20 @@ describe('Twirp API client', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(
-      createVM({
-        name: 'Development',
-        cpus: 2,
-        memory_mib: 2048,
-        disk_gib: 20,
-        iso_name: 'installer.iso',
-        network_mode: 'NETWORK_MODE_NAT',
-        cloud_init_enabled: true,
-        cloud_init_user_data: '#cloud-config\npackages: [curl]\n',
-        source_image: '',
-      }),
-    ).resolves.toEqual(virtualMachine)
+    const request = {
+      name: 'Development',
+      cpus: 2,
+      memory_mib: 2048,
+      disks: [{ size_gib: 20 }],
+      cdroms: [{ iso_name: 'installer.iso' }],
+      nics: [{ mode: 'NETWORK_MODE_NAT' as const }],
+      cloud_init_enabled: true,
+      cloud_init_user_data: '#cloud-config\npackages: [curl]\n',
+    }
+    await expect(createVM(request)).resolves.toEqual(virtualMachine)
     expect(fetchMock).toHaveBeenCalledWith(
       '/twirp/apprunner.v1.AppRunnerService/CreateVM',
-      expect.objectContaining({
-        body: JSON.stringify({
-          name: 'Development',
-          cpus: 2,
-          memory_mib: 2048,
-          disk_gib: 20,
-          iso_name: 'installer.iso',
-          network_mode: 'NETWORK_MODE_NAT',
-          cloud_init_enabled: true,
-          cloud_init_user_data: '#cloud-config\npackages: [curl]\n',
-          source_image: '',
-        }),
-      }),
+      expect.objectContaining({ body: JSON.stringify(request) }),
     )
   })
 
@@ -108,6 +94,20 @@ describe('Twirp API client', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/twirp/apprunner.v1.AppRunnerService/CloneVM',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ id: 'vm-id', name: 'Development-copy' }) }),
+    )
+  })
+
+  it('adds a network interface through Twirp', async () => {
+    const virtualMachine = { id: 'vm-id', name: 'Development', nics: [{ id: 'n0', mode: 'NETWORK_MODE_BRIDGE' as const, bridge_name: 'br0', mac_address: '52:54:00:00:00:01' }] }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ virtual_machine: virtualMachine }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(addVMNIC('vm-id', { mode: 'NETWORK_MODE_BRIDGE', bridge_name: 'br0' })).resolves.toEqual(virtualMachine)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/twirp/apprunner.v1.AppRunnerService/AddVMNIC',
+      expect.objectContaining({ body: JSON.stringify({ id: 'vm-id', nic: { mode: 'NETWORK_MODE_BRIDGE', bridge_name: 'br0' } }) }),
     )
   })
 

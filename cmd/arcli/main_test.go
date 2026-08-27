@@ -84,7 +84,7 @@ func twirpServer(t *testing.T, responses map[string]string) *httptest.Server {
 	return server
 }
 
-const vmListJSON = `{"virtual_machines":[{"id":"vm-1","name":"example","network_mode":"NETWORK_MODE_BRIDGE","bridge_name":"br0","mac_address":"52:54:00:00:00:01"},{"id":"vm-2","name":"nat-vm","network_mode":"NETWORK_MODE_NAT"}]}`
+const vmListJSON = `{"virtual_machines":[{"id":"vm-1","name":"example","nics":[{"id":"n0","mode":"NETWORK_MODE_BRIDGE","bridge_name":"br0","mac_address":"52:54:00:00:00:01"}]},{"id":"vm-2","name":"nat-vm","nics":[{"id":"n0","mode":"NETWORK_MODE_NAT","mac_address":"52:54:00:00:00:02"}]}]}`
 
 func TestVMGetResolvesName(t *testing.T) {
 	server := twirpServer(t, map[string]string{
@@ -149,8 +149,8 @@ func TestVMAddressWaitsForLease(t *testing.T) {
 	if err := run([]string{"--server", server.URL, "vm", "address", "example"}, &output); err == nil || !strings.Contains(err.Error(), "no DHCP lease") {
 		t.Errorf("err = %v, want missing lease error without --wait", err)
 	}
-	if err := run([]string{"--server", server.URL, "vm", "address", "nat-vm"}, &output); err == nil || !strings.Contains(err.Error(), "NAT") {
-		t.Errorf("err = %v, want NAT error", err)
+	if err := run([]string{"--server", server.URL, "vm", "address", "nat-vm"}, &output); err == nil || !strings.Contains(err.Error(), "no bridged") {
+		t.Errorf("err = %v, want no bridged interface error", err)
 	}
 }
 
@@ -175,7 +175,14 @@ func TestVMCreateFromTemplateAndStart(t *testing.T) {
 		Name              string `json:"name"`
 		CloudInitEnabled  bool   `json:"cloud_init_enabled"`
 		CloudInitUserData string `json:"cloud_init_user_data"`
-		SourceImage       string `json:"source_image"`
+		Disks             []struct {
+			SizeGib     uint32 `json:"size_gib"`
+			SourceImage string `json:"source_image"`
+		} `json:"disks"`
+		Nics []struct {
+			Mode       string `json:"mode"`
+			BridgeName string `json:"bridge_name"`
+		} `json:"nics"`
 	}
 	started := false
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
@@ -197,11 +204,17 @@ func TestVMCreateFromTemplateAndStart(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	var output bytes.Buffer
-	if err := run([]string{"--server", server.URL, "-o", "json", "vm", "create", "--name", "node", "--image", "ubuntu.img", "--network", "bridge", "--bridge", "br0", "--cloud-init-template", "base", "--start"}, &output); err != nil {
+	if err := run([]string{"--server", server.URL, "-o", "json", "vm", "create", "--name", "node", "--disk", "20:ubuntu.img", "--nic", "bridge:br0", "--cloud-init-template", "base", "--start"}, &output); err != nil {
 		t.Fatal(err)
 	}
-	if created.Name != "node" || !created.CloudInitEnabled || created.CloudInitUserData != "#cloud-config\nhostname: x\n" || created.SourceImage != "ubuntu.img" {
+	if created.Name != "node" || !created.CloudInitEnabled || created.CloudInitUserData != "#cloud-config\nhostname: x\n" {
 		t.Errorf("create request = %+v", created)
+	}
+	if len(created.Disks) != 1 || created.Disks[0].SizeGib != 20 || created.Disks[0].SourceImage != "ubuntu.img" {
+		t.Errorf("create request disks = %+v", created.Disks)
+	}
+	if len(created.Nics) != 1 || created.Nics[0].Mode != "NETWORK_MODE_BRIDGE" || created.Nics[0].BridgeName != "br0" {
+		t.Errorf("create request nics = %+v", created.Nics)
 	}
 	if !started {
 		t.Error("expected the VM to be started")

@@ -18,7 +18,9 @@ service AppRunnerService {
   rpc StopVM(StopVMRequest) returns (StopVMResponse);
   rpc RebootVM(RebootVMRequest) returns (RebootVMResponse);
   rpc UpdateVM(UpdateVMRequest) returns (UpdateVMResponse);
-  rpc UpdateVMNetwork(UpdateVMNetworkRequest) returns (UpdateVMNetworkResponse);
+  rpc AddVMNIC(AddVMNICRequest) returns (AddVMNICResponse);
+  rpc UpdateVMNIC(UpdateVMNICRequest) returns (UpdateVMNICResponse);
+  rpc RemoveVMNIC(RemoveVMNICRequest) returns (RemoveVMNICResponse);
   rpc AddVMDisk(AddVMDiskRequest) returns (AddVMDiskResponse);
   rpc RemoveVMDisk(RemoveVMDiskRequest) returns (RemoveVMDiskResponse);
   rpc AddVMCDROM(AddVMCDROMRequest) returns (AddVMCDROMResponse);
@@ -55,38 +57,66 @@ enum NetworkMode {
   NETWORK_MODE_BRIDGE = 2;
 }
 
+enum VMFirmware {
+  VM_FIRMWARE_UNSPECIFIED = 0;
+  VM_FIRMWARE_BIOS = 1;
+  VM_FIRMWARE_UEFI = 2;
+}
+
+// A virtual machine has zero or more disks, CD-ROM drives, and network
+// interfaces; none are implied.
 message VirtualMachine {
   string id = 1;
   string name = 2;
-  uint32 cpus = 3;
-  uint32 memory_mib = 4;
-  uint32 disk_gib = 5;
-  string iso_name = 6;
-  NetworkMode network_mode = 7;
-  VMStatus status = 8;
-  string created_at = 9;
-  string last_error = 10;
-  string console_path = 11;
-  string bridge_name = 12;
-  VMIPMIStatus ipmi = 13;
-  string description = 14;
-  repeated VMDisk disks = 15;
-  repeated VMCDROM cdroms = 16;
-  string mac_address = 17;
-  VMCloudInit cloud_init = 18;
-  string source_image = 19;
-  string firmware = 20;
+  string description = 3;
+  uint32 cpus = 4;
+  uint32 memory_mib = 5;
+  VMFirmware firmware = 6;
+  VMStatus status = 7;
+  string created_at = 8;
+  string last_error = 9;
+  string console_path = 10;
+  repeated VMDisk disks = 11;
+  repeated VMCDROM cdroms = 12;
+  repeated VMNIC nics = 13;
+  VMCloudInit cloud_init = 14;
+  VMIPMIStatus ipmi = 15;
 }
 
+// Disks attach in list order; the first disk is the boot disk. source_image
+// names the cloud image in ISO storage that a linked disk overlays.
 message VMDisk {
   string id = 1;
   uint32 size_gib = 2;
-  bool system = 3;
+  string source_image = 3;
 }
 
 message VMCDROM {
   string id = 1;
   string iso_name = 2;
+}
+
+message VMNIC {
+  string id = 1;
+  NetworkMode mode = 2;
+  string bridge_name = 3;
+  string mac_address = 4;
+}
+
+message VMDiskSpec {
+  uint32 size_gib = 1;
+  string source_image = 2;
+}
+
+message VMCDROMSpec {
+  string iso_name = 1;
+}
+
+// mac_address is generated when empty.
+message VMNICSpec {
+  NetworkMode mode = 1;
+  string bridge_name = 2;
+  string mac_address = 3;
 }
 
 message VMCloudInit {
@@ -107,9 +137,6 @@ message VMIPMIStatus {
 message HostStatus {
   bool qemu_available = 1;
   bool kvm_available = 2;
-  bool bridge_available = 3;
-  string bridge_name = 4;
-  string bridge_warning = 5;
 }
 
 message ISOImage {
@@ -191,17 +218,19 @@ message GetVMResponse {
   VirtualMachine virtual_machine = 1;
 }
 
+// firmware defaults to UEFI when any disk overlays a cloud image and BIOS
+// otherwise.
 message CreateVMRequest {
   string name = 1;
-  uint32 cpus = 2;
-  uint32 memory_mib = 3;
-  uint32 disk_gib = 4;
-  string iso_name = 5;
-  NetworkMode network_mode = 6;
-  string bridge_name = 7;
-  bool cloud_init_enabled = 8;
-  string cloud_init_user_data = 9;
-  string source_image = 10;
+  string description = 2;
+  uint32 cpus = 3;
+  uint32 memory_mib = 4;
+  VMFirmware firmware = 5;
+  repeated VMDiskSpec disks = 6;
+  repeated VMCDROMSpec cdroms = 7;
+  repeated VMNICSpec nics = 8;
+  bool cloud_init_enabled = 9;
+  string cloud_init_user_data = 10;
 }
 
 message CreateVMResponse {
@@ -254,20 +283,37 @@ message UpdateVMResponse {
   VirtualMachine virtual_machine = 1;
 }
 
-message UpdateVMNetworkRequest {
+message AddVMNICRequest {
   string id = 1;
-  NetworkMode network_mode = 2;
-  string bridge_name = 3;
-  string mac_address = 4;
+  VMNICSpec nic = 2;
 }
 
-message UpdateVMNetworkResponse {
+message AddVMNICResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message UpdateVMNICRequest {
+  string id = 1;
+  string nic_id = 2;
+  VMNICSpec nic = 3;
+}
+
+message UpdateVMNICResponse {
+  VirtualMachine virtual_machine = 1;
+}
+
+message RemoveVMNICRequest {
+  string id = 1;
+  string nic_id = 2;
+}
+
+message RemoveVMNICResponse {
   VirtualMachine virtual_machine = 1;
 }
 
 message AddVMDiskRequest {
   string id = 1;
-  uint32 size_gib = 2;
+  VMDiskSpec disk = 2;
 }
 
 message AddVMDiskResponse {

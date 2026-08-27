@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -440,7 +441,7 @@ func storage(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 
 func vm(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) == 0 || args[0] == "help" {
-		_, err := fmt.Fprintln(output, "usage: arcli vm list|get|address|create|clone|start|stop|reboot|delete|update|network|disk|cdrom|cloud-init|ipmi\nVM arguments accept a virtual machine ID or name.")
+		_, err := fmt.Fprintln(output, "usage: arcli vm list|get|address|create|clone|start|stop|reboot|delete|update|nic|disk|cdrom|cloud-init|ipmi\nVM arguments accept a virtual machine ID or name.")
 		return err
 	}
 	switch args[0] {
@@ -502,8 +503,8 @@ func vm(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, outp
 		return write(output, r.GetVirtualMachine())
 	case "update":
 		return updateVM(ctx, c, args[1:], output)
-	case "network":
-		return vmNetwork(ctx, c, args[1:], output)
+	case "nic":
+		return vmNIC(ctx, c, args[1:], output)
 	case "disk":
 		return vmDisk(ctx, c, args[1:], output)
 	case "cdrom":
@@ -547,16 +548,23 @@ func vmAction(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 	}
 }
 
+// multiFlag collects a repeatable string flag.
+type multiFlag []string
+
+func (f *multiFlag) String() string         { return strings.Join(*f, ",") }
+func (f *multiFlag) Set(value string) error { *f = append(*f, value); return nil }
+
 func createVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	f := flags("vm create")
 	name := f.String("name", "", "VM name")
+	description := f.String("description", "", "description")
 	cpus := f.Uint("cpus", 1, "vCPUs")
 	memory := f.Uint("memory", 1024, "memory MiB")
-	disk := f.Uint("disk", 10, "system disk GiB")
-	iso := f.String("iso", "", "ISO name")
-	network := f.String("network", "nat", "nat or bridge")
-	bridge := f.String("bridge", "", "bridge name")
-	image := f.String("image", "", "source cloud image")
+	firmware := f.String("firmware", "", "bios or uefi (default: uefi when a disk uses a cloud image)")
+	var disks, cdroms, nics multiFlag
+	f.Var(&disks, "disk", "disk size in GiB, optionally with a cloud image: SIZE or SIZE:IMAGE (repeatable)")
+	f.Var(&cdroms, "cdrom", "CD-ROM drive with an ISO name, or empty for no media (repeatable)")
+	f.Var(&nics, "nic", "network interface: nat, bridge:NAME, or MODE[:NAME]:MAC (repeatable)")
 	cloud := f.String("cloud-init-file", "", "cloud-init user-data file")
 	template := f.String("cloud-init-template", "", "stored cloud-init template name")
 	start := f.Bool("start", false, "start the VM after creating it")
@@ -569,9 +577,27 @@ func createVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 	if *cloud != "" && *template != "" {
 		return errors.New("--cloud-init-file and --cloud-init-template are mutually exclusive")
 	}
-	mode, e := networkMode(*network)
-	if e != nil {
+	request := &apprunnerv1.CreateVMRequest{Name: *name, Description: *description, Cpus: uint32(*cpus), MemoryMib: uint32(*memory)}
+	var e error
+	if request.Firmware, e = firmwareValue(*firmware); e != nil {
 		return e
+	}
+	for _, value := range disks {
+		disk, e := diskSpec(value)
+		if e != nil {
+			return e
+		}
+		request.Disks = append(request.Disks, disk)
+	}
+	for _, value := range cdroms {
+		request.Cdroms = append(request.Cdroms, &apprunnerv1.VMCDROMSpec{IsoName: value})
+	}
+	for _, value := range nics {
+		nic, e := nicSpec(value)
+		if e != nil {
+			return e
+		}
+		request.Nics = append(request.Nics, nic)
 	}
 	userData, e := readOptional(*cloud)
 	if e != nil {
@@ -582,7 +608,9 @@ func createVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 			return e
 		}
 	}
-	r, e := c.CreateVM(ctx, &apprunnerv1.CreateVMRequest{Name: *name, Cpus: uint32(*cpus), MemoryMib: uint32(*memory), DiskGib: uint32(*disk), IsoName: *iso, NetworkMode: mode, BridgeName: *bridge, CloudInitEnabled: *cloud != "" || *template != "", CloudInitUserData: userData, SourceImage: *image})
+	request.CloudInitEnabled = *cloud != "" || *template != ""
+	request.CloudInitUserData = userData
+	r, e := c.CreateVM(ctx, request)
 	if e != nil {
 		return e
 	}
@@ -595,6 +623,54 @@ func createVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 		vm = started.GetVirtualMachine()
 	}
 	return write(output, vm)
+}
+
+// diskSpec parses SIZE or SIZE:IMAGE.
+func diskSpec(value string) (*apprunnerv1.VMDiskSpec, error) {
+	sizeText, image, _ := strings.Cut(value, ":")
+	size, err := strconv.ParseUint(strings.TrimSpace(sizeText), 10, 32)
+	if err != nil || size == 0 {
+		return nil, fmt.Errorf("--disk %q must be SIZE_GIB or SIZE_GIB:IMAGE", value)
+	}
+	return &apprunnerv1.VMDiskSpec{SizeGib: uint32(size), SourceImage: strings.TrimSpace(image)}, nil
+}
+
+// nicSpec parses nat, nat:MAC, bridge:NAME, or bridge:NAME:MAC.
+func nicSpec(value string) (*apprunnerv1.VMNICSpec, error) {
+	parts := strings.Split(value, ":")
+	spec := &apprunnerv1.VMNICSpec{}
+	switch parts[0] {
+	case "nat":
+		spec.Mode = apprunnerv1.NetworkMode_NETWORK_MODE_NAT
+		if len(parts) > 1 {
+			spec.MacAddress = strings.Join(parts[1:], ":")
+		}
+	case "bridge":
+		spec.Mode = apprunnerv1.NetworkMode_NETWORK_MODE_BRIDGE
+		if len(parts) < 2 || parts[1] == "" {
+			return nil, fmt.Errorf("--nic %q must name a bridge: bridge:NAME[:MAC]", value)
+		}
+		spec.BridgeName = parts[1]
+		if len(parts) > 2 {
+			spec.MacAddress = strings.Join(parts[2:], ":")
+		}
+	default:
+		return nil, fmt.Errorf("--nic %q must start with nat or bridge", value)
+	}
+	return spec, nil
+}
+
+func firmwareValue(value string) (apprunnerv1.VMFirmware, error) {
+	switch value {
+	case "":
+		return apprunnerv1.VMFirmware_VM_FIRMWARE_UNSPECIFIED, nil
+	case "bios":
+		return apprunnerv1.VMFirmware_VM_FIRMWARE_BIOS, nil
+	case "uefi":
+		return apprunnerv1.VMFirmware_VM_FIRMWARE_UEFI, nil
+	default:
+		return 0, errors.New("--firmware must be bios or uefi")
+	}
 }
 
 func templateUserData(ctx context.Context, c apprunnerv1.AppRunnerService, name string) (string, error) {
@@ -657,26 +733,34 @@ func vmAddress(ctx context.Context, c apprunnerv1.AppRunnerService, args []strin
 	if e != nil {
 		return e
 	}
-	if vm.GetNetworkMode() != apprunnerv1.NetworkMode_NETWORK_MODE_BRIDGE {
-		return fmt.Errorf("virtual machine %s uses user-mode NAT networking; the host does not track its addresses", vm.GetName())
+	var bridged []*apprunnerv1.VMNIC
+	for _, nic := range vm.GetNics() {
+		if nic.GetMode() == apprunnerv1.NetworkMode_NETWORK_MODE_BRIDGE {
+			bridged = append(bridged, nic)
+		}
+	}
+	if len(bridged) == 0 {
+		return fmt.Errorf("virtual machine %s has no bridged network interface; the host does not track its addresses", vm.GetName())
 	}
 	deadline := time.Now().Add(*wait)
 	for {
-		leases, e := bridgeLeases(ctx, c, vm.GetBridgeName())
-		if e != nil {
-			return e
-		}
 		var matched []*apprunnerv1.DHCPLease
-		for _, lease := range leases {
-			if strings.EqualFold(lease.GetHardwareAddress(), vm.GetMacAddress()) {
-				matched = append(matched, lease)
+		for _, nic := range bridged {
+			leases, e := bridgeLeases(ctx, c, nic.GetBridgeName())
+			if e != nil {
+				return e
+			}
+			for _, lease := range leases {
+				if strings.EqualFold(lease.GetHardwareAddress(), nic.GetMacAddress()) {
+					matched = append(matched, lease)
+				}
 			}
 		}
 		if len(matched) > 0 {
 			return write(output, matched)
 		}
 		if !time.Now().Before(deadline) {
-			return fmt.Errorf("virtual machine %s (%s) holds no DHCP lease on bridge %s", vm.GetName(), vm.GetMacAddress(), vm.GetBridgeName())
+			return fmt.Errorf("virtual machine %s holds no DHCP lease on its bridged interfaces", vm.GetName())
 		}
 		time.Sleep(addressPollInterval)
 	}
@@ -730,34 +814,68 @@ func updateVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 	}
 	return write(output, r.GetVirtualMachine())
 }
-func vmNetwork(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
-	f := flags("vm network")
-	network := f.String("network", "nat", "nat or bridge")
-	bridge := f.String("bridge", "", "bridge name")
-	mac := f.String("mac", "", "MAC address")
-	if e := parseFlags(f, args); e != nil {
-		return e
+func vmNIC(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
+	usage := "usage: arcli vm nic add VM --mode nat|bridge [--bridge NAME] [--mac ADDRESS] | update VM NIC_ID --mode nat|bridge [--bridge NAME] [--mac ADDRESS] | remove VM NIC_ID"
+	if len(args) == 0 {
+		return errors.New(usage)
 	}
-	if e := require(f.Args(), 1, "usage: arcli vm network ID --network nat|bridge [--bridge NAME] [--mac ADDRESS]"); e != nil {
-		return e
+	switch args[0] {
+	case "add", "update":
+		f := flags("vm nic " + args[0])
+		mode := f.String("mode", "", "nat or bridge")
+		bridge := f.String("bridge", "", "bridge name")
+		mac := f.String("mac", "", "MAC address")
+		if e := parseFlags(f, args[1:]); e != nil {
+			return e
+		}
+		positional := 1
+		if args[0] == "update" {
+			positional = 2
+		}
+		if e := require(f.Args(), positional, usage); e != nil {
+			return e
+		}
+		id, e := vmID(ctx, c, f.Args()[0])
+		if e != nil {
+			return e
+		}
+		networkMode, e := networkMode(*mode)
+		if e != nil {
+			return e
+		}
+		spec := &apprunnerv1.VMNICSpec{Mode: networkMode, BridgeName: *bridge, MacAddress: *mac}
+		if args[0] == "add" {
+			r, e := c.AddVMNIC(ctx, &apprunnerv1.AddVMNICRequest{Id: id, Nic: spec})
+			if e != nil {
+				return e
+			}
+			return write(output, r.GetVirtualMachine())
+		}
+		r, e := c.UpdateVMNIC(ctx, &apprunnerv1.UpdateVMNICRequest{Id: id, NicId: f.Args()[1], Nic: spec})
+		if e != nil {
+			return e
+		}
+		return write(output, r.GetVirtualMachine())
+	case "remove":
+		if e := require(args[1:], 2, usage); e != nil {
+			return e
+		}
+		id, e := vmID(ctx, c, args[1])
+		if e != nil {
+			return e
+		}
+		r, e := c.RemoveVMNIC(ctx, &apprunnerv1.RemoveVMNICRequest{Id: id, NicId: args[2]})
+		if e != nil {
+			return e
+		}
+		return write(output, r.GetVirtualMachine())
+	default:
+		return errors.New(usage)
 	}
-	id, e := vmID(ctx, c, f.Args()[0])
-	if e != nil {
-		return e
-	}
-	mode, e := networkMode(*network)
-	if e != nil {
-		return e
-	}
-	r, e := c.UpdateVMNetwork(ctx, &apprunnerv1.UpdateVMNetworkRequest{Id: id, NetworkMode: mode, BridgeName: *bridge, MacAddress: *mac})
-	if e != nil {
-		return e
-	}
-	return write(output, r.GetVirtualMachine())
 }
 func vmDisk(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) == 0 {
-		return errors.New("usage: arcli vm disk add ID --size GIB | remove ID DISK_ID")
+		return errors.New("usage: arcli vm disk add ID --size GIB [--image CLOUD_IMAGE] | remove ID DISK_ID")
 	}
 	if e := require(args[1:], 1, "VM ID is required"); e != nil {
 		return e
@@ -765,6 +883,7 @@ func vmDisk(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, 
 	if args[0] == "add" {
 		f := flags("vm disk add")
 		size := f.Uint("size", 0, "disk GiB")
+		image := f.String("image", "", "cloud image in ISO storage to overlay")
 		if e := parseFlags(f, args[1:]); e != nil {
 			return e
 		}
@@ -775,7 +894,7 @@ func vmDisk(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, 
 		if e != nil {
 			return e
 		}
-		r, e := c.AddVMDisk(ctx, &apprunnerv1.AddVMDiskRequest{Id: id, SizeGib: uint32(*size)})
+		r, e := c.AddVMDisk(ctx, &apprunnerv1.AddVMDiskRequest{Id: id, Disk: &apprunnerv1.VMDiskSpec{SizeGib: uint32(*size), SourceImage: *image}})
 		if e != nil {
 			return e
 		}
@@ -1089,7 +1208,7 @@ func networkMode(value string) (apprunnerv1.NetworkMode, error) {
 	case "bridge":
 		return apprunnerv1.NetworkMode_NETWORK_MODE_BRIDGE, nil
 	default:
-		return 0, errors.New("--network must be nat or bridge")
+		return 0, errors.New("--mode must be nat or bridge")
 	}
 }
 func networkChange(value string) (apprunnerv1.NetworkChangeType, error) {

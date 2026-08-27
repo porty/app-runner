@@ -9,38 +9,59 @@ export type VMStatus =
 
 export type NetworkMode = 'NETWORK_MODE_NAT' | 'NETWORK_MODE_BRIDGE'
 
+export type VMFirmware = 'VM_FIRMWARE_UNSPECIFIED' | 'VM_FIRMWARE_BIOS' | 'VM_FIRMWARE_UEFI'
+
+// A virtual machine has zero or more disks, CD-ROM drives, and network
+// interfaces; the API never implies any.
 export interface VirtualMachine {
   id: string
   name: string
   description?: string
   cpus: number
   memory_mib: number
-  disk_gib: number
-  iso_name: string
-  network_mode: NetworkMode
-  bridge_name?: string
-  mac_address: string
+  firmware?: VMFirmware
   status: VMStatus
   created_at: string
   last_error?: string
   console_path: string
-  ipmi?: VMIPMIStatus
   disks?: VMDisk[]
   cdroms?: VMCDROM[]
+  nics?: VMNIC[]
   cloud_init?: VMCloudInit
-  source_image?: string
-  firmware?: string
+  ipmi?: VMIPMIStatus
 }
 
 export interface VMDisk {
   id: string
   size_gib: number
-  system: boolean
+  source_image?: string
 }
 
 export interface VMCDROM {
   id: string
   iso_name?: string
+}
+
+export interface VMNIC {
+  id: string
+  mode: NetworkMode
+  bridge_name?: string
+  mac_address: string
+}
+
+export interface VMDiskSpec {
+  size_gib: number
+  source_image?: string
+}
+
+export interface VMCDROMSpec {
+  iso_name?: string
+}
+
+export interface VMNICSpec {
+  mode: NetworkMode
+  bridge_name?: string
+  mac_address?: string
 }
 
 export interface VMCloudInit {
@@ -54,13 +75,6 @@ export interface UpdateVMRequest {
   description: string
   cpus: number
   memory_mib: number
-}
-
-export interface UpdateVMNetworkRequest {
-  id: string
-  network_mode: NetworkMode
-  bridge_name: string
-  mac_address: string
 }
 
 export interface VMIPMIStatus {
@@ -98,9 +112,6 @@ export interface CloudInitTemplate {
 export interface HostStatus {
   qemu_available: boolean
   kvm_available: boolean
-  bridge_available: boolean
-  bridge_name: string
-  bridge_warning: string
 }
 
 export interface ISOImage {
@@ -115,15 +126,15 @@ export interface DiskImage {
 
 export interface CreateVMRequest {
   name: string
+  description?: string
   cpus: number
   memory_mib: number
-  disk_gib: number
-  iso_name: string
-  network_mode: NetworkMode
-  bridge_name?: string
+  firmware?: VMFirmware
+  disks: VMDiskSpec[]
+  cdroms: VMCDROMSpec[]
+  nics: VMNICSpec[]
   cloud_init_enabled: boolean
   cloud_init_user_data: string
-  source_image: string
 }
 
 export type DiagnosticStatus =
@@ -385,13 +396,23 @@ export async function updateVM(request: UpdateVMRequest): Promise<VirtualMachine
   return response.virtual_machine
 }
 
-export async function updateVMNetwork(request: UpdateVMNetworkRequest): Promise<VirtualMachine> {
-  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('UpdateVMNetwork', request)
+export async function addVMNIC(id: string, nic: VMNICSpec): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('AddVMNIC', { id, nic })
   return response.virtual_machine
 }
 
-export async function addVMDisk(id: string, sizeGib: number): Promise<VirtualMachine> {
-  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('AddVMDisk', { id, size_gib: sizeGib })
+export async function updateVMNIC(id: string, nicID: string, nic: VMNICSpec): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('UpdateVMNIC', { id, nic_id: nicID, nic })
+  return response.virtual_machine
+}
+
+export async function removeVMNIC(id: string, nicID: string): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('RemoveVMNIC', { id, nic_id: nicID })
+  return response.virtual_machine
+}
+
+export async function addVMDisk(id: string, disk: VMDiskSpec): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('AddVMDisk', { id, disk })
   return response.virtual_machine
 }
 

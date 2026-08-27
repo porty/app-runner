@@ -24,9 +24,7 @@ func TestVMManagerConfiguresAndRetainsIPMICredentials(t *testing.T) {
 	manager, _, _ := newTestVMManager(t)
 	controller := &fakeIPMIController{}
 	manager.ipmi = controller
-	vm, err := manager.Create(context.Background(), createVMOptions{
-		Name: "ipmi-vm", CPUs: 2, MemoryMiB: 2048, DiskGiB: 20, ISOName: "installer.iso", NetworkMode: networkModeNAT,
-	})
+	vm, err := manager.Create(context.Background(), installerVMOptions("ipmi-vm"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,9 +50,7 @@ func TestVMManagerConfiguresAndRetainsIPMICredentials(t *testing.T) {
 
 func TestVMIPMIHALPersistsSupportedBootFlags(t *testing.T) {
 	manager, _, _ := newTestVMManager(t)
-	vm, err := manager.Create(context.Background(), createVMOptions{
-		Name: "boot-vm", CPUs: 2, MemoryMiB: 2048, DiskGiB: 20, ISOName: "installer.iso", NetworkMode: networkModeNAT,
-	})
+	vm, err := manager.Create(context.Background(), installerVMOptions("boot-vm"))
 	if err != nil {
 		t.Fatal(err)
 	}
