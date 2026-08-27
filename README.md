@@ -23,8 +23,10 @@ bin/arcli net status
 
 Run `arcli --help` for its command groups. Successful commands write a table by default; pass `-o json` or `-o yaml` so their results can be piped to other tools. VM operations accept an ID or a name, `arcli vm address --wait 2m NAME` waits for a bridged VM's DHCP lease, and `arcli net leases BRIDGE` lists a bridge's leases.
 
+A virtual machine has zero or more disks, CD-ROM drives, and network interfaces; nothing is implied. `arcli vm create --name NAME --disk 20 --cdrom installer.iso --nic bridge:br0` creates a conventional installer VM, while `--disk 40:ubuntu.img` creates a linked overlay of a cloud image. Devices are managed afterwards with `arcli vm disk|cdrom|nic`.
+
 Cloud-init support uses `xorriso` to generate per-VM NoCloud ISO images. The binary defaults to `xorriso` and can be changed with the `xorriso_binary` configuration setting or `-xorriso` command-line flag. Reusable user-data templates are stored privately in `state/cloud-init-templates.json`.
 
-QCow2 cloud images can currently be stored in `iso/` with an `.img` or `.qcow2` extension. VMs created from them use a linked qcow2 overlay and per-VM OVMF variable store, so the backing image must remain in place. Common OVMF locations are detected automatically; `uefi_code_path` and `uefi_vars_path` override them when needed.
+QCow2 cloud images can currently be stored in `iso/` with an `.img` or `.qcow2` extension. Disks created from them are linked qcow2 overlays, so the backing image must remain in place; such VMs default to UEFI firmware with a per-VM OVMF variable store. Common OVMF locations are detected automatically; `uefi_code_path` and `uefi_vars_path` override them when needed.
 
 See [Architectural decisions](docs/architecture-decisions.md) for the constraints and tradeoffs that shape the project.

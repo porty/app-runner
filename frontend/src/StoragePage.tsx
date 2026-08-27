@@ -106,12 +106,11 @@ function storageUsesByPath(virtualMachines: VirtualMachine[]): StorageUses {
     uses[key] = [...(uses[key] ?? []), { vm, label }]
   }
   for (const vm of virtualMachines) {
-    for (const disk of vm.disks ?? []) {
-      add('disk', `${vm.id}-${disk.id}.qcow2`, vm, disk.system ? 'System disk' : 'Data disk')
-    }
+    ;(vm.disks ?? []).forEach((disk, index) => {
+      add('disk', `${vm.id}-${disk.id}.qcow2`, vm, index === 0 ? 'Boot disk' : 'Disk')
+      add('iso', disk.source_image ?? '', vm, 'Cloud image')
+    })
     for (const cdrom of vm.cdroms ?? []) add('iso', cdrom.iso_name ?? '', vm, 'CD-ROM')
-    if ((vm.cdroms ?? []).length === 0) add('iso', vm.iso_name, vm, 'CD-ROM')
-    add('iso', vm.source_image ?? '', vm, 'Cloud image')
   }
   return uses
 }

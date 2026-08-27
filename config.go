@@ -26,7 +26,6 @@ type config struct {
 	DiskDir       string `json:"disk_dir"`
 	StateDir      string `json:"state_dir"`
 	RunDir        string `json:"run_dir"`
-	BridgeName    string `json:"bridge_name"`
 	QEMUBinary    string `json:"qemu_binary"`
 	QEMUImgBinary string `json:"qemu_img_binary"`
 	XorrisoBinary string `json:"xorriso_binary"`
@@ -42,7 +41,6 @@ func defaultConfig(workingDirectory string) config {
 		DiskDir:       filepath.Join(workingDirectory, "disk"),
 		StateDir:      filepath.Join(workingDirectory, "state"),
 		RunDir:        filepath.Join(workingDirectory, "run"),
-		BridgeName:    "br0",
 		QEMUBinary:    "qemu-system-x86_64",
 		QEMUImgBinary: "qemu-img",
 		XorrisoBinary: "xorriso",
@@ -91,7 +89,6 @@ func loadConfig(args []string, workingDirectory string) (config, error) {
 	flags.StringVar(&settings.DiskDir, "disk-dir", settings.DiskDir, "directory containing VM disk images")
 	flags.StringVar(&settings.StateDir, "state-dir", settings.StateDir, "directory containing application state")
 	flags.StringVar(&settings.RunDir, "run-dir", settings.RunDir, "directory containing runtime sockets")
-	flags.StringVar(&settings.BridgeName, "bridge", settings.BridgeName, "host bridge used by bridge networking")
 	flags.StringVar(&settings.QEMUBinary, "qemu", settings.QEMUBinary, "QEMU system binary")
 	flags.StringVar(&settings.QEMUImgBinary, "qemu-img", settings.QEMUImgBinary, "qemu-img binary")
 	flags.StringVar(&settings.XorrisoBinary, "xorriso", settings.XorrisoBinary, "xorriso binary used to build cloud-init ISO images")
@@ -110,9 +107,6 @@ func loadConfig(args []string, workingDirectory string) (config, error) {
 	settings.RunDir = absoluteFrom(workingDirectory, settings.RunDir)
 	settings.UEFICodePath = absoluteFrom(workingDirectory, settings.UEFICodePath)
 	settings.UEFIVarsPath = absoluteFrom(workingDirectory, settings.UEFIVarsPath)
-	if strings.TrimSpace(settings.BridgeName) == "" {
-		return config{}, errors.New("bridge name cannot be empty")
-	}
 	return settings, nil
 }
 
@@ -170,6 +164,11 @@ func prepareDirectories(settings config) error {
 // vmStateDir is the per-VM directory for firmware variables and generated media.
 func (c config) vmStateDir(id string) string {
 	return filepath.Join(c.StateDir, "vms", id)
+}
+
+// vmDiskPath is the qcow2 image for one of a VM's disks.
+func (c config) vmDiskPath(vmID, diskID string) string {
+	return filepath.Join(c.DiskDir, vmID+"-"+diskID+".qcow2")
 }
 
 func (c config) uefiVarsPath(id string) string {

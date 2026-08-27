@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -16,7 +17,9 @@ func TestQEMUArgumentsUseRequiredVirtualisationProfile(t *testing.T) {
 	qemu := newQEMUHypervisor(settings)
 	vm := virtualMachine{
 		ID: "vm-id", Name: "test VM", CPUs: 4, MemoryMiB: 4096,
-		ISOName: "installer.iso", NetworkMode: networkModeNAT, MACAddress: "52:54:00:11:22:33",
+		Disks:  []vmDisk{{ID: "d0", SizeGiB: 20}},
+		CDROMs: []vmCDROM{{ID: "c0", ISOName: "installer.iso"}},
+		NICs:   []vmNIC{{ID: "n0", Mode: networkModeNAT, MACAddress: "52:54:00:11:22:33"}},
 	}
 	arguments := qemu.arguments(vm)
 
@@ -24,7 +27,8 @@ func TestQEMUArgumentsUseRequiredVirtualisationProfile(t *testing.T) {
 		"q35,accel=kvm",
 		"host",
 		"virtio-vga",
-		"virtio-blk-pci,drive=system",
+		"file=" + settings.vmDiskPath("vm-id", "d0") + ",if=none,id=disk0,format=qcow2,cache=none",
+		"virtio-blk-pci,drive=disk0",
 		"virtio-scsi-pci,id=scsi0",
 		"scsi-cd,drive=install,bus=scsi0.0,id=cdromdev0",
 		"user,id=net0",
@@ -84,24 +88,37 @@ func TestExecuteQMPNegotiatesAndSendsCommand(t *testing.T) {
 	}
 }
 
-func TestQEMUArgumentsSupportBridgeNetworking(t *testing.T) {
+func TestQEMUArgumentsSupportMultipleNetworkInterfaces(t *testing.T) {
 	settings := defaultConfig(t.TempDir())
-	settings.BridgeName = "lab0"
 	qemu := newQEMUHypervisor(settings)
-	arguments := qemu.arguments(virtualMachine{ID: "vm-id", ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "lab0"})
+	arguments := qemu.arguments(virtualMachine{ID: "vm-id", NICs: []vmNIC{
+		{ID: "n0", Mode: networkModeBridge, BridgeName: "lab0", MACAddress: "52:54:00:00:00:01"},
+		{ID: "n1", Mode: networkModeNAT, MACAddress: "52:54:00:00:00:02"},
+	}})
 
-	if !slices.Contains(arguments, "bridge,id=net0,br=lab0") {
-		t.Fatalf("bridge network arguments are missing: %#v", arguments)
+	for _, expected := range []string{
+		"bridge,id=net0,br=lab0", "virtio-net-pci,netdev=net0,mac=52:54:00:00:00:01",
+		"user,id=net1", "virtio-net-pci,netdev=net1,mac=52:54:00:00:00:02",
+	} {
+		if !slices.Contains(arguments, expected) {
+			t.Fatalf("network argument %q is missing: %#v", expected, arguments)
+		}
 	}
-	if slices.Contains(arguments, "user,id=net0") {
-		t.Fatalf("NAT arguments were included for a bridge VM: %#v", arguments)
+}
+
+func TestQEMUArgumentsOmitDevicesTheVMDoesNotHave(t *testing.T) {
+	arguments := newQEMUHypervisor(defaultConfig(t.TempDir())).arguments(virtualMachine{ID: "vm-id", Name: "bare"})
+	for _, argument := range arguments {
+		if strings.HasPrefix(argument, "file=") || strings.HasPrefix(argument, "virtio-net") || strings.HasPrefix(argument, "user,") || strings.HasPrefix(argument, "bridge,") {
+			t.Fatalf("device-less VM received device argument %q: %#v", argument, arguments)
+		}
 	}
 }
 
 func TestQEMUArgumentsMountCloudInitISO(t *testing.T) {
 	settings := defaultConfig(t.TempDir())
 	qemu := newQEMUHypervisor(settings)
-	arguments := qemu.arguments(virtualMachine{ID: "vm-id", NetworkMode: networkModeNAT, CloudInit: vmCloudInit{Enabled: true}})
+	arguments := qemu.arguments(virtualMachine{ID: "vm-id", CloudInit: vmCloudInit{Enabled: true}})
 
 	for _, expected := range []string{
 		"file=" + settings.cloudInitISOPath("vm-id") + ",if=none,id=cloudinit,media=cdrom,readonly=on",
@@ -151,7 +168,7 @@ func TestQEMUArgumentsUsePersistentUEFIFirmware(t *testing.T) {
 	settings := defaultConfig(t.TempDir())
 	settings.UEFICodePath = "/firmware/OVMF_CODE.fd"
 	qemu := newQEMUHypervisor(settings)
-	arguments := qemu.arguments(virtualMachine{ID: "vm-id", Firmware: vmFirmwareUEFI, NetworkMode: networkModeNAT})
+	arguments := qemu.arguments(virtualMachine{ID: "vm-id", Firmware: vmFirmwareUEFI})
 	for _, expected := range []string{
 		"if=pflash,format=raw,unit=0,readonly=on,file=/firmware/OVMF_CODE.fd",
 		"if=pflash,format=raw,unit=1,file=" + settings.uefiVarsPath("vm-id"),
@@ -164,7 +181,7 @@ func TestQEMUArgumentsUsePersistentUEFIFirmware(t *testing.T) {
 
 func TestQEMUArgumentsHonorIPMIBootDevice(t *testing.T) {
 	qemu := newQEMUHypervisor(defaultConfig(t.TempDir()))
-	arguments := qemu.arguments(virtualMachine{ID: "vm-id", ISOName: "installer.iso", IPMI: vmIPMIConfig{BootDevice: uint8(1)}})
+	arguments := qemu.arguments(virtualMachine{ID: "vm-id", IPMI: vmIPMIConfig{BootDevice: uint8(1)}})
 	if !slices.Contains(arguments, "order=ncd,menu=on") {
 		t.Fatalf("PXE boot order is missing: %#v", arguments)
 	}

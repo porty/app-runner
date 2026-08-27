@@ -27,10 +27,7 @@ func TestConsoleProxyRejectsInactiveVM(t *testing.T) {
 
 func TestConsoleProxyRelaysBinaryVNCData(t *testing.T) {
 	manager, _, _ := newTestVMManager(t)
-	vm, err := manager.Create(context.Background(), createVMOptions{
-		Name: "console-vm", CPUs: 1, MemoryMiB: 512, DiskGiB: 1,
-		ISOName: "installer.iso", NetworkMode: networkModeNAT,
-	})
+	vm, err := manager.Create(context.Background(), installerVMOptions("console-vm"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -138,10 +138,7 @@ func TestValidateNetworkChangeRejectsUnsafeNames(t *testing.T) {
 
 func TestNetworkingStatusMapsManagedVMsToTheirBridges(t *testing.T) {
 	vms, _, settings := newTestVMManager(t)
-	if _, err := vms.Create(t.Context(), createVMOptions{
-		Name: "bridge-workload", CPUs: 1, MemoryMiB: 512, DiskGiB: 1,
-		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br-lab",
-	}); err != nil {
+	if _, err := vms.Create(t.Context(), bridgedVMOptions("bridge-workload", "br-lab")); err != nil {
 		t.Fatal(err)
 	}
 	provider := &fakeNetworkProvider{status: networkingStatus{
@@ -162,10 +159,7 @@ func TestNetworkingStatusMapsManagedVMsToTheirBridges(t *testing.T) {
 
 func TestNetworkManagerRestoresMissingConfiguredBridge(t *testing.T) {
 	vms, _, settings := newTestVMManager(t)
-	if _, err := vms.Create(t.Context(), createVMOptions{
-		Name: "bridge-workload", CPUs: 1, MemoryMiB: 512, DiskGiB: 1,
-		ISOName: "installer.iso", NetworkMode: networkModeBridge, BridgeName: "br-lab",
-	}); err != nil {
+	if _, err := vms.Create(t.Context(), bridgedVMOptions("bridge-workload", "br-lab")); err != nil {
 		t.Fatal(err)
 	}
 	provider := &fakeNetworkProvider{}
@@ -222,7 +216,7 @@ func TestNetworkingStatusIncludesBridgeDHCPConfiguration(t *testing.T) {
 func TestNetworkingStatusLabelsDHCPLeasesWithVMNames(t *testing.T) {
 	vms, _, settings := newTestVMManager(t)
 	vms.vms = append(vms.vms, virtualMachine{
-		ID: "vm-id", Name: "web-01", NetworkMode: networkModeBridge, BridgeName: "br-lab", MACAddress: "52:54:00:44:81:f7",
+		ID: "vm-id", Name: "web-01", NICs: []vmNIC{{ID: "n0", Mode: networkModeBridge, BridgeName: "br-lab", MACAddress: "52:54:00:44:81:f7"}},
 	})
 	dhcp, err := newDHCPManager(settings.StateDir, &fakeDHCPBridgeProvider{}, nil, nil)
 	if err != nil {
@@ -250,8 +244,8 @@ func TestNetworkingStatusLabelsDHCPLeasesWithVMNames(t *testing.T) {
 func TestNetworkingRejectsAutoDNSWhenLegacyVMNameIsInvalid(t *testing.T) {
 	vms, _, settings := newTestVMManager(t)
 	vms.vms = append(vms.vms, virtualMachine{
-		ID: "legacy", Name: "Legacy VM", NetworkMode: networkModeBridge,
-		BridgeName: "br0", Status: vmStatusStopped,
+		ID: "legacy", Name: "Legacy VM", Status: vmStatusStopped,
+		NICs: []vmNIC{{ID: "n0", Mode: networkModeBridge, BridgeName: "br0", MACAddress: "52:54:00:00:00:99"}},
 	})
 	bridgeProvider := &fakeDHCPBridgeProvider{}
 	dhcp, err := newDHCPManager(settings.StateDir, bridgeProvider, nil, nil)

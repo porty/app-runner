@@ -15,10 +15,11 @@ Launch and manage QEMU/KVM virtual machines from the web interface.
 
 - x86-64 QEMU/KVM using the Q35 machine type
 - always uses KVM acceleration and `host` CPU
-- configurable name, vCPU count, memory, system disk size, installation ISO, and network mode
-- qcow2 system disks
-- virtio system disk and network devices
-- installation media attached through a virtio SCSI controller
+- configurable name, description, vCPU count, memory, and firmware
+- zero or more qcow2 disks, CD-ROM drives, and network interfaces; none are implied
+- the first disk is the boot disk; a disk may be a linked overlay of a qcow2 cloud image
+- virtio disk and network devices
+- CD-ROM media attached through a virtio SCSI controller
 
 ## Storage and configuration
 
@@ -31,8 +32,7 @@ Launch and manage QEMU/KVM virtual machines from the web interface.
 
 ## Networking
 
-- supports user-mode NAT and host bridge networking
-- stores the selected bridge on each bridged VM and supports multiple host bridges
+- each network interface uses user-mode NAT or attaches to a host bridge; a VM may attach to several bridges
 - provides a Networking page that lists Linux bridges, member interfaces, addresses, operational state, and assigned managed workloads
 - distinguishes managed VMs and containers from host interfaces that cannot be attributed to an App Runner workload
 - reports the backend username, UID, groups, CAP_NET_ADMIN state, actual `/dev/net/tun` read/write access, `qemu-bridge-helper` ownership and permissions, file capabilities, and bridge allow-list results
@@ -48,7 +48,7 @@ Launch and manage QEMU/KVM virtual machines from the web interface.
 - assigns the first usable address to a DHCP-enabled bridge and begins dynamic leases at host offset 50, leaving lower addresses available for static assignments
 - suggests distinct private `/24` ranges for multiple bridges and rejects overlapping managed or host-interface subnets
 - starts a bridge's DHCP server before its first VM starts and stops it after the last VM on that bridge exits
-- persists DHCP leases and stable VM MAC addresses across backend restarts
+- persists DHCP leases and stable per-interface MAC addresses across backend restarts
 - reports DHCP socket capability diagnostics; DHCP requires UDP port 67 and bind-to-interface access in addition to bridge-management permission
 - optionally enables runtime-only NAT for a managed DHCP bridge, advertising the bridge address as the router and managing IPv4 forwarding, isolated nftables forwarding/masquerade rules, and tagged iptables-nft/UFW filter allowances with the same first-VM/last-VM lifecycle
 - restores the host's prior forwarding setting and removes its dedicated nftables table after the last applicable VM stops or during abandoned-state recovery; it does not persist these settings through a host network manager

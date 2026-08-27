@@ -36,7 +36,7 @@ func TestLoadConfigUsesDefaultsAndCLIOverrides(t *testing.T) {
 func TestLoadConfigAppliesFileBeforeCLI(t *testing.T) {
 	workingDirectory := t.TempDir()
 	configPath := filepath.Join(workingDirectory, defaultConfigName)
-	contents := []byte(`{"listen":"127.0.0.1:7000","iso_dir":"images","bridge_name":"lab0"}`)
+	contents := []byte(`{"listen":"127.0.0.1:7000","iso_dir":"images","run_dir":"/var/run/app-runner"}`)
 	if err := os.WriteFile(configPath, contents, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -51,8 +51,8 @@ func TestLoadConfigAppliesFileBeforeCLI(t *testing.T) {
 	if settings.ISODir != filepath.Join(workingDirectory, "images") {
 		t.Fatalf("config file ISO directory was not resolved: %q", settings.ISODir)
 	}
-	if settings.BridgeName != "lab0" {
-		t.Fatalf("unexpected bridge name: %q", settings.BridgeName)
+	if settings.RunDir != "/var/run/app-runner" {
+		t.Fatalf("config file run directory was not applied: %q", settings.RunDir)
 	}
 }
 

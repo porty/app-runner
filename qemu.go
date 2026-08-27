@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -150,19 +149,15 @@ func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
 			"-drive", "if=pflash,format=raw,unit=1,file="+q.settings.uefiVarsPath(vm.ID),
 		)
 	}
-	for diskIndex, disk := range effectiveVMDisks(vm) {
+	for diskIndex, disk := range vm.Disks {
 		driveID := "disk" + strconv.Itoa(diskIndex)
-		if disk.System {
-			driveID = "system"
-		}
-		diskPath := q.vmDiskPath(vm.ID, disk)
 		arguments = append(arguments,
-			"-drive", "file="+diskPath+",if=none,id="+driveID+",format=qcow2,cache=none",
+			"-drive", "file="+q.settings.vmDiskPath(vm.ID, disk.ID)+",if=none,id="+driveID+",format=qcow2,cache=none",
 			"-device", "virtio-blk-pci,drive="+driveID,
 		)
 	}
 	arguments = append(arguments, "-device", "virtio-scsi-pci,id=scsi0")
-	for cdromIndex, cdrom := range effectiveVMCDROMs(vm) {
+	for cdromIndex, cdrom := range vm.CDROMs {
 		driveID := cdromDriveID(cdromIndex)
 		deviceID := cdromDeviceID(cdromIndex)
 		if cdrom.ISOName != "" {
@@ -180,24 +175,14 @@ func (q *qemuHypervisor) arguments(vm virtualMachine) []string {
 		)
 	}
 	arguments = append(arguments, "-boot", "order="+q.bootOrder(vm)+",menu=on")
-	if vm.NetworkMode == networkModeBridge {
-		networkDevice := "virtio-net-pci,netdev=net0"
-		if vm.MACAddress != "" {
-			networkDevice += ",mac=" + vm.MACAddress
+	for nicIndex, nic := range vm.NICs {
+		netdevID := "net" + strconv.Itoa(nicIndex)
+		if nic.Mode == networkModeBridge {
+			arguments = append(arguments, "-netdev", "bridge,id="+netdevID+",br="+nic.BridgeName)
+		} else {
+			arguments = append(arguments, "-netdev", "user,id="+netdevID)
 		}
-		arguments = append(arguments,
-			"-netdev", "bridge,id=net0,br="+vm.BridgeName,
-			"-device", networkDevice,
-		)
-	} else {
-		networkDevice := "virtio-net-pci,netdev=net0"
-		if vm.MACAddress != "" {
-			networkDevice += ",mac=" + vm.MACAddress
-		}
-		arguments = append(arguments,
-			"-netdev", "user,id=net0",
-			"-device", networkDevice,
-		)
+		arguments = append(arguments, "-device", "virtio-net-pci,netdev="+netdevID+",mac="+nic.MACAddress)
 	}
 	return append(arguments,
 		"-qmp", "unix:"+q.qmpSocketPath(vm.ID)+",server=on,wait=off",
@@ -264,23 +249,6 @@ func executeQMPCommand(socketPath, command string, arguments map[string]any) err
 	return nil
 }
 
-func effectiveVMDisks(vm virtualMachine) []vmDisk {
-	if len(vm.Disks) != 0 {
-		return vm.Disks
-	}
-	return []vmDisk{{ID: "system", SizeGiB: vm.DiskGiB, System: true}}
-}
-
-func effectiveVMCDROMs(vm virtualMachine) []vmCDROM {
-	if len(vm.CDROMs) != 0 {
-		return vm.CDROMs
-	}
-	if vm.ISOName == "" {
-		return nil
-	}
-	return []vmCDROM{{ID: "cdrom0", ISOName: vm.ISOName}}
-}
-
 func cdromDriveID(index int) string {
 	if index == 0 {
 		return "install"
@@ -293,19 +261,12 @@ func cdromDeviceID(index int) string {
 }
 
 func (q *qemuHypervisor) cdromDriveID(vm virtualMachine, id string) string {
-	for index, cdrom := range effectiveVMCDROMs(vm) {
+	for index, cdrom := range vm.CDROMs {
 		if cdrom.ID == id {
 			return cdromDeviceID(index)
 		}
 	}
 	return ""
-}
-
-func (q *qemuHypervisor) vmDiskPath(vmID string, disk vmDisk) string {
-	if disk.System {
-		return filepath.Join(q.settings.DiskDir, vmID+".qcow2")
-	}
-	return filepath.Join(q.settings.DiskDir, vmID+"-"+disk.ID+".qcow2")
 }
 
 func waitForQMPResponse(decoder *json.Decoder, expectedKey string) error {

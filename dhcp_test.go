@@ -92,6 +92,11 @@ func (c *fakeBridgeDNSController) Status(bridge string) (bool, string) {
 
 func (c *fakeBridgeDNSController) Close() error { return nil }
 
+// bridgedTestVM builds a VM with a single bridged interface.
+func bridgedTestVM(id, bridge, mac string) virtualMachine {
+	return virtualMachine{ID: id, Name: id, NICs: []vmNIC{{ID: id + "-nic", Mode: networkModeBridge, BridgeName: bridge, MACAddress: mac}}}
+}
+
 func newFakeManagedDHCPServer() *fakeManagedDHCPServer {
 	return &fakeManagedDHCPServer{closed: make(chan struct{})}
 }
@@ -285,8 +290,8 @@ func TestDHCPManagerStartsOnceAndStopsAfterLastVM(t *testing.T) {
 	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR, false, bridgeDNSConfig{}); err != nil {
 		t.Fatal(err)
 	}
-	first := virtualMachine{ID: "one", NetworkMode: networkModeBridge, BridgeName: "br0"}
-	second := virtualMachine{ID: "two", NetworkMode: networkModeBridge, BridgeName: "br0"}
+	first := bridgedTestVM("one", "br0", "52:54:00:00:00:11")
+	second := bridgedTestVM("two", "br0", "52:54:00:00:00:12")
 	if err := manager.Prepare(first); err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +334,7 @@ func TestDHCPHandlerOffersFirstPoolAddress(t *testing.T) {
 	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR, false, bridgeDNSConfig{}); err != nil {
 		t.Fatal(err)
 	}
-	vm := virtualMachine{ID: "one", NetworkMode: networkModeBridge, BridgeName: "br0"}
+	vm := bridgedTestVM("one", "br0", "52:54:00:00:00:11")
 	if err := manager.Prepare(vm); err != nil {
 		t.Fatal(err)
 	}
@@ -434,8 +439,8 @@ func TestDHCPNATStartsOnceAndSuppliesBridgeAsRouter(t *testing.T) {
 	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR, true, bridgeDNSConfig{}); err != nil {
 		t.Fatal(err)
 	}
-	first := virtualMachine{ID: "one", NetworkMode: networkModeBridge, BridgeName: "br0"}
-	second := virtualMachine{ID: "two", NetworkMode: networkModeBridge, BridgeName: "br0"}
+	first := bridgedTestVM("one", "br0", "52:54:00:00:00:11")
+	second := bridgedTestVM("two", "br0", "52:54:00:00:00:12")
 	if err := manager.Prepare(first); err != nil {
 		t.Fatal(err)
 	}
@@ -495,10 +500,8 @@ func TestDHCPDNSLifecycleOptionsAndAutomaticRecords(t *testing.T) {
 	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR, false, config); err != nil {
 		t.Fatal(err)
 	}
-	vm := virtualMachine{
-		ID: "one", Name: "web-1", NetworkMode: networkModeBridge, BridgeName: "br0",
-		MACAddress: "52:54:00:00:00:04",
-	}
+	vm := bridgedTestVM("one", "br0", "52:54:00:00:00:04")
+	vm.Name = "web-1"
 	if err := manager.Prepare(vm); err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +566,7 @@ func TestDHCPRollsBackDNSWhenDHCPListenerCannotStart(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	err = manager.Prepare(virtualMachine{ID: "one", Name: "web-1", NetworkMode: networkModeBridge, BridgeName: "br0"})
+	err = manager.Prepare(bridgedTestVM("one", "br0", "52:54:00:00:00:21"))
 	if err == nil {
 		t.Fatal("DHCP listener failure was not reported")
 	}
@@ -583,7 +586,7 @@ func TestDHCPManagerReportsBridgePreparationFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider.err = errors.New("conflicting address")
-	err = manager.Prepare(virtualMachine{ID: "one", NetworkMode: networkModeBridge, BridgeName: "br0"})
+	err = manager.Prepare(bridgedTestVM("one", "br0", "52:54:00:00:00:11"))
 	if err == nil || manager.Status("br0").LastError == "" {
 		t.Fatalf("preparation failure was not reported: %v, %#v", err, manager.Status("br0"))
 	}
@@ -603,5 +606,65 @@ func TestDHCPManagerSuggestsAndEnforcesDistinctBridgeRanges(t *testing.T) {
 	}
 	if err := manager.Configure("br1", true, "192.168.100.0/24", false, bridgeDNSConfig{}); err == nil {
 		t.Fatal("overlapping bridge DHCP ranges were accepted")
+	}
+}
+
+func TestDHCPManagerPreparesEveryBridgeAVMUses(t *testing.T) {
+	provider := &fakeDHCPBridgeProvider{}
+	manager, err := newDHCPManager(t.TempDir(), provider, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.newServer = func(string, server4.Handler) (managedDHCPServer, error) { return newFakeManagedDHCPServer(), nil }
+	if err := manager.Configure("br0", true, "192.168.100.0/24", false, bridgeDNSConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Configure("br1", true, "192.168.101.0/24", false, bridgeDNSConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	vm := virtualMachine{ID: "dual", Name: "dual", NICs: []vmNIC{
+		{ID: "a", Mode: networkModeBridge, BridgeName: "br0", MACAddress: "52:54:00:00:00:31"},
+		{ID: "b", Mode: networkModeBridge, BridgeName: "br1", MACAddress: "52:54:00:00:00:32"},
+		{ID: "c", Mode: networkModeNAT, MACAddress: "52:54:00:00:00:33"},
+	}}
+	if err := manager.Prepare(vm); err != nil {
+		t.Fatal(err)
+	}
+	if !manager.Status("br0").Running || !manager.Status("br1").Running {
+		t.Fatalf("both bridges should be serving: br0=%v br1=%v", manager.Status("br0").Running, manager.Status("br1").Running)
+	}
+	manager.Release(vm)
+	if manager.Status("br0").Running || manager.Status("br1").Running {
+		t.Fatal("bridges kept running after the VM was released")
+	}
+}
+
+func TestDHCPManagerRollsBackEarlierBridgesWhenALaterOneFails(t *testing.T) {
+	provider := &fakeDHCPBridgeProvider{}
+	manager, err := newDHCPManager(t.TempDir(), provider, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.newServer = func(bridge string, _ server4.Handler) (managedDHCPServer, error) {
+		if bridge == "br1" {
+			return nil, errors.New("port 67 unavailable on br1")
+		}
+		return newFakeManagedDHCPServer(), nil
+	}
+	if err := manager.Configure("br0", true, "192.168.100.0/24", false, bridgeDNSConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Configure("br1", true, "192.168.101.0/24", false, bridgeDNSConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	vm := virtualMachine{ID: "dual", Name: "dual", NICs: []vmNIC{
+		{ID: "a", Mode: networkModeBridge, BridgeName: "br0", MACAddress: "52:54:00:00:00:41"},
+		{ID: "b", Mode: networkModeBridge, BridgeName: "br1", MACAddress: "52:54:00:00:00:42"},
+	}}
+	if err := manager.Prepare(vm); err == nil {
+		t.Fatal("failure on the second bridge was not reported")
+	}
+	if manager.Status("br0").Running {
+		t.Fatal("first bridge was left running after the second failed")
 	}
 }
