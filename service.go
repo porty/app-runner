@@ -495,7 +495,7 @@ func rpcError(err error) error {
 		return twirp.NewError(twirp.AlreadyExists, err.Error())
 	case errors.Is(err, errVMAlreadyRunning), errors.Is(err, errVMNotRunning), errors.Is(err, errBridgeUnavailable),
 		errors.Is(err, errHostUnavailable), errors.Is(err, errDeleteRunningVM), errors.Is(err, errDeviceRunningVM),
-		errors.Is(err, errCloneRunningVM):
+		errors.Is(err, errCloneRunningVM), errors.Is(err, errVMBusy):
 		return twirp.NewError(twirp.FailedPrecondition, err.Error())
 	default:
 		return twirp.InternalError(fmt.Sprintf("operation failed: %v", err))
