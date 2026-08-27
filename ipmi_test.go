@@ -2,6 +2,8 @@ package apprunner
 
 import (
 	"context"
+	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/bougou/go-ipmi/pkg/hal"
@@ -76,5 +78,27 @@ func TestValidateIPMIConfigRejectsInvalidEndpoint(t *testing.T) {
 	err := validateIPMIConfig(vmIPMIConfig{Enabled: true, BridgeName: "br0", Address: "not-an-ip", Username: "admin", Password: "secret"})
 	if err == nil {
 		t.Fatal("invalid IPMI address was accepted")
+	}
+}
+
+func TestIPMIManagerLeavesUnchangedListenerAlone(t *testing.T) {
+	manager := newIPMIManager(nil, nil)
+	config := vmIPMIConfig{Enabled: true, BridgeName: "no-such-bridge", Address: "192.0.2.10", Username: "admin", Password: "secret"}
+	manager.runtimes["vm-id"] = &ipmiRuntime{
+		bridge: config.BridgeName, address: netip.MustParseAddr(config.Address), prefixBits: 24,
+		username: config.Username, password: config.Password, running: true,
+	}
+	// Identical configuration returns before consulting the (absent) bridge.
+	if err := manager.Configure(virtualMachine{ID: "vm-id", IPMI: config}); err != nil {
+		t.Fatalf("unchanged configuration was not a no-op: %v", err)
+	}
+	if running, _ := manager.Status("vm-id"); !running {
+		t.Fatal("unchanged configuration stopped the listener")
+	}
+	// A credential rotation must go through, which here fails on the missing bridge.
+	rotated := config
+	rotated.Password = "rotated"
+	if err := manager.Configure(virtualMachine{ID: "vm-id", IPMI: rotated}); err == nil || !strings.Contains(err.Error(), "bridge") {
+		t.Fatalf("changed configuration did not attempt reconfiguration: %v", err)
 	}
 }
