@@ -754,3 +754,52 @@ func TestForceStopTimesOutWithoutExitCallback(t *testing.T) {
 		t.Fatalf("forced stop should give up waiting and report stopped: %#v", stopped)
 	}
 }
+
+func TestVMManagerStaysResponsiveWhileCloningDisks(t *testing.T) {
+	manager, _, _ := newTestVMManager(t)
+	source, err := manager.Create(context.Background(), installerVMOptions("template"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	copying := make(chan struct{})
+	release := make(chan struct{})
+	manager.copyFile = func(ctx context.Context, sourcePath, destinationPath string) error {
+		close(copying)
+		<-release
+		return copyVMFile(ctx, sourcePath, destinationPath)
+	}
+	manager.newID = func() (string, error) { return "clone-id", nil }
+	cloneResult := make(chan error, 1)
+	go func() {
+		_, err := manager.Clone(context.Background(), source.ID, "template-copy")
+		cloneResult <- err
+	}()
+	<-copying
+
+	// The copy is in progress with the lock released: reads succeed, the
+	// clone is not yet listed, and the source is protected from changes.
+	vms, err := manager.List()
+	if err != nil || len(vms) != 1 {
+		t.Fatalf("List during clone = %#v, %v", vms, err)
+	}
+	if _, err := manager.Start(source.ID); !errors.Is(err, errVMBusy) {
+		t.Fatalf("starting the clone source returned %v, want busy", err)
+	}
+	if err := manager.Delete(source.ID); !errors.Is(err, errVMBusy) {
+		t.Fatalf("deleting the clone source returned %v, want busy", err)
+	}
+	if _, err := manager.Create(context.Background(), installerVMOptions("template-copy")); !errors.Is(err, errVMNameExists) {
+		t.Fatalf("reusing the reserved clone name returned %v", err)
+	}
+	close(release)
+	if err := <-cloneResult; err != nil {
+		t.Fatalf("Clone returned an error: %v", err)
+	}
+	vms, err = manager.List()
+	if err != nil || len(vms) != 2 {
+		t.Fatalf("clone was not listed after completion: %#v, %v", vms, err)
+	}
+	if _, err := manager.Start(source.ID); err != nil {
+		t.Fatalf("source remained busy after the clone finished: %v", err)
+	}
+}

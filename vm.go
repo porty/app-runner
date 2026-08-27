@@ -51,6 +51,7 @@ var (
 	errDeleteRunningVM   = errors.New("stop the virtual machine before deleting it")
 	errDeviceRunningVM   = errors.New("stop the virtual machine before changing its device configuration")
 	errCloneRunningVM    = errors.New("stop the virtual machine before cloning it")
+	errVMBusy            = errors.New("the virtual machine is busy with another operation")
 )
 
 type fieldError struct {
@@ -213,7 +214,15 @@ type vmManager struct {
 	now               func() time.Time
 	newID             func() (string, error)
 	buildCloudInitISO cloudInitISOBuilder
+	copyFile          func(context.Context, string, string) error
 	vms               []virtualMachine
+	// creating holds definitions whose files are still being produced with
+	// the lock released; they reserve names and MAC addresses but are not
+	// yet listed.
+	creating map[string]virtualMachine
+	// busy records VMs whose disks are being copied or created with the lock
+	// released, keyed by ID with a short description of the operation.
+	busy map[string]string
 	// exits holds, per running VM, a channel closed once its process exit
 	// has been observed and its runtime files cleaned up.
 	exits            map[string]chan struct{}
@@ -239,11 +248,14 @@ func newVMManager(options vmManagerOptions) (*vmManager, error) {
 		now:              time.Now,
 		newID:            randomID,
 		exits:            make(map[string]chan struct{}),
+		creating:         make(map[string]virtualMachine),
+		busy:             make(map[string]string),
 		forceStopTimeout: defaultForceStopTimeout,
 		buildCloudInitISO: func(ctx context.Context, destination string, options cloudInitISOOptions) error {
 			return createCloudInitISO(ctx, settings.XorrisoBinary, destination, options)
 		},
-		vms: vms,
+		copyFile: copyVMFile,
+		vms:      vms,
 	}
 	if manager.bridgeCapability == nil {
 		manager.bridgeCapability = func(string) (bool, string) { return false, "bridge networking is not configured" }
@@ -377,14 +389,66 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 		return virtualMachine{}, &fieldError{field: "firmware", message: "UEFI firmware is unavailable; configure uefi_code_path and uefi_vars_path"}
 	}
 
+	// Reserve the identity under the lock, then produce files without it so
+	// long-running qemu-img work does not stall every other request.
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, existing := range m.vms {
-		if strings.EqualFold(existing.Name, options.Name) {
-			return virtualMachine{}, errVMNameExists
-		}
+	vm, err := m.reserveVMLocked(options, firmware)
+	m.mu.Unlock()
+	if err != nil {
+		return virtualMachine{}, err
 	}
 
+	created := make([]string, 0, len(vm.Disks))
+	cleanup := func() {
+		for _, path := range created {
+			_ = removeIfExists(path)
+		}
+		_ = os.RemoveAll(m.settings.vmStateDir(vm.ID))
+	}
+	produce := func() error {
+		for _, disk := range vm.Disks {
+			if err := m.createDiskFile(ctx, vm.ID, disk); err != nil {
+				return err
+			}
+			created = append(created, m.vmDiskPath(vm.ID, disk))
+		}
+		if err := os.MkdirAll(m.settings.vmStateDir(vm.ID), 0o750); err != nil {
+			return fmt.Errorf("create VM state directory: %w", err)
+		}
+		if vm.Firmware == vmFirmwareUEFI {
+			if err := m.copyFile(ctx, m.settings.UEFIVarsPath, m.uefiVarsPath(vm.ID)); err != nil {
+				return fmt.Errorf("create UEFI variable store: %w", err)
+			}
+		}
+		if vm.CloudInit.Enabled {
+			return m.buildCloudInitISO(ctx, m.cloudInitISOPath(vm.ID), cloudInitOptions(vm))
+		}
+		return nil
+	}
+	err = produce()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.creating, vm.ID)
+	if err != nil {
+		cleanup()
+		return virtualMachine{}, err
+	}
+	m.vms = append(m.vms, vm)
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms = m.vms[:len(m.vms)-1]
+		cleanup()
+		return virtualMachine{}, err
+	}
+	return cloneVirtualMachine(vm), nil
+}
+
+// reserveVMLocked allocates a definition for validated options and records it
+// as in progress so its name and MAC addresses cannot be claimed twice.
+func (m *vmManager) reserveVMLocked(options createVMOptions, firmware vmFirmware) (virtualMachine, error) {
+	if m.nameInUseLocked(options.Name, "") {
+		return virtualMachine{}, errVMNameExists
+	}
 	id, err := m.newID()
 	if err != nil {
 		return virtualMachine{}, fmt.Errorf("generate virtual machine ID: %w", err)
@@ -424,44 +488,31 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 		}
 		vm.NICs = append(vm.NICs, nic)
 	}
+	m.creating[vm.ID] = vm
+	return vm, nil
+}
 
-	created := make([]string, 0, len(vm.Disks))
-	cleanup := func() {
-		for _, path := range created {
-			_ = removeIfExists(path)
-		}
-		_ = os.RemoveAll(m.settings.vmStateDir(vm.ID))
-	}
-	for _, disk := range vm.Disks {
-		if err := m.createDiskFile(ctx, vm.ID, disk); err != nil {
-			cleanup()
-			return virtualMachine{}, err
-		}
-		created = append(created, m.vmDiskPath(vm.ID, disk))
-	}
-	if err := os.MkdirAll(m.settings.vmStateDir(vm.ID), 0o750); err != nil {
-		cleanup()
-		return virtualMachine{}, fmt.Errorf("create VM state directory: %w", err)
-	}
-	if vm.Firmware == vmFirmwareUEFI {
-		if err := copyVMFile(ctx, m.settings.UEFIVarsPath, m.uefiVarsPath(vm.ID)); err != nil {
-			cleanup()
-			return virtualMachine{}, fmt.Errorf("create UEFI variable store: %w", err)
+func (m *vmManager) nameInUseLocked(name, excludeID string) bool {
+	for _, existing := range m.vms {
+		if existing.ID != excludeID && strings.EqualFold(existing.Name, name) {
+			return true
 		}
 	}
-	if vm.CloudInit.Enabled {
-		if err := m.buildCloudInitISO(ctx, m.cloudInitISOPath(vm.ID), cloudInitOptions(vm)); err != nil {
-			cleanup()
-			return virtualMachine{}, err
+	for _, pending := range m.creating {
+		if strings.EqualFold(pending.Name, name) {
+			return true
 		}
 	}
-	m.vms = append(m.vms, vm)
-	if err := m.store.Save(m.vms); err != nil {
-		m.vms = m.vms[:len(m.vms)-1]
-		cleanup()
-		return virtualMachine{}, err
+	return false
+}
+
+// requireIdleLocked rejects changes to a VM whose files are being produced
+// or copied outside the lock.
+func (m *vmManager) requireIdleLocked(id string) error {
+	if reason, busy := m.busy[id]; busy {
+		return fmt.Errorf("%w: %s", errVMBusy, reason)
 	}
-	return cloneVirtualMachine(vm), nil
+	return nil
 }
 
 func (m *vmManager) createDiskFile(ctx context.Context, vmID string, disk vmDisk) error {
@@ -485,27 +536,92 @@ func (m *vmManager) createDiskFile(ctx context.Context, vmID string, disk vmDisk
 func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine, error) {
 	name = strings.TrimSpace(name)
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if err := m.reconcileLocked(); err != nil {
+		m.mu.Unlock()
 		return virtualMachine{}, err
 	}
 	index := m.indexByID(id)
 	if index == -1 {
+		m.mu.Unlock()
 		return virtualMachine{}, errVMNotFound
 	}
-	source := m.vms[index]
+	source := cloneVirtualMachine(m.vms[index])
 	if source.Status != vmStatusStopped {
+		m.mu.Unlock()
 		return virtualMachine{}, errCloneRunningVM
 	}
-	if err := validateVMIdentityAndResources(name, source.Description, source.CPUs, source.MemoryMiB); err != nil {
+	if err := m.requireIdleLocked(id); err != nil {
+		m.mu.Unlock()
 		return virtualMachine{}, err
 	}
-	for _, existing := range m.vms {
-		if strings.EqualFold(existing.Name, name) {
-			return virtualMachine{}, errVMNameExists
-		}
+	if err := validateVMIdentityAndResources(name, source.Description, source.CPUs, source.MemoryMiB); err != nil {
+		m.mu.Unlock()
+		return virtualMachine{}, err
 	}
+	clone, err := m.reserveCloneLocked(source, name)
+	if err != nil {
+		m.mu.Unlock()
+		return virtualMachine{}, err
+	}
+	// The source stays readable but cannot be started, deleted, or changed
+	// while its disks are copied with the lock released.
+	m.busy[source.ID] = "cloning"
+	m.mu.Unlock()
 
+	createdPaths := make([]string, 0, len(clone.Disks))
+	removeCreated := func() {
+		for _, path := range createdPaths {
+			_ = removeIfExists(path)
+		}
+		_ = os.RemoveAll(m.settings.vmStateDir(clone.ID))
+	}
+	copyErr := func() error {
+		if err := os.MkdirAll(m.settings.vmStateDir(clone.ID), 0o750); err != nil {
+			return fmt.Errorf("create VM state directory: %w", err)
+		}
+		for diskIndex, sourceDisk := range source.Disks {
+			destinationPath := m.vmDiskPath(clone.ID, clone.Disks[diskIndex])
+			if err := m.copyFile(ctx, m.vmDiskPath(source.ID, sourceDisk), destinationPath); err != nil {
+				return fmt.Errorf("copy disk %s: %w", sourceDisk.ID, err)
+			}
+			createdPaths = append(createdPaths, destinationPath)
+		}
+		if clone.CloudInit.Enabled {
+			if err := m.buildCloudInitISO(ctx, m.cloudInitISOPath(clone.ID), cloudInitOptions(clone)); err != nil {
+				return err
+			}
+		}
+		if clone.Firmware == vmFirmwareUEFI {
+			if err := m.copyFile(ctx, m.uefiVarsPath(source.ID), m.uefiVarsPath(clone.ID)); err != nil {
+				return fmt.Errorf("clone UEFI variable store: %w", err)
+			}
+		}
+		return nil
+	}()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.busy, source.ID)
+	delete(m.creating, clone.ID)
+	if copyErr != nil {
+		removeCreated()
+		return virtualMachine{}, copyErr
+	}
+	m.vms = append(m.vms, clone)
+	if err := m.store.Save(m.vms); err != nil {
+		m.vms = m.vms[:len(m.vms)-1]
+		removeCreated()
+		return virtualMachine{}, err
+	}
+	return cloneVirtualMachine(clone), nil
+}
+
+// reserveCloneLocked allocates the clone's identity: new device IDs and MAC
+// addresses, the same configuration, and no IPMI endpoint.
+func (m *vmManager) reserveCloneLocked(source virtualMachine, name string) (virtualMachine, error) {
+	if m.nameInUseLocked(name, "") {
+		return virtualMachine{}, errVMNameExists
+	}
 	cloneID, err := m.newID()
 	if err != nil {
 		return virtualMachine{}, fmt.Errorf("generate cloned virtual machine ID: %w", err)
@@ -513,7 +629,6 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 	if m.indexByID(cloneID) != -1 {
 		return virtualMachine{}, errors.New("generated cloned virtual machine ID already exists")
 	}
-
 	clone := virtualMachine{
 		ID:          cloneID,
 		Name:        name,
@@ -550,45 +665,8 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 		}
 		clone.NICs = append(clone.NICs, nic)
 	}
-
-	if err := os.MkdirAll(m.settings.vmStateDir(clone.ID), 0o750); err != nil {
-		return virtualMachine{}, fmt.Errorf("create VM state directory: %w", err)
-	}
-	createdPaths := make([]string, 0, len(clone.Disks))
-	removeCreated := func() {
-		for _, path := range createdPaths {
-			_ = removeIfExists(path)
-		}
-		_ = os.RemoveAll(m.settings.vmStateDir(clone.ID))
-	}
-	for diskIndex, sourceDisk := range source.Disks {
-		destinationPath := m.vmDiskPath(clone.ID, clone.Disks[diskIndex])
-		if err := copyVMFile(ctx, m.vmDiskPath(source.ID, sourceDisk), destinationPath); err != nil {
-			removeCreated()
-			return virtualMachine{}, fmt.Errorf("copy disk %s: %w", sourceDisk.ID, err)
-		}
-		createdPaths = append(createdPaths, destinationPath)
-	}
-	if clone.CloudInit.Enabled {
-		if err := m.buildCloudInitISO(ctx, m.cloudInitISOPath(clone.ID), cloudInitOptions(clone)); err != nil {
-			removeCreated()
-			return virtualMachine{}, err
-		}
-	}
-	if clone.Firmware == vmFirmwareUEFI {
-		if err := copyVMFile(ctx, m.uefiVarsPath(source.ID), m.uefiVarsPath(clone.ID)); err != nil {
-			removeCreated()
-			return virtualMachine{}, fmt.Errorf("clone UEFI variable store: %w", err)
-		}
-	}
-
-	m.vms = append(m.vms, clone)
-	if err := m.store.Save(m.vms); err != nil {
-		m.vms = m.vms[:len(m.vms)-1]
-		removeCreated()
-		return virtualMachine{}, err
-	}
-	return cloneVirtualMachine(clone), nil
+	m.creating[clone.ID] = clone
+	return clone, nil
 }
 
 func (m *vmManager) Start(id string) (virtualMachine, error) {
@@ -600,6 +678,9 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 	index := m.indexByID(id)
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
+	}
+	if err := m.requireIdleLocked(id); err != nil {
+		return virtualMachine{}, err
 	}
 	vm := m.vms[index]
 	if vm.Status == vmStatusRunning || vm.Status == vmStatusStopping {
@@ -772,6 +853,9 @@ func (m *vmManager) Delete(id string) error {
 	if index == -1 {
 		return errVMNotFound
 	}
+	if err := m.requireIdleLocked(id); err != nil {
+		return err
+	}
 	if m.vms[index].Status == vmStatusRunning || m.vms[index].Status == vmStatusStopping {
 		return errDeleteRunningVM
 	}
@@ -811,10 +895,11 @@ func (m *vmManager) Update(id, name, description string, cpus, memoryMiB uint32)
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
 	}
-	for candidateIndex, candidate := range m.vms {
-		if candidateIndex != index && strings.EqualFold(candidate.Name, name) {
-			return virtualMachine{}, errVMNameExists
-		}
+	if err := m.requireIdleLocked(id); err != nil {
+		return virtualMachine{}, err
+	}
+	if m.nameInUseLocked(name, id) {
+		return virtualMachine{}, errVMNameExists
 	}
 	previous := m.vms[index]
 	m.vms[index].Name = name
@@ -856,6 +941,9 @@ func (m *vmManager) ConfigureCloudInit(ctx context.Context, id string, configura
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
 	}
+	if err := m.requireIdleLocked(id); err != nil {
+		return virtualMachine{}, err
+	}
 	previous := m.vms[index]
 	if previous.CloudInit == configuration {
 		return cloneVirtualMachine(previous), nil
@@ -894,6 +982,9 @@ func (m *vmManager) AddNIC(id string, spec vmNICSpec) (virtualMachine, error) {
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
 	}
+	if err := m.requireIdleLocked(id); err != nil {
+		return virtualMachine{}, err
+	}
 	if vmIsActive(m.vms[index]) {
 		return virtualMachine{}, errDeviceRunningVM
 	}
@@ -925,6 +1016,9 @@ func (m *vmManager) UpdateNIC(id, nicID string, spec vmNICSpec) (virtualMachine,
 	index := m.indexByID(id)
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
+	}
+	if err := m.requireIdleLocked(id); err != nil {
+		return virtualMachine{}, err
 	}
 	nicIndex := slices.IndexFunc(m.vms[index].NICs, func(nic vmNIC) bool { return nic.ID == nicID })
 	if nicIndex == -1 {
@@ -963,6 +1057,9 @@ func (m *vmManager) RemoveNIC(id, nicID string) (virtualMachine, error) {
 	index := m.indexByID(id)
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
+	}
+	if err := m.requireIdleLocked(id); err != nil {
+		return virtualMachine{}, err
 	}
 	if vmIsActive(m.vms[index]) {
 		return virtualMachine{}, errDeviceRunningVM
@@ -1003,6 +1100,11 @@ func (m *vmManager) macAddressInUseLocked(macAddress string) bool {
 			return true
 		}
 	}
+	for _, pending := range m.creating {
+		if pending.hasMACAddress(macAddress) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -1035,24 +1137,43 @@ func (m *vmManager) AddDisk(ctx context.Context, id string, spec vmDiskSpec) (vi
 		return virtualMachine{}, err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	index := m.indexByID(id)
 	if index == -1 {
+		m.mu.Unlock()
 		return virtualMachine{}, errVMNotFound
 	}
 	if vmIsActive(m.vms[index]) {
+		m.mu.Unlock()
 		return virtualMachine{}, errDeviceRunningVM
+	}
+	if err := m.requireIdleLocked(id); err != nil {
+		m.mu.Unlock()
+		return virtualMachine{}, err
 	}
 	diskID, err := randomID()
 	if err != nil {
+		m.mu.Unlock()
 		return virtualMachine{}, fmt.Errorf("generate disk ID: %w", err)
 	}
 	disk := vmDisk{ID: diskID, SizeGiB: spec.SizeGiB, SourceImage: spec.SourceImage}
-	if err := m.createDiskFile(ctx, id, disk); err != nil {
-		return virtualMachine{}, err
+	m.busy[id] = "adding a disk"
+	m.mu.Unlock()
+
+	createErr := m.createDiskFile(ctx, id, disk)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.busy, id)
+	if createErr != nil {
+		return virtualMachine{}, createErr
+	}
+	index = m.indexByID(id)
+	if index == -1 {
+		_ = removeIfExists(m.vmDiskPath(id, disk))
+		return virtualMachine{}, errVMNotFound
 	}
 	previous := slices.Clone(m.vms[index].Disks)
-	m.vms[index].Disks = append(m.vms[index].Disks, disk)
+	m.vms[index].Disks = append(slices.Clone(m.vms[index].Disks), disk)
 	if err := m.store.Save(m.vms); err != nil {
 		m.vms[index].Disks = previous
 		_ = removeIfExists(m.vmDiskPath(id, disk))
@@ -1067,6 +1188,9 @@ func (m *vmManager) RemoveDisk(id, diskID string) (virtualMachine, error) {
 	index := m.indexByID(id)
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
+	}
+	if err := m.requireIdleLocked(id); err != nil {
+		return virtualMachine{}, err
 	}
 	if vmIsActive(m.vms[index]) {
 		return virtualMachine{}, errDeviceRunningVM
@@ -1105,6 +1229,9 @@ func (m *vmManager) AddCDROM(id, isoName string) (virtualMachine, error) {
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
 	}
+	if err := m.requireIdleLocked(id); err != nil {
+		return virtualMachine{}, err
+	}
 	if vmIsActive(m.vms[index]) {
 		return virtualMachine{}, errDeviceRunningVM
 	}
@@ -1131,6 +1258,9 @@ func (m *vmManager) UpdateCDROM(id, cdromID, isoName string) (virtualMachine, er
 	index := m.indexByID(id)
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
+	}
+	if err := m.requireIdleLocked(id); err != nil {
+		return virtualMachine{}, err
 	}
 	cdromIndex := slices.IndexFunc(m.vms[index].CDROMs, func(cdrom vmCDROM) bool { return cdrom.ID == cdromID })
 	if cdromIndex == -1 {
@@ -1172,6 +1302,9 @@ func (m *vmManager) RemoveCDROM(id, cdromID string) (virtualMachine, error) {
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
 	}
+	if err := m.requireIdleLocked(id); err != nil {
+		return virtualMachine{}, err
+	}
 	if vmIsActive(m.vms[index]) {
 		return virtualMachine{}, errDeviceRunningVM
 	}
@@ -1194,6 +1327,9 @@ func (m *vmManager) ConfigureIPMI(id string, config vmIPMIConfig) (virtualMachin
 	index := m.indexByID(id)
 	if index == -1 {
 		return virtualMachine{}, errVMNotFound
+	}
+	if err := m.requireIdleLocked(id); err != nil {
+		return virtualMachine{}, err
 	}
 	previous := m.vms[index].IPMI
 	if !config.Enabled {
