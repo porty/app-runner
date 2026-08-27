@@ -2218,12 +2218,15 @@ func (x *StartVMResponse) GetVirtualMachine() *VirtualMachine {
 	return nil
 }
 
+// A graceful stop asks the guest to shut down. When timeout_seconds is set
+// and the guest is still running afterwards, the VM is forced off.
 type StopVMRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Force         bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Force          bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
+	TimeoutSeconds uint32                 `protobuf:"varint,3,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *StopVMRequest) Reset() {
@@ -2268,6 +2271,13 @@ func (x *StopVMRequest) GetForce() bool {
 		return x.Force
 	}
 	return false
+}
+
+func (x *StopVMRequest) GetTimeoutSeconds() uint32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
 }
 
 type StopVMResponse struct {
@@ -5844,10 +5854,11 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\x0eStartVMRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"X\n" +
 	"\x0fStartVMResponse\x12E\n" +
-	"\x0fvirtual_machine\x18\x01 \x01(\v2\x1c.apprunner.v1.VirtualMachineR\x0evirtualMachine\"5\n" +
+	"\x0fvirtual_machine\x18\x01 \x01(\v2\x1c.apprunner.v1.VirtualMachineR\x0evirtualMachine\"^\n" +
 	"\rStopVMRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
-	"\x05force\x18\x02 \x01(\bR\x05force\"W\n" +
+	"\x05force\x18\x02 \x01(\bR\x05force\x12'\n" +
+	"\x0ftimeout_seconds\x18\x03 \x01(\rR\x0etimeoutSeconds\"W\n" +
 	"\x0eStopVMResponse\x12E\n" +
 	"\x0fvirtual_machine\x18\x01 \x01(\v2\x1c.apprunner.v1.VirtualMachineR\x0evirtualMachine\"!\n" +
 	"\x0fRebootVMRequest\x12\x0e\n" +

@@ -169,7 +169,7 @@ func TestVMManagerLifecycle(t *testing.T) {
 		t.Fatalf("VM was not marked running: %#v", vm)
 	}
 
-	vm, err = manager.Stop(vm.ID, false)
+	vm, err = manager.Stop(vm.ID, false, 0)
 	if err != nil {
 		t.Fatalf("graceful Stop returned an error: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestVMManagerAllowsVMsWithoutDevices(t *testing.T) {
 	if _, err := manager.Start(vm.ID); err != nil {
 		t.Fatalf("device-less VM could not start: %v", err)
 	}
-	if _, err := manager.Stop(vm.ID, true); err != nil {
+	if _, err := manager.Stop(vm.ID, true, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.Delete(vm.ID); err != nil {
@@ -252,7 +252,7 @@ func TestVMManagerCreatesCloudImageVMAsLinkedUEFIDisk(t *testing.T) {
 	if _, err := manager.Start(vm.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.Stop(vm.ID, true); err != nil {
+	if _, err := manager.Stop(vm.ID, true, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.Delete(vm.ID); err != nil {
@@ -353,7 +353,7 @@ func TestVMManagerManagesCloudInitISOThroughoutVMLifecycle(t *testing.T) {
 	if _, err := manager.ConfigureCloudInit(context.Background(), vm.ID, vmCloudInit{Enabled: true, UserData: "changed"}); !errors.Is(err, errDeviceRunningVM) {
 		t.Fatalf("changing cloud-init on a running VM returned %v", err)
 	}
-	if _, err := manager.Stop(vm.ID, true); err != nil {
+	if _, err := manager.Stop(vm.ID, true, 0); err != nil {
 		t.Fatal(err)
 	}
 	vm, err = manager.ConfigureCloudInit(context.Background(), vm.ID, vmCloudInit{})
@@ -523,7 +523,7 @@ func TestVMManagerUpdatesSettingsAndDevices(t *testing.T) {
 	if _, err := manager.AddNIC(vm.ID, vmNICSpec{Mode: networkModeNAT}); !errors.Is(err, errDeviceRunningVM) {
 		t.Fatalf("adding a NIC to a running VM returned %v", err)
 	}
-	if _, err := manager.Stop(vm.ID, true); err != nil {
+	if _, err := manager.Stop(vm.ID, true, 0); err != nil {
 		t.Fatal(err)
 	}
 	vm, err = manager.AddDisk(context.Background(), vm.ID, vmDiskSpec{SizeGiB: 5})
@@ -622,7 +622,7 @@ func TestVMManagerCoordinatesBridgeNetworkLifecycle(t *testing.T) {
 	if len(lifecycle.prepared) != 1 || lifecycle.prepared[0] != vm.ID {
 		t.Fatalf("network was not prepared before start: %#v", lifecycle.prepared)
 	}
-	if _, err := manager.Stop(vm.ID, true); err != nil {
+	if _, err := manager.Stop(vm.ID, true, 0); err != nil {
 		t.Fatal(err)
 	}
 	if len(lifecycle.released) != 1 || lifecycle.released[0] != vm.ID {
@@ -716,7 +716,7 @@ func TestForceStopWaitsForExitBeforeRestart(t *testing.T) {
 	if _, err := manager.Start(vm.ID); err != nil {
 		t.Fatal(err)
 	}
-	stopped, err := manager.Stop(vm.ID, true)
+	stopped, err := manager.Stop(vm.ID, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -746,7 +746,7 @@ func TestForceStopTimesOutWithoutExitCallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	hypervisor.onExit = nil // the reaper never reports
-	stopped, err := manager.Stop(vm.ID, true)
+	stopped, err := manager.Stop(vm.ID, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -801,5 +801,53 @@ func TestVMManagerStaysResponsiveWhileCloningDisks(t *testing.T) {
 	}
 	if _, err := manager.Start(source.ID); err != nil {
 		t.Fatalf("source remained busy after the clone finished: %v", err)
+	}
+}
+
+func TestGracefulStopEscalatesToForceAfterTimeout(t *testing.T) {
+	manager, hypervisor, _ := newTestVMManager(t)
+	vm, err := manager.Create(context.Background(), installerVMOptions("stubborn"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Start(vm.ID); err != nil {
+		t.Fatal(err)
+	}
+	stopping, err := manager.Stop(vm.ID, false, 20*time.Millisecond)
+	if err != nil || stopping.Status != vmStatusStopping || hypervisor.forcedStop {
+		t.Fatalf("graceful stop = %#v, %v (forced=%v)", stopping, err, hypervisor.forcedStop)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		current, err := manager.Get(vm.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.Status == vmStatusStopped {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("VM was not forced off after the shutdown timeout: %#v", current)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !hypervisor.forcedStop {
+		t.Fatal("timeout expiry did not force the VM off")
+	}
+
+	// A guest that shuts down in time is never forced.
+	hypervisor.forcedStop = false
+	if _, err := manager.Start(vm.ID); err != nil {
+		t.Fatal(err)
+	}
+	stopping, err = manager.Stop(vm.ID, false, 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hypervisor.running[stopping.PID] = false
+	hypervisor.onExit(stopping.PID, nil)
+	time.Sleep(80 * time.Millisecond)
+	if hypervisor.forcedStop {
+		t.Fatal("a guest that exited before the deadline was still forced off")
 	}
 }

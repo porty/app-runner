@@ -121,7 +121,7 @@ func (s *appRunnerService) StartVM(_ context.Context, request *apprunnerv1.Start
 }
 
 func (s *appRunnerService) StopVM(_ context.Context, request *apprunnerv1.StopVMRequest) (*apprunnerv1.StopVMResponse, error) {
-	vm, err := s.manager.Stop(request.GetId(), request.GetForce())
+	vm, err := s.manager.Stop(request.GetId(), request.GetForce(), time.Duration(request.GetTimeoutSeconds())*time.Second)
 	if err != nil {
 		return nil, rpcError(err)
 	}
