@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"os"
@@ -38,7 +39,6 @@ type bridgeNATController interface {
 	Stop(string) error
 	Running(string) bool
 	FinishRecovery() error
-	Close() error
 }
 
 type natPersistedState struct {
@@ -177,13 +177,6 @@ func (m *natManager) FinishRecovery() error {
 	return m.cleanupLocked()
 }
 
-func (m *natManager) Close() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.active = make(map[string]netip.Prefix)
-	return m.cleanupLocked()
-}
-
 func (m *natManager) cleanupLocked() error {
 	rulesErr := m.backend.ReplaceRules(nil)
 	forwardingErr := m.restoreForwardingLocked()
@@ -281,6 +274,9 @@ func (linuxNATBackend) ReplaceRules(networks []natNetwork) error {
 	if err := replaceHostFilterRules(connection, tables, networks); err != nil {
 		return err
 	}
+	if len(networks) != 0 && !hasIPv4FilterTable(tables) {
+		slog.Warn("no iptables-nft filter table found; host firewall accept rules for managed NAT bridges were not installed")
+	}
 	if len(networks) == 0 {
 		return connection.Flush()
 	}
@@ -300,6 +296,15 @@ func (linuxNATBackend) ReplaceRules(networks []natNetwork) error {
 		connection.AddRule(&nftables.Rule{Table: table, Chain: postrouting, Exprs: masqueradeExpressions(network)})
 	}
 	return connection.Flush()
+}
+
+func hasIPv4FilterTable(tables []*nftables.Table) bool {
+	for _, table := range tables {
+		if table.Family == nftables.TableFamilyIPv4 && table.Name == "filter" {
+			return true
+		}
+	}
+	return false
 }
 
 // replaceHostFilterRules inserts narrowly scoped accepts into an existing

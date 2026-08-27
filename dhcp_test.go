@@ -60,7 +60,6 @@ func (c *fakeBridgeNATController) Running(bridge string) bool {
 }
 
 func (c *fakeBridgeNATController) FinishRecovery() error { return nil }
-func (c *fakeBridgeNATController) Close() error          { return nil }
 
 type fakeBridgeDNSController struct {
 	started map[string]bridgeDNSConfig
@@ -666,5 +665,33 @@ func TestDHCPManagerRollsBackEarlierBridgesWhenALaterOneFails(t *testing.T) {
 	}
 	if manager.Status("br0").Running {
 		t.Fatal("first bridge was left running after the second failed")
+	}
+}
+
+func TestDHCPShutdownClosesListenersButKeepsNAT(t *testing.T) {
+	provider := &fakeDHCPBridgeProvider{}
+	nat := newFakeBridgeNATController()
+	manager, err := newDHCPManager(t.TempDir(), provider, nat, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := newFakeManagedDHCPServer()
+	manager.newServer = func(string, server4.Handler) (managedDHCPServer, error) { return server, nil }
+	if err := manager.Configure("br0", true, defaultBridgeDHCPCIDR, true, bridgeDNSConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Prepare(bridgedTestVM("one", "br0", "52:54:00:00:00:51")); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-server.closed:
+	default:
+		t.Fatal("DHCP listener was not closed on shutdown")
+	}
+	if !nat.Running("br0") || len(nat.stopped) != 0 {
+		t.Fatalf("shutdown tore down NAT that running guests still need: running=%v stopped=%v", nat.Running("br0"), nat.stopped)
 	}
 }

@@ -1,15 +1,22 @@
 package apprunner
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/netip"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
-// RunServer starts the App Runner HTTP and Twirp API server.
+// RunServer starts the App Runner HTTP and Twirp API server and runs until
+// SIGINT or SIGTERM. Shutting down closes the API and the managed DHCP, DNS,
+// and IPMI listeners; running virtual machines and the NAT rules serving
+// them are deliberately left alone and re-verified on the next start.
 func RunServer(args []string, frontend fs.FS) error {
 	workingDirectory, err := os.Getwd()
 	if err != nil {
@@ -53,7 +60,6 @@ func RunServer(args []string, frontend fs.FS) error {
 	if err != nil {
 		return err
 	}
-	defer dhcp.Close()
 	manager.networkLifecycle = dhcp
 	ipmi := newIPMIManager(manager, func(bridge string) (netip.Prefix, bool) {
 		status := dhcp.Status(bridge)
@@ -64,7 +70,6 @@ func RunServer(args []string, frontend fs.FS) error {
 		return prefix, err == nil
 	})
 	manager.ipmi = ipmi
-	defer ipmi.Close()
 	vms, err := manager.List()
 	if err != nil {
 		return err
@@ -94,10 +99,34 @@ func RunServer(args []string, frontend fs.FS) error {
 		Handler: newHTTPHandler(frontend, appRuntime{
 			manager: manager, networking: networking, storage: newStorageService(settings), templates: templates, capabilities: capabilities,
 		}),
+		// Console WebSockets and large uploads are long-lived, so only the
+		// header read and idle keep-alives are bounded.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
 	}
 	slog.Info("App Runner listening", "address", settings.Listen, "iso_dir", settings.ISODir, "disk_dir", settings.DiskDir, "state_dir", settings.StateDir, "run_dir", settings.RunDir)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	serverErr := make(chan error, 1)
+	go func() { serverErr <- server.ListenAndServe() }()
+	select {
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+	}
+	slog.Info("shutting down; running virtual machines are left running")
+	shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownContext); err != nil {
+		slog.Warn("HTTP server shutdown", "error", err)
+	}
+	ipmi.Close()
+	if err := dhcp.Shutdown(); err != nil {
+		slog.Warn("close managed network listeners", "error", err)
 	}
 	return nil
 }

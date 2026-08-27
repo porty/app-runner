@@ -1,8 +1,11 @@
 package apprunner
 
 import (
+	"errors"
 	"net/netip"
 	"testing"
+
+	"github.com/google/nftables"
 )
 
 func TestDHCPAddressConflicts(t *testing.T) {
@@ -33,5 +36,27 @@ func TestDHCPAddressConflicts(t *testing.T) {
 				t.Errorf("dhcpAddressConflicts(%s, onBridge=%v) = %v, want %v", test.existing, test.onBridge, got, test.want)
 			}
 		})
+	}
+}
+
+func TestHostFirewallDiagnosticDistinguishesFilterTables(t *testing.T) {
+	list := func(tables ...*nftables.Table) func() ([]*nftables.Table, error) {
+		return func() ([]*nftables.Table, error) { return tables, nil }
+	}
+	if got := hostFirewallDiagnostic(false, nil); got.Status != diagnosticInfo {
+		t.Fatalf("without CAP_NET_ADMIN = %#v", got)
+	}
+	if got := hostFirewallDiagnostic(true, func() ([]*nftables.Table, error) { return nil, errors.New("denied") }); got.Status != diagnosticInfo {
+		t.Fatalf("listing failure = %#v", got)
+	}
+	if got := hostFirewallDiagnostic(true, list(&nftables.Table{Family: nftables.TableFamilyIPv4, Name: "filter"})); got.Status != diagnosticPass {
+		t.Fatalf("iptables-nft filter = %#v", got)
+	}
+	if got := hostFirewallDiagnostic(true, list(&nftables.Table{Family: nftables.TableFamilyIPv4, Name: appRunnerNATTable})); got.Status != diagnosticPass {
+		t.Fatalf("only App Runner's own table = %#v", got)
+	}
+	got := hostFirewallDiagnostic(true, list(&nftables.Table{Family: nftables.TableFamilyINet, Name: "firewalld"}))
+	if got.Status != diagnosticWarning || got.Remediation == "" {
+		t.Fatalf("native nftables firewall = %#v", got)
 	}
 }
