@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestQEMUArgumentsUseRequiredVirtualisationProfile(t *testing.T) {
@@ -184,5 +186,41 @@ func TestQEMUArgumentsHonorIPMIBootDevice(t *testing.T) {
 	arguments := qemu.arguments(virtualMachine{ID: "vm-id", IPMI: vmIPMIConfig{BootDevice: uint8(1)}})
 	if !slices.Contains(arguments, "order=ncd,menu=on") {
 		t.Fatalf("PXE boot order is missing: %#v", arguments)
+	}
+}
+
+func TestIsRunningRequiresTheVMsOwnQEMUProcess(t *testing.T) {
+	settings := defaultConfig(t.TempDir())
+	qemu := newQEMUHypervisor(settings)
+	socketPath := settings.qmpSocketPath("vm-id")
+	// A process that merely exists (this test binary) is not the VM.
+	if qemu.IsRunning(virtualMachine{ID: "vm-id", PID: os.Getpid()}) {
+		t.Fatal("an unrelated live PID was treated as the VM's QEMU process")
+	}
+	// A process whose command line references the VM's QMP socket is.
+	// A loop body stops the shell from exec-ing sleep directly, which would
+	// drop the marker argument from the visible command line.
+	command := exec.Command("sh", "-c", "while :; do sleep 1; done", "sh", "unix:"+socketPath+",server=on,wait=off")
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = command.Process.Kill(); _, _ = command.Process.Wait() })
+	// Start returns before the kernel has finished publishing the new argv,
+	// so give /proc a moment to reflect the exec.
+	recognised := false
+	for attempt := 0; attempt < 100 && !recognised; attempt++ {
+		recognised = qemu.IsRunning(virtualMachine{ID: "vm-id", PID: command.Process.Pid})
+		if !recognised {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if !recognised {
+		t.Fatal("the VM's own process was not recognised as running")
+	}
+	if qemu.IsRunning(virtualMachine{ID: "other-vm", PID: command.Process.Pid}) {
+		t.Fatal("a process serving another VM's socket was treated as this VM")
+	}
+	if qemu.IsRunning(virtualMachine{ID: "vm-id", PID: 0}) {
+		t.Fatal("PID 0 was treated as running")
 	}
 }
