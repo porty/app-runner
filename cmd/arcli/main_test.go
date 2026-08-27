@@ -324,3 +324,30 @@ func TestNetBridgeConfigureDefaultsServicesOff(t *testing.T) {
 		}
 	}
 }
+
+func TestVMStopForceAfterIsNotTheRequestTimeout(t *testing.T) {
+	var request struct {
+		ID             string `json:"id"`
+		Force          bool   `json:"force"`
+		TimeoutSeconds uint32 `json:"timeout_seconds"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, r *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/ListVMs") {
+			_, _ = response.Write([]byte(vmListJSON))
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		_, _ = response.Write([]byte(`{"virtual_machine":{"id":"vm-1","name":"example","status":"VM_STATUS_STOPPING"}}`))
+	}))
+	t.Cleanup(server.Close)
+	var output bytes.Buffer
+	if err := run([]string{"--server", server.URL, "vm", "stop", "example", "--force-after", "90s"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if request.ID != "vm-1" || request.Force || request.TimeoutSeconds != 90 {
+		t.Errorf("request = %+v, want a graceful stop escalating after 90s", request)
+	}
+}

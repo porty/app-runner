@@ -486,18 +486,19 @@ func vm(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, outp
 	case "stop":
 		f := flags("vm stop")
 		force := f.Bool("force", false, "force stop")
-		timeout := f.Duration("timeout", 0, "force the VM off if it has not shut down within this duration")
+		// Named --force-after rather than --timeout, which is the global request timeout.
+		forceAfter := f.Duration("force-after", 0, "force the VM off if it has not shut down within this duration")
 		if e := parseFlags(f, args[1:]); e != nil {
 			return e
 		}
-		if e := require(f.Args(), 1, "usage: arcli vm stop [--force | --timeout DURATION] ID"); e != nil {
+		if e := require(f.Args(), 1, "usage: arcli vm stop [--force | --force-after DURATION] ID"); e != nil {
 			return e
 		}
 		id, e := vmID(ctx, c, f.Args()[0])
 		if e != nil {
 			return e
 		}
-		r, e := c.StopVM(ctx, &apprunnerv1.StopVMRequest{Id: id, Force: *force, TimeoutSeconds: uint32(timeout.Seconds())})
+		r, e := c.StopVM(ctx, &apprunnerv1.StopVMRequest{Id: id, Force: *force, TimeoutSeconds: uint32(forceAfter.Seconds())})
 		if e != nil {
 			return e
 		}
