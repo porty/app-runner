@@ -381,8 +381,10 @@ export async function startVM(id: string): Promise<VirtualMachine> {
   return response.virtual_machine
 }
 
-export async function stopVM(id: string, force = false): Promise<VirtualMachine> {
-  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('StopVM', { id, force })
+// A graceful stop with timeoutSeconds forces the VM off if the guest has not
+// shut down by then.
+export async function stopVM(id: string, force = false, timeoutSeconds = 0): Promise<VirtualMachine> {
+  const response = await callTwirp<{ virtual_machine: VirtualMachine }>('StopVM', { id, force, timeout_seconds: timeoutSeconds })
   return response.virtual_machine
 }
 

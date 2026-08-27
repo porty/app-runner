@@ -225,7 +225,9 @@ type vmManager struct {
 	busy map[string]string
 	// exits holds, per running VM, a channel closed once its process exit
 	// has been observed and its runtime files cleaned up.
-	exits            map[string]chan struct{}
+	exits map[string]chan struct{}
+	// stopTimers escalate graceful shutdowns that the guest ignores.
+	stopTimers       map[string]*time.Timer
 	forceStopTimeout time.Duration
 }
 
@@ -248,6 +250,7 @@ func newVMManager(options vmManagerOptions) (*vmManager, error) {
 		now:              time.Now,
 		newID:            randomID,
 		exits:            make(map[string]chan struct{}),
+		stopTimers:       make(map[string]*time.Timer),
 		creating:         make(map[string]virtualMachine),
 		busy:             make(map[string]string),
 		forceStopTimeout: defaultForceStopTimeout,
@@ -767,7 +770,10 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 	return cloneVirtualMachine(m.vms[index]), nil
 }
 
-func (m *vmManager) Stop(id string, force bool) (virtualMachine, error) {
+// Stop powers a VM off. Without force it asks the guest to shut down; when
+// timeout is positive and the guest has not exited by then, the VM is
+// forced off instead of staying in the stopping state indefinitely.
+func (m *vmManager) Stop(id string, force bool, timeout time.Duration) (virtualMachine, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.reconcileLocked(); err != nil {
@@ -791,7 +797,35 @@ func (m *vmManager) Stop(id string, force bool) (virtualMachine, error) {
 	if err := m.store.Save(m.vms); err != nil {
 		return virtualMachine{}, err
 	}
+	m.cancelStopTimerLocked(id)
+	if timeout > 0 {
+		pid := m.vms[index].PID
+		m.stopTimers[id] = time.AfterFunc(timeout, func() { m.escalateStop(id, pid) })
+	}
 	return cloneVirtualMachine(m.vms[index]), nil
+}
+
+// escalateStop forces a VM off after its graceful shutdown deadline passed
+// without the guest exiting.
+func (m *vmManager) escalateStop(id string, pid int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.stopTimers, id)
+	index := m.indexByID(id)
+	if index == -1 || m.vms[index].Status != vmStatusStopping || m.vms[index].PID != pid {
+		return
+	}
+	slog.Warn("graceful shutdown timed out; forcing the virtual machine off", "vm", m.vms[index].Name)
+	if _, err := m.forceStopLocked(index); err != nil {
+		slog.Error("force stop after shutdown timeout", "vm", id, "error", err)
+	}
+}
+
+func (m *vmManager) cancelStopTimerLocked(id string) {
+	if timer := m.stopTimers[id]; timer != nil {
+		timer.Stop()
+		delete(m.stopTimers, id)
+	}
 }
 
 // forceStopLocked kills the VM process and waits, with the manager unlocked,
@@ -800,6 +834,7 @@ func (m *vmManager) Stop(id string, force bool) (virtualMachine, error) {
 // and on return.
 func (m *vmManager) forceStopLocked(index int) (virtualMachine, error) {
 	id := m.vms[index].ID
+	m.cancelStopTimerLocked(id)
 	if err := m.hypervisor.ForceStop(m.vms[index]); err != nil {
 		return virtualMachine{}, err
 	}
@@ -835,8 +870,10 @@ func (m *vmManager) forceStopLocked(index int) (virtualMachine, error) {
 	return cloneVirtualMachine(m.vms[index]), nil
 }
 
-// signalExitLocked wakes anything waiting for the VM's process to exit.
+// signalExitLocked wakes anything waiting for the VM's process to exit and
+// drops any pending shutdown escalation.
 func (m *vmManager) signalExitLocked(id string) {
+	m.cancelStopTimerLocked(id)
 	if exited := m.exits[id]; exited != nil {
 		close(exited)
 		delete(m.exits, id)

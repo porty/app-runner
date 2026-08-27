@@ -271,7 +271,7 @@ func (h *vmIPMIHAL) SetPower(_ context.Context, on bool) error {
 	if vm.Status == vmStatusStopped {
 		return nil
 	}
-	_, err = h.manager.Stop(h.vmID, true)
+	_, err = h.manager.Stop(h.vmID, true, 0)
 	return err
 }
 func (h *vmIPMIHAL) PowerCycle(ctx context.Context) error {
@@ -282,7 +282,7 @@ func (h *vmIPMIHAL) PowerCycle(ctx context.Context) error {
 }
 func (h *vmIPMIHAL) ColdReset(context.Context) error { return h.manager.Reset(h.vmID) }
 func (h *vmIPMIHAL) WarmReset(_ context.Context) error {
-	_, err := h.manager.Stop(h.vmID, false)
+	_, err := h.manager.Stop(h.vmID, false, 0)
 	return err
 }
 func (h *vmIPMIHAL) Identify(context.Context, uint8) error        { return nil }

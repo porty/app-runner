@@ -254,9 +254,12 @@ message StartVMResponse {
   VirtualMachine virtual_machine = 1;
 }
 
+// A graceful stop asks the guest to shut down. When timeout_seconds is set
+// and the guest is still running afterwards, the VM is forced off.
 message StopVMRequest {
   string id = 1;
   bool force = 2;
+  uint32 timeout_seconds = 3;
 }
 
 message StopVMResponse {
