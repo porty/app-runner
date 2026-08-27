@@ -1,0 +1,449 @@
+// Package dns runs the per-bridge forwarding DNS server with optional
+// authoritative records for managed VMs.
+package dns
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/netip"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/miekg/dns"
+
+	"github.com/roflware/app-runner/internal/validate"
+)
+
+const Port = 53
+
+type Config struct {
+	Enabled    bool     `json:"enabled,omitempty"`
+	Forwarders []string `json:"forwarders,omitempty"`
+	Auto       bool     `json:"auto,omitempty"`
+	Suffix     string   `json:"suffix,omitempty"`
+}
+
+type RecordProvider func() map[string]netip.Addr
+
+type Server interface {
+	Serve() error
+	Close() error
+}
+
+type serverFactory func(netip.Addr, dns.Handler) (Server, error)
+
+type bridgeRuntime struct {
+	server  Server
+	running bool
+	error   string
+}
+
+type Manager struct {
+	mu        sync.Mutex
+	newServer serverFactory
+	runtimes  map[string]*bridgeRuntime
+}
+
+func NewManager() *Manager {
+	return &Manager{newServer: newInProcessServer, runtimes: make(map[string]*bridgeRuntime)}
+}
+
+func (m *Manager) Start(bridge string, address netip.Addr, config Config, records RecordProvider) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if runtime := m.runtimes[bridge]; runtime != nil && runtime.running {
+		return nil
+	}
+	handler := &queryHandler{bridge: bridge, address: address, config: config, records: records}
+	server, err := m.newServer(address, handler)
+	if err != nil {
+		return fmt.Errorf("listen on %s UDP/TCP port %d: %w", address, Port, err)
+	}
+	runtime := &bridgeRuntime{server: server, running: true}
+	m.runtimes[bridge] = runtime
+	go m.serve(bridge, runtime)
+	slog.Info("bridge DNS server started", "bridge", bridge, "address", address, "forwarders", config.Forwarders, "auto_dns", config.Auto, "suffix", config.Suffix)
+	return nil
+}
+
+func (m *Manager) Stop(bridge string) error {
+	m.mu.Lock()
+	runtime := m.runtimes[bridge]
+	if runtime == nil {
+		m.mu.Unlock()
+		return nil
+	}
+	delete(m.runtimes, bridge)
+	m.mu.Unlock()
+	if err := runtime.server.Close(); err != nil {
+		return err
+	}
+	slog.Info("bridge DNS server stopped", "bridge", bridge)
+	return nil
+}
+
+func (m *Manager) Status(bridge string) (bool, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	runtime := m.runtimes[bridge]
+	if runtime == nil {
+		return false, ""
+	}
+	return runtime.running, runtime.error
+}
+
+func (m *Manager) Close() error {
+	m.mu.Lock()
+	runtimes := m.runtimes
+	m.runtimes = make(map[string]*bridgeRuntime)
+	m.mu.Unlock()
+	var result error
+	for _, runtime := range runtimes {
+		result = errors.Join(result, runtime.server.Close())
+	}
+	return result
+}
+
+func (m *Manager) serve(bridge string, runtime *bridgeRuntime) {
+	err := runtime.server.Serve()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.runtimes[bridge] != runtime {
+		return
+	}
+	runtime.running = false
+	if err != nil {
+		runtime.error = err.Error()
+		slog.Error("bridge DNS server stopped unexpectedly", "bridge", bridge, "error", err)
+	}
+}
+
+type combinedServer struct {
+	udp           *dns.Server
+	tcp           *dns.Server
+	udpConnection net.PacketConn
+	tcpListener   net.Listener
+	errors        chan error
+	close         sync.Once
+}
+
+func newInProcessServer(address netip.Addr, handler dns.Handler) (Server, error) {
+	listenAddress := net.JoinHostPort(address.String(), strconv.Itoa(Port))
+	udpConnection, err := net.ListenPacket("udp4", listenAddress)
+	if err != nil {
+		return nil, err
+	}
+	tcpListener, err := net.Listen("tcp4", listenAddress)
+	if err != nil {
+		_ = udpConnection.Close()
+		return nil, err
+	}
+	udpStarted := make(chan struct{})
+	tcpStarted := make(chan struct{})
+	server := &combinedServer{
+		udp:           &dns.Server{PacketConn: udpConnection, Handler: handler, NotifyStartedFunc: func() { close(udpStarted) }},
+		tcp:           &dns.Server{Listener: tcpListener, Handler: handler, NotifyStartedFunc: func() { close(tcpStarted) }},
+		udpConnection: udpConnection,
+		tcpListener:   tcpListener,
+		errors:        make(chan error, 2),
+	}
+	go func() { server.errors <- server.udp.ActivateAndServe() }()
+	go func() { server.errors <- server.tcp.ActivateAndServe() }()
+	for _, started := range []<-chan struct{}{udpStarted, tcpStarted} {
+		select {
+		case <-started:
+		case serveErr := <-server.errors:
+			_ = server.Close()
+			return nil, serveErr
+		case <-time.After(2 * time.Second):
+			_ = server.Close()
+			return nil, errors.New("timed out starting DNS listener")
+		}
+	}
+	return server, nil
+}
+
+func (s *combinedServer) Serve() error {
+	first := <-s.errors
+	_ = s.Close()
+	second := <-s.errors
+	return errors.Join(first, second)
+}
+
+func (s *combinedServer) Close() error {
+	var result error
+	s.close.Do(func() {
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		result = errors.Join(
+			s.udp.ShutdownContext(shutdownContext), s.tcp.ShutdownContext(shutdownContext),
+			ignoreClosedNetworkError(s.udpConnection.Close()), ignoreClosedNetworkError(s.tcpListener.Close()),
+		)
+	})
+	return result
+}
+
+func ignoreClosedNetworkError(err error) error {
+	if errors.Is(err, net.ErrClosed) {
+		return nil
+	}
+	return err
+}
+
+type queryHandler struct {
+	bridge  string
+	address netip.Addr
+	config  Config
+	records RecordProvider
+}
+
+func (h *queryHandler) ServeDNS(writer dns.ResponseWriter, request *dns.Msg) {
+	client := ""
+	if writer.RemoteAddr() != nil {
+		client = writer.RemoteAddr().String()
+	}
+	requestID := uint16(0)
+	questionName := ""
+	questionType := ""
+	questionCount := 0
+	if request != nil {
+		requestID = request.Id
+		questionCount = len(request.Question)
+		if questionCount != 0 {
+			questionName = request.Question[0].Name
+			questionType = typeName(request.Question[0].Qtype)
+		}
+	}
+	slog.Info("DNS query received",
+		"bridge", h.bridge,
+		"client", client,
+		"transaction_id", requestID,
+		"name", questionName,
+		"type", questionType,
+		"question_count", questionCount,
+	)
+	writer = &loggingResponseWriter{
+		ResponseWriter: writer,
+		bridge:         h.bridge,
+		client:         client,
+		requestID:      requestID,
+		questionName:   questionName,
+		questionType:   questionType,
+	}
+	if request == nil || len(request.Question) != 1 {
+		response := new(dns.Msg)
+		if request != nil {
+			response.SetRcode(request, dns.RcodeFormatError)
+		}
+		_ = writer.WriteMsg(response)
+		return
+	}
+	if h.config.Auto && nameWithinZone(request.Question[0].Name, h.config.Suffix) {
+		h.serveAuthoritative(writer, request)
+		return
+	}
+	h.serveForwarded(writer, request)
+}
+
+type loggingResponseWriter struct {
+	dns.ResponseWriter
+	bridge       string
+	client       string
+	requestID    uint16
+	questionName string
+	questionType string
+}
+
+func (w *loggingResponseWriter) WriteMsg(response *dns.Msg) error {
+	err := w.ResponseWriter.WriteMsg(response)
+	if err == nil && response != nil {
+		slog.Info("DNS response sent",
+			"bridge", w.bridge,
+			"client", w.client,
+			"transaction_id", w.requestID,
+			"name", w.questionName,
+			"type", w.questionType,
+			"rcode", dns.RcodeToString[response.Rcode],
+			"answers", len(response.Answer),
+			"authoritative", response.Authoritative,
+			"truncated", response.Truncated,
+		)
+	}
+	return err
+}
+
+func typeName(value uint16) string {
+	if name, found := dns.TypeToString[value]; found {
+		return name
+	}
+	return strconv.FormatUint(uint64(value), 10)
+}
+
+func (h *queryHandler) serveAuthoritative(writer dns.ResponseWriter, request *dns.Msg) {
+	response := new(dns.Msg)
+	response.SetReply(request)
+	response.Authoritative = true
+	response.RecursionAvailable = true
+	question := request.Question[0]
+	name := strings.ToLower(dns.Fqdn(question.Name))
+	zone := strings.ToLower(dns.Fqdn(h.config.Suffix))
+	nameserver := zone
+	records := make(map[string]netip.Addr)
+	if h.records != nil {
+		for label, address := range h.records() {
+			records[strings.ToLower(label)+"."+zone] = address
+		}
+	}
+
+	if name == zone {
+		if question.Qtype == dns.TypeA || question.Qtype == dns.TypeANY {
+			response.Answer = append(response.Answer, &dns.A{Hdr: dns.RR_Header{Name: zone, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 30}, A: net.IP(h.address.AsSlice())})
+		}
+		switch question.Qtype {
+		case dns.TypeSOA, dns.TypeANY:
+			response.Answer = append(response.Answer, authoritativeSOA(zone, nameserver))
+		}
+		if question.Qtype == dns.TypeNS || question.Qtype == dns.TypeANY {
+			response.Answer = append(response.Answer, &dns.NS{Hdr: dns.RR_Header{Name: zone, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 30}, Ns: nameserver})
+		}
+	} else if address, found := records[name]; found {
+		if question.Qtype == dns.TypeA || question.Qtype == dns.TypeANY {
+			response.Answer = append(response.Answer, &dns.A{Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 30}, A: net.IP(address.AsSlice())})
+		}
+	} else {
+		response.Rcode = dns.RcodeNameError
+	}
+	if len(response.Answer) == 0 {
+		response.Ns = append(response.Ns, authoritativeSOA(zone, nameserver))
+	}
+	if err := writer.WriteMsg(response); err != nil {
+		slog.Warn("write authoritative DNS response", "name", question.Name, "error", err)
+	}
+}
+
+func (h *queryHandler) serveForwarded(writer dns.ResponseWriter, request *dns.Msg) {
+	var lastErr error
+	for _, forwarder := range h.config.Forwarders {
+		endpoint, err := forwarderEndpoint(forwarder)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		client := &dns.Client{Net: "udp", Timeout: 3 * time.Second}
+		response, _, err := client.ExchangeContext(context.Background(), request.Copy(), endpoint)
+		if err == nil && response != nil && response.Truncated {
+			client.Net = "tcp"
+			response, _, err = client.ExchangeContext(context.Background(), request.Copy(), endpoint)
+		}
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err := writer.WriteMsg(response); err != nil {
+			slog.Warn("write forwarded DNS response", "name", request.Question[0].Name, "error", err)
+		}
+		return
+	}
+	response := new(dns.Msg)
+	response.SetRcode(request, dns.RcodeServerFailure)
+	_ = writer.WriteMsg(response)
+	if lastErr != nil {
+		slog.Warn("all DNS forwarders failed", "name", request.Question[0].Name, "error", lastErr)
+	}
+}
+
+func authoritativeSOA(zone, nameserver string) *dns.SOA {
+	return &dns.SOA{
+		Hdr: dns.RR_Header{Name: zone, Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: 30},
+		Ns:  nameserver, Mbox: "hostmaster." + zone, Serial: 1,
+		Refresh: 60, Retry: 60, Expire: 300, Minttl: 30,
+	}
+}
+
+func nameWithinZone(name, suffix string) bool {
+	name = strings.ToLower(dns.Fqdn(name))
+	zone := strings.ToLower(dns.Fqdn(suffix))
+	return name == zone || strings.HasSuffix(name, "."+zone)
+}
+
+func NormalizeSuffix(suffix string) (string, error) {
+	suffix = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(suffix)), ".")
+	if len(suffix) == 0 || len(suffix) > 253 {
+		return "", errors.New("DNS suffix must contain between 1 and 253 characters")
+	}
+	for _, label := range strings.Split(suffix, ".") {
+		if err := validate.DNSLabel(label); err != nil {
+			return "", fmt.Errorf("invalid DNS suffix label %q: %w", label, err)
+		}
+	}
+	return suffix, nil
+}
+
+func DefaultSuffix(bridge string) string {
+	return strings.ToLower(bridge) + ".internal"
+}
+
+func NormalizeForwarders(forwarders []string, server netip.Addr) ([]string, error) {
+	result := make([]string, 0, len(forwarders))
+	seen := make(map[string]struct{})
+	for _, value := range forwarders {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		address, port, err := parseForwarder(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DNS forwarder %q: %w", value, err)
+		}
+		if address == server && port == Port {
+			return nil, fmt.Errorf("DNS forwarder %s would send queries back to the managed DNS server", value)
+		}
+		normalized := address.String()
+		if port != Port {
+			normalized = netip.AddrPortFrom(address, uint16(port)).String()
+		}
+		if _, found := seen[normalized]; found {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	if len(result) == 0 {
+		return nil, errors.New("at least one DNS forwarding server is required")
+	}
+	if len(result) > 8 {
+		return nil, errors.New("at most eight DNS forwarding servers may be configured")
+	}
+	return result, nil
+}
+
+func parseForwarder(value string) (netip.Addr, int, error) {
+	if address, err := netip.ParseAddr(value); err == nil {
+		return address.Unmap(), Port, nil
+	}
+	endpoint, err := netip.ParseAddrPort(value)
+	if err != nil {
+		return netip.Addr{}, 0, errors.New("must be an IP address with an optional port")
+	}
+	if endpoint.Port() == 0 {
+		return netip.Addr{}, 0, errors.New("port must be between 1 and 65535")
+	}
+	return endpoint.Addr().Unmap(), int(endpoint.Port()), nil
+}
+
+func forwarderEndpoint(value string) (string, error) {
+	address, port, err := parseForwarder(value)
+	if err != nil {
+		return "", err
+	}
+	return net.JoinHostPort(address.String(), strconv.Itoa(port)), nil
+}
+
+func DefaultForwarders() []string {
+	return []string{"1.1.1.1", "8.8.8.8"}
+}

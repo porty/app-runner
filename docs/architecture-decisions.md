@@ -26,6 +26,8 @@ This document records the main decisions that define App Runner. It describes th
 
 **Consequences:** The process has a broad set of responsibilities and capability requirements. Internal boundaries therefore matter even though they are not separate deployments, and a process failure can affect every App Runner-owned control-plane service.
 
+The Go code is split into packages under `internal/` along those boundaries: `vm` (definitions and lifecycle) drives `qemu` and depends on host services only through interfaces; `dhcp`, `dns`, and `nat` provide guest network services; `hostnet` owns bridge inspection and transactional changes; `ipmi` exposes virtual BMCs; `storage`, `cloudinit`, and `config` are leaf concerns; `api` maps everything onto Twirp and HTTP; and `server` wires the process together. Dependencies point from `server` and `api` inwards, never from `vm` outwards to the services built on it.
+
 ## Typed RPC boundary between interface and backend
 
 **Decision:** The browser interface communicates with the backend through a protobuf-defined Twirp API.
