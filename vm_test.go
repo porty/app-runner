@@ -71,8 +71,8 @@ func (h *fakeHypervisor) Start(_ virtualMachine, onExit func(int, error)) (int, 
 	return h.nextPID, nil
 }
 
-func (h *fakeHypervisor) IsRunning(pid int) bool {
-	return h.running[pid]
+func (h *fakeHypervisor) IsRunning(vm virtualMachine) bool {
+	return h.running[vm.PID]
 }
 
 func (h *fakeHypervisor) GracefulStop(vm virtualMachine) error {
@@ -730,7 +730,7 @@ func TestForceStopWaitsForExitBeforeRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("restart after forced stop: %v", err)
 	}
-	if restarted.Status != vmStatusRunning || !hypervisor.IsRunning(restarted.PID) {
+	if restarted.Status != vmStatusRunning || !hypervisor.IsRunning(restarted) {
 		t.Fatalf("VM did not restart: %#v", restarted)
 	}
 }

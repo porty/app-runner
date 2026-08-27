@@ -10,7 +10,9 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -86,12 +88,29 @@ func (q *qemuHypervisor) Start(vm virtualMachine, onExit func(int, error)) (int,
 	return command.Process.Pid, nil
 }
 
-func (q *qemuHypervisor) IsRunning(pid int) bool {
+// IsRunning reports whether the VM's recorded PID is still the QEMU process
+// started for it. A live PID alone is not enough: after a host reboot, or
+// once the kernel reuses the number, it can belong to an unrelated process,
+// so the command line must reference this VM's QMP socket.
+func (q *qemuHypervisor) IsRunning(vm virtualMachine) bool {
+	return processServesQMPSocket(vm.PID, q.qmpSocketPath(vm.ID))
+}
+
+func processServesQMPSocket(pid int, socketPath string) bool {
 	if pid <= 0 {
 		return false
 	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
+	contents, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
+	if err != nil {
+		return false
+	}
+	marker := "unix:" + socketPath
+	for _, argument := range strings.Split(string(contents), "\x00") {
+		if strings.HasPrefix(argument, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (q *qemuHypervisor) GracefulStop(vm virtualMachine) error {

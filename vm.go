@@ -175,7 +175,7 @@ type hypervisor interface {
 	CreateDisk(context.Context, string, uint32) error
 	CreateLinkedDisk(context.Context, string, string, uint32) error
 	Start(virtualMachine, func(int, error)) (int, error)
-	IsRunning(int) bool
+	IsRunning(virtualMachine) bool
 	GracefulStop(virtualMachine) error
 	ForceStop(virtualMachine) error
 	Reset(virtualMachine) error
@@ -1393,7 +1393,7 @@ func (m *vmManager) reconcileLocked() error {
 		if vm.Status != vmStatusRunning && vm.Status != vmStatusStopping {
 			continue
 		}
-		if vm.PID <= 0 || !m.hypervisor.IsRunning(vm.PID) {
+		if vm.PID <= 0 || !m.hypervisor.IsRunning(*vm) {
 			stoppedVM := *vm
 			vm.PID = 0
 			vm.Status = vmStatusStopped
