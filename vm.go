@@ -105,6 +105,25 @@ type vmNIC struct {
 	Mode       networkMode `json:"mode"`
 	BridgeName string      `json:"bridge_name,omitempty"`
 	MACAddress string      `json:"mac_address"`
+	// Addresses are the IPv4 leases currently held from managed DHCP; they
+	// are looked up when a VM is read rather than stored.
+	Addresses []string `json:"-"`
+}
+
+// sameDefinition compares the stored identity of two interfaces, ignoring
+// runtime address annotations.
+func (nic vmNIC) sameDefinition(other vmNIC) bool {
+	return nic.ID == other.ID && nic.Mode == other.Mode && nic.BridgeName == other.BridgeName &&
+		strings.EqualFold(nic.MACAddress, other.MACAddress)
+}
+
+// vmUpdate carries the settings an update may change; nil fields are left
+// as they are.
+type vmUpdate struct {
+	Name        *string
+	Description *string
+	CPUs        *uint32
+	MemoryMiB   *uint32
 }
 
 type vmCloudInit struct {
@@ -194,12 +213,15 @@ type vmNetworkLifecycle interface {
 }
 
 // vmManagerOptions wires the VM manager to the host facilities it drives.
+// Addresses, when set, resolves the managed DHCP leases held by a MAC
+// address on a bridge so read VMs report their guest addresses.
 type vmManagerOptions struct {
 	Settings         config
 	Store            virtualMachineStore
 	Hypervisor       hypervisor
 	Capabilities     func() hostCapabilities
 	BridgeCapability func(string) (bool, string)
+	Addresses        func(bridge, macAddress string) []string
 }
 
 type vmManager struct {
@@ -209,6 +231,7 @@ type vmManager struct {
 	hypervisor        hypervisor
 	capabilities      func() hostCapabilities
 	bridgeCapability  func(string) (bool, string)
+	addresses         func(bridge, macAddress string) []string
 	networkLifecycle  vmNetworkLifecycle
 	ipmi              vmIPMIController
 	now               func() time.Time
@@ -247,6 +270,7 @@ func newVMManager(options vmManagerOptions) (*vmManager, error) {
 		hypervisor:       options.Hypervisor,
 		capabilities:     options.Capabilities,
 		bridgeCapability: options.BridgeCapability,
+		addresses:        options.Addresses,
 		now:              time.Now,
 		newID:            randomID,
 		exits:            make(map[string]chan struct{}),
@@ -300,18 +324,17 @@ func (m *vmManager) validateStoredDefinitions() error {
 
 func (m *vmManager) List() ([]virtualMachine, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if err := m.reconcileLocked(); err != nil {
+		m.mu.Unlock()
 		return nil, err
 	}
 	result := make([]virtualMachine, 0, len(m.vms))
 	for _, vm := range m.vms {
 		result = append(result, cloneVirtualMachine(vm))
 	}
-	if m.ipmi != nil {
-		for index := range result {
-			result[index].IPMIRunning, result[index].IPMIError = m.ipmi.Status(result[index].ID)
-		}
+	m.mu.Unlock()
+	for index := range result {
+		m.annotate(&result[index])
 	}
 	sort.Slice(result, func(left, right int) bool {
 		return result[left].CreatedAt.Before(result[right].CreatedAt)
@@ -321,19 +344,46 @@ func (m *vmManager) List() ([]virtualMachine, error) {
 
 func (m *vmManager) Get(id string) (virtualMachine, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if err := m.reconcileLocked(); err != nil {
+		m.mu.Unlock()
 		return virtualMachine{}, err
 	}
 	index := m.indexByID(id)
 	if index == -1 {
+		m.mu.Unlock()
 		return virtualMachine{}, errVMNotFound
 	}
 	result := cloneVirtualMachine(m.vms[index])
-	if m.ipmi != nil {
-		result.IPMIRunning, result.IPMIError = m.ipmi.Status(result.ID)
-	}
+	m.mu.Unlock()
+	m.annotate(&result)
 	return result, nil
+}
+
+// annotated returns a copy of a stored definition with runtime information
+// attached; it is what every read or mutation hands back to callers.
+func (m *vmManager) annotated(vm virtualMachine) virtualMachine {
+	result := cloneVirtualMachine(vm)
+	m.annotate(&result)
+	return result
+}
+
+// annotate adds runtime information that is not part of the stored
+// definition: BMC status and leased guest addresses. The IPMI and DHCP
+// managers are always acquired after the VM manager lock, so this is safe
+// with or without it held.
+func (m *vmManager) annotate(vm *virtualMachine) {
+	if m.ipmi != nil {
+		vm.IPMIRunning, vm.IPMIError = m.ipmi.Status(vm.ID)
+	}
+	if m.addresses == nil {
+		return
+	}
+	for index := range vm.NICs {
+		nic := &vm.NICs[index]
+		if nic.Mode == networkModeBridge && nic.BridgeName != "" {
+			nic.Addresses = m.addresses(nic.BridgeName, nic.MACAddress)
+		}
+	}
 }
 
 // cloneVirtualMachine copies a definition so callers cannot alias the
@@ -443,7 +493,7 @@ func (m *vmManager) Create(ctx context.Context, options createVMOptions) (virtua
 		cleanup()
 		return virtualMachine{}, err
 	}
-	return cloneVirtualMachine(vm), nil
+	return m.annotated(vm), nil
 }
 
 // reserveVMLocked allocates a definition for validated options and records it
@@ -616,7 +666,7 @@ func (m *vmManager) Clone(ctx context.Context, id, name string) (virtualMachine,
 		removeCreated()
 		return virtualMachine{}, err
 	}
-	return cloneVirtualMachine(clone), nil
+	return m.annotated(clone), nil
 }
 
 // reserveCloneLocked allocates the clone's identity: new device IDs and MAC
@@ -767,7 +817,7 @@ func (m *vmManager) Start(id string) (virtualMachine, error) {
 		}
 		return virtualMachine{}, err
 	}
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 // Stop powers a VM off. Without force it asks the guest to shut down; when
@@ -802,7 +852,7 @@ func (m *vmManager) Stop(id string, force bool, timeout time.Duration) (virtualM
 		pid := m.vms[index].PID
 		m.stopTimers[id] = time.AfterFunc(timeout, func() { m.escalateStop(id, pid) })
 	}
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 // escalateStop forces a VM off after its graceful shutdown deadline passed
@@ -867,7 +917,7 @@ func (m *vmManager) forceStopLocked(index int) (virtualMachine, error) {
 			return virtualMachine{}, err
 		}
 	}
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 // signalExitLocked wakes anything waiting for the VM's process to exit and
@@ -917,12 +967,7 @@ func (m *vmManager) Delete(id string) error {
 	return m.store.Save(m.vms)
 }
 
-func (m *vmManager) Update(id, name, description string, cpus, memoryMiB uint32) (virtualMachine, error) {
-	name = strings.TrimSpace(name)
-	description = strings.TrimSpace(description)
-	if err := validateVMIdentityAndResources(name, description, cpus, memoryMiB); err != nil {
-		return virtualMachine{}, err
-	}
+func (m *vmManager) Update(id string, update vmUpdate) (virtualMachine, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.reconcileLocked(); err != nil {
@@ -935,19 +980,32 @@ func (m *vmManager) Update(id, name, description string, cpus, memoryMiB uint32)
 	if err := m.requireIdleLocked(id); err != nil {
 		return virtualMachine{}, err
 	}
-	if m.nameInUseLocked(name, id) {
+	previous := m.vms[index]
+	candidate := previous
+	if update.Name != nil {
+		candidate.Name = strings.TrimSpace(*update.Name)
+	}
+	if update.Description != nil {
+		candidate.Description = strings.TrimSpace(*update.Description)
+	}
+	if update.CPUs != nil {
+		candidate.CPUs = *update.CPUs
+	}
+	if update.MemoryMiB != nil {
+		candidate.MemoryMiB = *update.MemoryMiB
+	}
+	if err := validateVMIdentityAndResources(candidate.Name, candidate.Description, candidate.CPUs, candidate.MemoryMiB); err != nil {
+		return virtualMachine{}, err
+	}
+	if candidate.Name != previous.Name && m.nameInUseLocked(candidate.Name, id) {
 		return virtualMachine{}, errVMNameExists
 	}
-	previous := m.vms[index]
-	m.vms[index].Name = name
-	m.vms[index].Description = description
-	m.vms[index].CPUs = cpus
-	m.vms[index].MemoryMiB = memoryMiB
+	m.vms[index] = candidate
 	commitCloudInit := func() {}
 	rollbackCloudInit := func() {}
-	if previous.Name != name && m.vms[index].CloudInit.Enabled {
+	if previous.Name != candidate.Name && candidate.CloudInit.Enabled {
 		var stageErr error
-		commitCloudInit, rollbackCloudInit, stageErr = m.stageCloudInitISO(context.Background(), m.vms[index])
+		commitCloudInit, rollbackCloudInit, stageErr = m.stageCloudInitISO(context.Background(), candidate)
 		if stageErr != nil {
 			m.vms[index] = previous
 			return virtualMachine{}, stageErr
@@ -959,7 +1017,7 @@ func (m *vmManager) Update(id, name, description string, cpus, memoryMiB uint32)
 		return virtualMachine{}, err
 	}
 	commitCloudInit()
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 func (m *vmManager) ConfigureCloudInit(ctx context.Context, id string, configuration vmCloudInit) (virtualMachine, error) {
@@ -983,7 +1041,7 @@ func (m *vmManager) ConfigureCloudInit(ctx context.Context, id string, configura
 	}
 	previous := m.vms[index]
 	if previous.CloudInit == configuration {
-		return cloneVirtualMachine(previous), nil
+		return m.annotated(previous), nil
 	}
 	if vmIsActive(previous) {
 		return virtualMachine{}, errDeviceRunningVM
@@ -1001,7 +1059,7 @@ func (m *vmManager) ConfigureCloudInit(ctx context.Context, id string, configura
 		return virtualMachine{}, err
 	}
 	commit()
-	return cloneVirtualMachine(candidate), nil
+	return m.annotated(candidate), nil
 }
 
 // AddNIC attaches a network interface to a stopped VM.
@@ -1035,7 +1093,7 @@ func (m *vmManager) AddNIC(id string, spec vmNICSpec) (virtualMachine, error) {
 		m.vms[index].NICs = previous
 		return virtualMachine{}, err
 	}
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 // UpdateNIC changes a network interface. Saving an unchanged interface is
@@ -1066,8 +1124,8 @@ func (m *vmManager) UpdateNIC(id, nicID string, spec vmNICSpec) (virtualMachine,
 	if updated.MACAddress == "" {
 		updated.MACAddress = current.MACAddress
 	}
-	if updated == current {
-		return cloneVirtualMachine(m.vms[index]), nil
+	if updated.sameDefinition(current) {
+		return m.annotated(m.vms[index]), nil
 	}
 	if vmIsActive(m.vms[index]) {
 		return virtualMachine{}, errDeviceRunningVM
@@ -1082,7 +1140,7 @@ func (m *vmManager) UpdateNIC(id, nicID string, spec vmNICSpec) (virtualMachine,
 		m.vms[index].NICs = previous
 		return virtualMachine{}, err
 	}
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 func (m *vmManager) RemoveNIC(id, nicID string) (virtualMachine, error) {
@@ -1111,7 +1169,7 @@ func (m *vmManager) RemoveNIC(id, nicID string) (virtualMachine, error) {
 		m.vms[index].NICs = previous
 		return virtualMachine{}, err
 	}
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 // newNICLocked allocates an interface identity for a spec, generating a
@@ -1216,7 +1274,7 @@ func (m *vmManager) AddDisk(ctx context.Context, id string, spec vmDiskSpec) (vi
 		_ = removeIfExists(m.vmDiskPath(id, disk))
 		return virtualMachine{}, err
 	}
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 func (m *vmManager) RemoveDisk(id, diskID string) (virtualMachine, error) {
@@ -1252,7 +1310,7 @@ func (m *vmManager) RemoveDisk(id, diskID string) (virtualMachine, error) {
 	if err := removeIfExists(stagedPath); err != nil {
 		return virtualMachine{}, fmt.Errorf("remove disk: %w", err)
 	}
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 func (m *vmManager) AddCDROM(id, isoName string) (virtualMachine, error) {
@@ -1282,7 +1340,7 @@ func (m *vmManager) AddCDROM(id, isoName string) (virtualMachine, error) {
 		m.vms[index].CDROMs = previous
 		return virtualMachine{}, err
 	}
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 func (m *vmManager) UpdateCDROM(id, cdromID, isoName string) (virtualMachine, error) {
@@ -1305,7 +1363,7 @@ func (m *vmManager) UpdateCDROM(id, cdromID, isoName string) (virtualMachine, er
 	}
 	previousISO := m.vms[index].CDROMs[cdromIndex].ISOName
 	if previousISO == isoName {
-		return cloneVirtualMachine(m.vms[index]), nil
+		return m.annotated(m.vms[index]), nil
 	}
 	if vmIsActive(m.vms[index]) {
 		path := ""
@@ -1329,7 +1387,7 @@ func (m *vmManager) UpdateCDROM(id, cdromID, isoName string) (virtualMachine, er
 		}
 		return virtualMachine{}, err
 	}
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 func (m *vmManager) RemoveCDROM(id, cdromID string) (virtualMachine, error) {
@@ -1355,7 +1413,7 @@ func (m *vmManager) RemoveCDROM(id, cdromID string) (virtualMachine, error) {
 		m.vms[index].CDROMs = previous
 		return virtualMachine{}, err
 	}
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 func (m *vmManager) ConfigureIPMI(id string, config vmIPMIConfig) (virtualMachine, error) {
@@ -1405,7 +1463,7 @@ func (m *vmManager) ConfigureIPMI(id string, config vmIPMIConfig) (virtualMachin
 		}
 		return virtualMachine{}, err
 	}
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 func validateIPMIConfig(config vmIPMIConfig) error {
@@ -1458,7 +1516,7 @@ func (m *vmManager) Reboot(id string) (virtualMachine, error) {
 	if err := m.hypervisor.Reset(m.vms[index]); err != nil {
 		return virtualMachine{}, fmt.Errorf("reboot virtual machine: %w", err)
 	}
-	return cloneVirtualMachine(m.vms[index]), nil
+	return m.annotated(m.vms[index]), nil
 }
 
 func (m *vmManager) ListISOs() ([]isoImage, error) {

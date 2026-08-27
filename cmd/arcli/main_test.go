@@ -122,13 +122,13 @@ func TestVMAddressWaitsForLease(t *testing.T) {
 		switch request.URL.Path {
 		case "/twirp/apprunner.v1.AppRunnerService/ListVMs":
 			_, _ = response.Write([]byte(vmListJSON))
-		case "/twirp/apprunner.v1.AppRunnerService/GetNetworkingStatus":
+		case "/twirp/apprunner.v1.AppRunnerService/GetVM":
 			calls++
-			leases := `[]`
-			if calls >= 3 {
-				leases = `[{"hardware_address":"52:54:00:00:00:01","address":"192.168.100.50","vm_name":"example"}]`
+			addresses := `[]`
+			if calls >= 2 {
+				addresses = `["192.168.100.50"]`
 			}
-			_, _ = response.Write([]byte(`{"status":{"bridges":[{"name":"br0","dhcp":{"leases":` + leases + `}}]}}`))
+			_, _ = response.Write([]byte(`{"virtual_machine":{"id":"vm-1","name":"example","nics":[{"id":"n0","mode":"NETWORK_MODE_BRIDGE","bridge_name":"br0","mac_address":"52:54:00:00:00:01","addresses":` + addresses + `}]}}`))
 		default:
 			t.Errorf("unexpected path %q", request.URL.Path)
 		}
@@ -138,11 +138,11 @@ func TestVMAddressWaitsForLease(t *testing.T) {
 	if err := run([]string{"--server", server.URL, "-o", "json", "vm", "address", "--wait", "5s", "example"}, &output); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := output.String(), "[{\"hardware_address\":\"52:54:00:00:00:01\",\"address\":\"192.168.100.50\",\"vm_name\":\"example\"}]\n"; got != want {
+	if got, want := output.String(), "[{\"nic_id\":\"n0\",\"bridge_name\":\"br0\",\"mac_address\":\"52:54:00:00:00:01\",\"address\":\"192.168.100.50\"}]\n"; got != want {
 		t.Errorf("output = %q, want %q", got, want)
 	}
-	if calls < 3 {
-		t.Errorf("networking status polled %d times, want at least 3", calls)
+	if calls < 2 {
+		t.Errorf("VM polled %d times, want at least 2", calls)
 	}
 	output.Reset()
 	calls = 0
@@ -155,9 +155,20 @@ func TestVMAddressWaitsForLease(t *testing.T) {
 }
 
 func TestNetLeases(t *testing.T) {
-	server := twirpServer(t, map[string]string{
-		"GetNetworkingStatus": `{"status":{"bridges":[{"name":"br0","dhcp":{"leases":[{"hardware_address":"52:54:00:00:00:01","address":"192.168.100.50","vm_name":"example"}]}}]}}`,
-	})
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		var body struct {
+			BridgeName string `json:"bridge_name"`
+		}
+		_ = json.NewDecoder(request.Body).Decode(&body)
+		response.Header().Set("Content-Type", "application/json")
+		if !strings.HasSuffix(request.URL.Path, "/ListBridgeLeases") || body.BridgeName != "br0" {
+			response.WriteHeader(http.StatusNotFound)
+			_, _ = response.Write([]byte(`{"code":"not_found","msg":"bridge not found"}`))
+			return
+		}
+		_, _ = response.Write([]byte(`{"leases":[{"hardware_address":"52:54:00:00:00:01","address":"192.168.100.50","vm_name":"example"}]}`))
+	}))
+	t.Cleanup(server.Close)
 	var output bytes.Buffer
 	if err := run([]string{"--server", server.URL, "net", "leases", "br0"}, &output); err != nil {
 		t.Fatal(err)
@@ -259,14 +270,8 @@ func TestSubcommandFlagsAfterPositionalArguments(t *testing.T) {
 	}
 }
 
-func TestVMUpdateKeepsUnspecifiedFields(t *testing.T) {
-	var request struct {
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Cpus        uint32 `json:"cpus"`
-		MemoryMib   uint32 `json:"memory_mib"`
-	}
+func TestVMUpdateSendsOnlyGivenFields(t *testing.T) {
+	var request map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, r *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
 		if strings.HasSuffix(r.URL.Path, "/ListVMs") {
@@ -283,7 +288,39 @@ func TestVMUpdateKeepsUnspecifiedFields(t *testing.T) {
 	if err := run([]string{"--server", server.URL, "-o", "json", "vm", "update", "example", "--memory", "8192"}, &output); err != nil {
 		t.Fatal(err)
 	}
-	if request.ID != "vm-1" || request.Name != "example" || request.Description != "lab" || request.Cpus != 4 || request.MemoryMib != 8192 {
-		t.Errorf("request = %+v, want current values with memory 8192", request)
+	if request["id"] != "vm-1" || request["memory_mib"] != float64(8192) {
+		t.Errorf("request = %+v, want id vm-1 with memory 8192", request)
+	}
+	for _, absent := range []string{"name", "description", "cpus"} {
+		if _, present := request[absent]; present {
+			t.Errorf("request unexpectedly included %s: %+v", absent, request)
+		}
+	}
+}
+
+func TestNetBridgeConfigureDefaultsServicesOff(t *testing.T) {
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, r *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		if !strings.HasSuffix(r.URL.Path, "/ConfigureBridge") {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		_, _ = response.Write([]byte(`{"status":{"can_manage":true}}`))
+	}))
+	t.Cleanup(server.Close)
+	var output bytes.Buffer
+	if err := run([]string{"--server", server.URL, "net", "bridge", "configure", "br0", "--dhcp", "--cidr", "10.9.0.0/24"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if request["bridge_name"] != "br0" || request["dhcp_enabled"] != true || request["cidr"] != "10.9.0.0/24" {
+		t.Errorf("request = %+v", request)
+	}
+	for _, off := range []string{"nat_enabled", "dns_enabled", "auto_dns"} {
+		if value, present := request[off]; present && value != false {
+			t.Errorf("%s defaulted on: %+v", off, request)
+		}
 	}
 }

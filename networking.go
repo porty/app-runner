@@ -18,6 +18,12 @@ import (
 
 const networkConfirmationWindow = 15 * time.Second
 
+var (
+	errBridgeNotFound        = errors.New("bridge not found")
+	errPendingChangeNotFound = errors.New("pending network change not found")
+	errNetworkChangePending  = errors.New("another network change is waiting for confirmation")
+)
+
 type diagnosticStatus string
 
 const (
@@ -246,6 +252,31 @@ func (m *networkManager) Status() (networkingStatus, error) {
 	return status, nil
 }
 
+// Leases lists a bridge's active managed DHCP leases, labelled with the VM
+// that owns each MAC address.
+func (m *networkManager) Leases(bridge string) ([]dhcpLease, error) {
+	if m.dhcp == nil {
+		return nil, errors.New("DHCP manager is not configured")
+	}
+	status := m.dhcp.Status(bridge)
+	if !status.Enabled {
+		return nil, fmt.Errorf("%w: DHCP is not enabled on bridge %s", errBridgeNotFound, bridge)
+	}
+	vms, err := m.vms.List()
+	if err != nil {
+		return nil, err
+	}
+	for index := range status.Leases {
+		for _, vm := range vms {
+			if vm.hasMACAddress(status.Leases[index].HardwareAddress) {
+				status.Leases[index].VMName = vm.Name
+				break
+			}
+		}
+	}
+	return status.Leases, nil
+}
+
 func (m *networkManager) ClearBridgeDHCPLeases(bridge string) error {
 	if m.dhcp == nil {
 		return errors.New("DHCP manager is not configured")
@@ -275,6 +306,9 @@ func (m *networkManager) ConfigureBridgeSettings(bridge, description string, ena
 	if len(description) > 255 || strings.ContainsAny(description, "\x00\r\n") {
 		return &fieldError{field: "description", message: "must be a single line of at most 255 characters"}
 	}
+	if err := validateInterfaceName(bridge); err != nil {
+		return &fieldError{field: "bridge_name", message: err.Error()}
+	}
 	if dnsConfig.Auto {
 		vms, err := m.vms.List()
 		if err != nil {
@@ -303,7 +337,7 @@ func (m *networkManager) ConfigureBridgeSettings(bridge, description string, ena
 		}
 	}
 	if !found {
-		return fmt.Errorf("bridge %s does not exist", bridge)
+		return fmt.Errorf("%w: %s", errBridgeNotFound, bridge)
 	}
 	descriptionChanged := currentDescription != description
 	descriptionProvider, canSetDescription := m.provider.(networkBridgeDescriptionProvider)
@@ -354,7 +388,7 @@ func (m *networkManager) Apply(_ context.Context, change networkChange) (pending
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.pending != nil {
-		return pendingNetworkChange{}, errors.New("another network change is waiting for confirmation")
+		return pendingNetworkChange{}, errNetworkChangePending
 	}
 	if err := m.validateWorkloadSafety(change); err != nil {
 		return pendingNetworkChange{}, err
@@ -391,7 +425,7 @@ func (m *networkManager) Confirm(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.pending == nil || m.pending.ID != id {
-		return errors.New("pending network change not found")
+		return errPendingChangeNotFound
 	}
 	return m.clearPendingLocked()
 }
@@ -400,7 +434,7 @@ func (m *networkManager) Revert(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.pending == nil || m.pending.ID != id {
-		return errors.New("pending network change not found")
+		return errPendingChangeNotFound
 	}
 	if err := m.provider.Restore(m.pending.Snapshot); err != nil {
 		return err

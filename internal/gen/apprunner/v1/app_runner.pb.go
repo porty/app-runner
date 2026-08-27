@@ -611,12 +611,15 @@ func (x *VMCDROM) GetIsoName() string {
 	return ""
 }
 
+// addresses lists the IPv4 addresses currently leased to the interface by
+// App Runner's managed DHCP on its bridge; NAT interfaces have none.
 type VMNIC struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Mode          NetworkMode            `protobuf:"varint,2,opt,name=mode,proto3,enum=apprunner.v1.NetworkMode" json:"mode,omitempty"`
 	BridgeName    string                 `protobuf:"bytes,3,opt,name=bridge_name,json=bridgeName,proto3" json:"bridge_name,omitempty"`
 	MacAddress    string                 `protobuf:"bytes,4,opt,name=mac_address,json=macAddress,proto3" json:"mac_address,omitempty"`
+	Addresses     []string               `protobuf:"bytes,5,rep,name=addresses,proto3" json:"addresses,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -677,6 +680,13 @@ func (x *VMNIC) GetMacAddress() string {
 		return x.MacAddress
 	}
 	return ""
+}
+
+func (x *VMNIC) GetAddresses() []string {
+	if x != nil {
+		return x.Addresses
+	}
+	return nil
 }
 
 type VMDiskSpec struct {
@@ -2412,13 +2422,14 @@ func (x *RebootVMResponse) GetVirtualMachine() *VirtualMachine {
 	return nil
 }
 
+// Only fields that are present are changed.
 type UpdateVMRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
-	Cpus          uint32                 `protobuf:"varint,4,opt,name=cpus,proto3" json:"cpus,omitempty"`
-	MemoryMib     uint32                 `protobuf:"varint,5,opt,name=memory_mib,json=memoryMib,proto3" json:"memory_mib,omitempty"`
+	Name          *string                `protobuf:"bytes,2,opt,name=name,proto3,oneof" json:"name,omitempty"`
+	Description   *string                `protobuf:"bytes,3,opt,name=description,proto3,oneof" json:"description,omitempty"`
+	Cpus          *uint32                `protobuf:"varint,4,opt,name=cpus,proto3,oneof" json:"cpus,omitempty"`
+	MemoryMib     *uint32                `protobuf:"varint,5,opt,name=memory_mib,json=memoryMib,proto3,oneof" json:"memory_mib,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2461,29 +2472,29 @@ func (x *UpdateVMRequest) GetId() string {
 }
 
 func (x *UpdateVMRequest) GetName() string {
-	if x != nil {
-		return x.Name
+	if x != nil && x.Name != nil {
+		return *x.Name
 	}
 	return ""
 }
 
 func (x *UpdateVMRequest) GetDescription() string {
-	if x != nil {
-		return x.Description
+	if x != nil && x.Description != nil {
+		return *x.Description
 	}
 	return ""
 }
 
 func (x *UpdateVMRequest) GetCpus() uint32 {
-	if x != nil {
-		return x.Cpus
+	if x != nil && x.Cpus != nil {
+		return *x.Cpus
 	}
 	return 0
 }
 
 func (x *UpdateVMRequest) GetMemoryMib() uint32 {
-	if x != nil {
-		return x.MemoryMib
+	if x != nil && x.MemoryMib != nil {
+		return *x.MemoryMib
 	}
 	return 0
 }
@@ -4848,35 +4859,37 @@ func (x *RevertNetworkChangeResponse) GetStatus() *NetworkingStatus {
 	return nil
 }
 
-type ConfigureBridgeDHCPRequest struct {
+// ConfigureBridge sets a bridge's description and its managed guest
+// network services (DHCP, and NAT and DNS on top of it).
+type ConfigureBridgeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	BridgeName    string                 `protobuf:"bytes,1,opt,name=bridge_name,json=bridgeName,proto3" json:"bridge_name,omitempty"`
-	Enabled       bool                   `protobuf:"varint,2,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	Cidr          string                 `protobuf:"bytes,3,opt,name=cidr,proto3" json:"cidr,omitempty"`
-	NatEnabled    bool                   `protobuf:"varint,4,opt,name=nat_enabled,json=natEnabled,proto3" json:"nat_enabled,omitempty"`
-	DnsEnabled    bool                   `protobuf:"varint,5,opt,name=dns_enabled,json=dnsEnabled,proto3" json:"dns_enabled,omitempty"`
-	DnsForwarders []string               `protobuf:"bytes,6,rep,name=dns_forwarders,json=dnsForwarders,proto3" json:"dns_forwarders,omitempty"`
-	AutoDns       bool                   `protobuf:"varint,7,opt,name=auto_dns,json=autoDns,proto3" json:"auto_dns,omitempty"`
-	DnsSuffix     string                 `protobuf:"bytes,8,opt,name=dns_suffix,json=dnsSuffix,proto3" json:"dns_suffix,omitempty"`
-	Description   string                 `protobuf:"bytes,9,opt,name=description,proto3" json:"description,omitempty"`
+	Description   string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	DhcpEnabled   bool                   `protobuf:"varint,3,opt,name=dhcp_enabled,json=dhcpEnabled,proto3" json:"dhcp_enabled,omitempty"`
+	Cidr          string                 `protobuf:"bytes,4,opt,name=cidr,proto3" json:"cidr,omitempty"`
+	NatEnabled    bool                   `protobuf:"varint,5,opt,name=nat_enabled,json=natEnabled,proto3" json:"nat_enabled,omitempty"`
+	DnsEnabled    bool                   `protobuf:"varint,6,opt,name=dns_enabled,json=dnsEnabled,proto3" json:"dns_enabled,omitempty"`
+	DnsForwarders []string               `protobuf:"bytes,7,rep,name=dns_forwarders,json=dnsForwarders,proto3" json:"dns_forwarders,omitempty"`
+	AutoDns       bool                   `protobuf:"varint,8,opt,name=auto_dns,json=autoDns,proto3" json:"auto_dns,omitempty"`
+	DnsSuffix     string                 `protobuf:"bytes,9,opt,name=dns_suffix,json=dnsSuffix,proto3" json:"dns_suffix,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ConfigureBridgeDHCPRequest) Reset() {
-	*x = ConfigureBridgeDHCPRequest{}
+func (x *ConfigureBridgeRequest) Reset() {
+	*x = ConfigureBridgeRequest{}
 	mi := &file_apprunner_v1_app_runner_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ConfigureBridgeDHCPRequest) String() string {
+func (x *ConfigureBridgeRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ConfigureBridgeDHCPRequest) ProtoMessage() {}
+func (*ConfigureBridgeRequest) ProtoMessage() {}
 
-func (x *ConfigureBridgeDHCPRequest) ProtoReflect() protoreflect.Message {
+func (x *ConfigureBridgeRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_apprunner_v1_app_runner_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4888,95 +4901,95 @@ func (x *ConfigureBridgeDHCPRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ConfigureBridgeDHCPRequest.ProtoReflect.Descriptor instead.
-func (*ConfigureBridgeDHCPRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use ConfigureBridgeRequest.ProtoReflect.Descriptor instead.
+func (*ConfigureBridgeRequest) Descriptor() ([]byte, []int) {
 	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{79}
 }
 
-func (x *ConfigureBridgeDHCPRequest) GetBridgeName() string {
+func (x *ConfigureBridgeRequest) GetBridgeName() string {
 	if x != nil {
 		return x.BridgeName
 	}
 	return ""
 }
 
-func (x *ConfigureBridgeDHCPRequest) GetEnabled() bool {
-	if x != nil {
-		return x.Enabled
-	}
-	return false
-}
-
-func (x *ConfigureBridgeDHCPRequest) GetCidr() string {
-	if x != nil {
-		return x.Cidr
-	}
-	return ""
-}
-
-func (x *ConfigureBridgeDHCPRequest) GetNatEnabled() bool {
-	if x != nil {
-		return x.NatEnabled
-	}
-	return false
-}
-
-func (x *ConfigureBridgeDHCPRequest) GetDnsEnabled() bool {
-	if x != nil {
-		return x.DnsEnabled
-	}
-	return false
-}
-
-func (x *ConfigureBridgeDHCPRequest) GetDnsForwarders() []string {
-	if x != nil {
-		return x.DnsForwarders
-	}
-	return nil
-}
-
-func (x *ConfigureBridgeDHCPRequest) GetAutoDns() bool {
-	if x != nil {
-		return x.AutoDns
-	}
-	return false
-}
-
-func (x *ConfigureBridgeDHCPRequest) GetDnsSuffix() string {
-	if x != nil {
-		return x.DnsSuffix
-	}
-	return ""
-}
-
-func (x *ConfigureBridgeDHCPRequest) GetDescription() string {
+func (x *ConfigureBridgeRequest) GetDescription() string {
 	if x != nil {
 		return x.Description
 	}
 	return ""
 }
 
-type ConfigureBridgeDHCPResponse struct {
+func (x *ConfigureBridgeRequest) GetDhcpEnabled() bool {
+	if x != nil {
+		return x.DhcpEnabled
+	}
+	return false
+}
+
+func (x *ConfigureBridgeRequest) GetCidr() string {
+	if x != nil {
+		return x.Cidr
+	}
+	return ""
+}
+
+func (x *ConfigureBridgeRequest) GetNatEnabled() bool {
+	if x != nil {
+		return x.NatEnabled
+	}
+	return false
+}
+
+func (x *ConfigureBridgeRequest) GetDnsEnabled() bool {
+	if x != nil {
+		return x.DnsEnabled
+	}
+	return false
+}
+
+func (x *ConfigureBridgeRequest) GetDnsForwarders() []string {
+	if x != nil {
+		return x.DnsForwarders
+	}
+	return nil
+}
+
+func (x *ConfigureBridgeRequest) GetAutoDns() bool {
+	if x != nil {
+		return x.AutoDns
+	}
+	return false
+}
+
+func (x *ConfigureBridgeRequest) GetDnsSuffix() string {
+	if x != nil {
+		return x.DnsSuffix
+	}
+	return ""
+}
+
+type ConfigureBridgeResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Status        *NetworkingStatus      `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ConfigureBridgeDHCPResponse) Reset() {
-	*x = ConfigureBridgeDHCPResponse{}
+func (x *ConfigureBridgeResponse) Reset() {
+	*x = ConfigureBridgeResponse{}
 	mi := &file_apprunner_v1_app_runner_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ConfigureBridgeDHCPResponse) String() string {
+func (x *ConfigureBridgeResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ConfigureBridgeDHCPResponse) ProtoMessage() {}
+func (*ConfigureBridgeResponse) ProtoMessage() {}
 
-func (x *ConfigureBridgeDHCPResponse) ProtoReflect() protoreflect.Message {
+func (x *ConfigureBridgeResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_apprunner_v1_app_runner_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4988,14 +5001,102 @@ func (x *ConfigureBridgeDHCPResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ConfigureBridgeDHCPResponse.ProtoReflect.Descriptor instead.
-func (*ConfigureBridgeDHCPResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use ConfigureBridgeResponse.ProtoReflect.Descriptor instead.
+func (*ConfigureBridgeResponse) Descriptor() ([]byte, []int) {
 	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{80}
 }
 
-func (x *ConfigureBridgeDHCPResponse) GetStatus() *NetworkingStatus {
+func (x *ConfigureBridgeResponse) GetStatus() *NetworkingStatus {
 	if x != nil {
 		return x.Status
+	}
+	return nil
+}
+
+type ListBridgeLeasesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BridgeName    string                 `protobuf:"bytes,1,opt,name=bridge_name,json=bridgeName,proto3" json:"bridge_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListBridgeLeasesRequest) Reset() {
+	*x = ListBridgeLeasesRequest{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[81]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListBridgeLeasesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListBridgeLeasesRequest) ProtoMessage() {}
+
+func (x *ListBridgeLeasesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[81]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListBridgeLeasesRequest.ProtoReflect.Descriptor instead.
+func (*ListBridgeLeasesRequest) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{81}
+}
+
+func (x *ListBridgeLeasesRequest) GetBridgeName() string {
+	if x != nil {
+		return x.BridgeName
+	}
+	return ""
+}
+
+type ListBridgeLeasesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Leases        []*DHCPLease           `protobuf:"bytes,1,rep,name=leases,proto3" json:"leases,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListBridgeLeasesResponse) Reset() {
+	*x = ListBridgeLeasesResponse{}
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[82]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListBridgeLeasesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListBridgeLeasesResponse) ProtoMessage() {}
+
+func (x *ListBridgeLeasesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[82]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListBridgeLeasesResponse.ProtoReflect.Descriptor instead.
+func (*ListBridgeLeasesResponse) Descriptor() ([]byte, []int) {
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{82}
+}
+
+func (x *ListBridgeLeasesResponse) GetLeases() []*DHCPLease {
+	if x != nil {
+		return x.Leases
 	}
 	return nil
 }
@@ -5009,7 +5110,7 @@ type ClearBridgeDHCPLeasesRequest struct {
 
 func (x *ClearBridgeDHCPLeasesRequest) Reset() {
 	*x = ClearBridgeDHCPLeasesRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[81]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5021,7 +5122,7 @@ func (x *ClearBridgeDHCPLeasesRequest) String() string {
 func (*ClearBridgeDHCPLeasesRequest) ProtoMessage() {}
 
 func (x *ClearBridgeDHCPLeasesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[81]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5034,7 +5135,7 @@ func (x *ClearBridgeDHCPLeasesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClearBridgeDHCPLeasesRequest.ProtoReflect.Descriptor instead.
 func (*ClearBridgeDHCPLeasesRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{81}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *ClearBridgeDHCPLeasesRequest) GetBridgeName() string {
@@ -5053,7 +5154,7 @@ type ClearBridgeDHCPLeasesResponse struct {
 
 func (x *ClearBridgeDHCPLeasesResponse) Reset() {
 	*x = ClearBridgeDHCPLeasesResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[82]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5065,7 +5166,7 @@ func (x *ClearBridgeDHCPLeasesResponse) String() string {
 func (*ClearBridgeDHCPLeasesResponse) ProtoMessage() {}
 
 func (x *ClearBridgeDHCPLeasesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[82]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5078,7 +5179,7 @@ func (x *ClearBridgeDHCPLeasesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClearBridgeDHCPLeasesResponse.ProtoReflect.Descriptor instead.
 func (*ClearBridgeDHCPLeasesResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{82}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *ClearBridgeDHCPLeasesResponse) GetStatus() *NetworkingStatus {
@@ -5098,7 +5199,7 @@ type DeleteBridgeDHCPLeaseRequest struct {
 
 func (x *DeleteBridgeDHCPLeaseRequest) Reset() {
 	*x = DeleteBridgeDHCPLeaseRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[83]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5110,7 +5211,7 @@ func (x *DeleteBridgeDHCPLeaseRequest) String() string {
 func (*DeleteBridgeDHCPLeaseRequest) ProtoMessage() {}
 
 func (x *DeleteBridgeDHCPLeaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[83]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5123,7 +5224,7 @@ func (x *DeleteBridgeDHCPLeaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteBridgeDHCPLeaseRequest.ProtoReflect.Descriptor instead.
 func (*DeleteBridgeDHCPLeaseRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{83}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *DeleteBridgeDHCPLeaseRequest) GetBridgeName() string {
@@ -5149,7 +5250,7 @@ type DeleteBridgeDHCPLeaseResponse struct {
 
 func (x *DeleteBridgeDHCPLeaseResponse) Reset() {
 	*x = DeleteBridgeDHCPLeaseResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[84]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5161,7 +5262,7 @@ func (x *DeleteBridgeDHCPLeaseResponse) String() string {
 func (*DeleteBridgeDHCPLeaseResponse) ProtoMessage() {}
 
 func (x *DeleteBridgeDHCPLeaseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[84]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5174,7 +5275,7 @@ func (x *DeleteBridgeDHCPLeaseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteBridgeDHCPLeaseResponse.ProtoReflect.Descriptor instead.
 func (*DeleteBridgeDHCPLeaseResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{84}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *DeleteBridgeDHCPLeaseResponse) GetStatus() *NetworkingStatus {
@@ -5195,7 +5296,7 @@ type SetBridgeDHCPStaticLeaseRequest struct {
 
 func (x *SetBridgeDHCPStaticLeaseRequest) Reset() {
 	*x = SetBridgeDHCPStaticLeaseRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[85]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5207,7 +5308,7 @@ func (x *SetBridgeDHCPStaticLeaseRequest) String() string {
 func (*SetBridgeDHCPStaticLeaseRequest) ProtoMessage() {}
 
 func (x *SetBridgeDHCPStaticLeaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[85]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5220,7 +5321,7 @@ func (x *SetBridgeDHCPStaticLeaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetBridgeDHCPStaticLeaseRequest.ProtoReflect.Descriptor instead.
 func (*SetBridgeDHCPStaticLeaseRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{85}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *SetBridgeDHCPStaticLeaseRequest) GetBridgeName() string {
@@ -5253,7 +5354,7 @@ type SetBridgeDHCPStaticLeaseResponse struct {
 
 func (x *SetBridgeDHCPStaticLeaseResponse) Reset() {
 	*x = SetBridgeDHCPStaticLeaseResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[86]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5265,7 +5366,7 @@ func (x *SetBridgeDHCPStaticLeaseResponse) String() string {
 func (*SetBridgeDHCPStaticLeaseResponse) ProtoMessage() {}
 
 func (x *SetBridgeDHCPStaticLeaseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[86]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5278,7 +5379,7 @@ func (x *SetBridgeDHCPStaticLeaseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetBridgeDHCPStaticLeaseResponse.ProtoReflect.Descriptor instead.
 func (*SetBridgeDHCPStaticLeaseResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{86}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *SetBridgeDHCPStaticLeaseResponse) GetStatus() *NetworkingStatus {
@@ -5300,7 +5401,7 @@ type CloudInitTemplate struct {
 
 func (x *CloudInitTemplate) Reset() {
 	*x = CloudInitTemplate{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[87]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5312,7 +5413,7 @@ func (x *CloudInitTemplate) String() string {
 func (*CloudInitTemplate) ProtoMessage() {}
 
 func (x *CloudInitTemplate) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[87]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5325,7 +5426,7 @@ func (x *CloudInitTemplate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloudInitTemplate.ProtoReflect.Descriptor instead.
 func (*CloudInitTemplate) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{87}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *CloudInitTemplate) GetName() string {
@@ -5364,7 +5465,7 @@ type ListCloudInitTemplatesRequest struct {
 
 func (x *ListCloudInitTemplatesRequest) Reset() {
 	*x = ListCloudInitTemplatesRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[88]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5376,7 +5477,7 @@ func (x *ListCloudInitTemplatesRequest) String() string {
 func (*ListCloudInitTemplatesRequest) ProtoMessage() {}
 
 func (x *ListCloudInitTemplatesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[88]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5389,7 +5490,7 @@ func (x *ListCloudInitTemplatesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCloudInitTemplatesRequest.ProtoReflect.Descriptor instead.
 func (*ListCloudInitTemplatesRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{88}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{90}
 }
 
 type ListCloudInitTemplatesResponse struct {
@@ -5401,7 +5502,7 @@ type ListCloudInitTemplatesResponse struct {
 
 func (x *ListCloudInitTemplatesResponse) Reset() {
 	*x = ListCloudInitTemplatesResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[89]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5413,7 +5514,7 @@ func (x *ListCloudInitTemplatesResponse) String() string {
 func (*ListCloudInitTemplatesResponse) ProtoMessage() {}
 
 func (x *ListCloudInitTemplatesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[89]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5426,7 +5527,7 @@ func (x *ListCloudInitTemplatesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCloudInitTemplatesResponse.ProtoReflect.Descriptor instead.
 func (*ListCloudInitTemplatesResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{89}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *ListCloudInitTemplatesResponse) GetTemplates() []*CloudInitTemplate {
@@ -5446,7 +5547,7 @@ type CreateCloudInitTemplateRequest struct {
 
 func (x *CreateCloudInitTemplateRequest) Reset() {
 	*x = CreateCloudInitTemplateRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[90]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5458,7 +5559,7 @@ func (x *CreateCloudInitTemplateRequest) String() string {
 func (*CreateCloudInitTemplateRequest) ProtoMessage() {}
 
 func (x *CreateCloudInitTemplateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[90]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5471,7 +5572,7 @@ func (x *CreateCloudInitTemplateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCloudInitTemplateRequest.ProtoReflect.Descriptor instead.
 func (*CreateCloudInitTemplateRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{90}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *CreateCloudInitTemplateRequest) GetName() string {
@@ -5497,7 +5598,7 @@ type CreateCloudInitTemplateResponse struct {
 
 func (x *CreateCloudInitTemplateResponse) Reset() {
 	*x = CreateCloudInitTemplateResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[91]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5509,7 +5610,7 @@ func (x *CreateCloudInitTemplateResponse) String() string {
 func (*CreateCloudInitTemplateResponse) ProtoMessage() {}
 
 func (x *CreateCloudInitTemplateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[91]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5522,7 +5623,7 @@ func (x *CreateCloudInitTemplateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCloudInitTemplateResponse.ProtoReflect.Descriptor instead.
 func (*CreateCloudInitTemplateResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{91}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *CreateCloudInitTemplateResponse) GetTemplate() *CloudInitTemplate {
@@ -5543,7 +5644,7 @@ type UpdateCloudInitTemplateRequest struct {
 
 func (x *UpdateCloudInitTemplateRequest) Reset() {
 	*x = UpdateCloudInitTemplateRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[92]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5555,7 +5656,7 @@ func (x *UpdateCloudInitTemplateRequest) String() string {
 func (*UpdateCloudInitTemplateRequest) ProtoMessage() {}
 
 func (x *UpdateCloudInitTemplateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[92]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5568,7 +5669,7 @@ func (x *UpdateCloudInitTemplateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateCloudInitTemplateRequest.ProtoReflect.Descriptor instead.
 func (*UpdateCloudInitTemplateRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{92}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *UpdateCloudInitTemplateRequest) GetName() string {
@@ -5601,7 +5702,7 @@ type UpdateCloudInitTemplateResponse struct {
 
 func (x *UpdateCloudInitTemplateResponse) Reset() {
 	*x = UpdateCloudInitTemplateResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[93]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5613,7 +5714,7 @@ func (x *UpdateCloudInitTemplateResponse) String() string {
 func (*UpdateCloudInitTemplateResponse) ProtoMessage() {}
 
 func (x *UpdateCloudInitTemplateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[93]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5626,7 +5727,7 @@ func (x *UpdateCloudInitTemplateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateCloudInitTemplateResponse.ProtoReflect.Descriptor instead.
 func (*UpdateCloudInitTemplateResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{93}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *UpdateCloudInitTemplateResponse) GetTemplate() *CloudInitTemplate {
@@ -5645,7 +5746,7 @@ type DeleteCloudInitTemplateRequest struct {
 
 func (x *DeleteCloudInitTemplateRequest) Reset() {
 	*x = DeleteCloudInitTemplateRequest{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[94]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5657,7 +5758,7 @@ func (x *DeleteCloudInitTemplateRequest) String() string {
 func (*DeleteCloudInitTemplateRequest) ProtoMessage() {}
 
 func (x *DeleteCloudInitTemplateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[94]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5670,7 +5771,7 @@ func (x *DeleteCloudInitTemplateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCloudInitTemplateRequest.ProtoReflect.Descriptor instead.
 func (*DeleteCloudInitTemplateRequest) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{94}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *DeleteCloudInitTemplateRequest) GetName() string {
@@ -5688,7 +5789,7 @@ type DeleteCloudInitTemplateResponse struct {
 
 func (x *DeleteCloudInitTemplateResponse) Reset() {
 	*x = DeleteCloudInitTemplateResponse{}
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[95]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5700,7 +5801,7 @@ func (x *DeleteCloudInitTemplateResponse) String() string {
 func (*DeleteCloudInitTemplateResponse) ProtoMessage() {}
 
 func (x *DeleteCloudInitTemplateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_apprunner_v1_app_runner_proto_msgTypes[95]
+	mi := &file_apprunner_v1_app_runner_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5713,7 +5814,7 @@ func (x *DeleteCloudInitTemplateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCloudInitTemplateResponse.ProtoReflect.Descriptor instead.
 func (*DeleteCloudInitTemplateResponse) Descriptor() ([]byte, []int) {
-	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{95}
+	return file_apprunner_v1_app_runner_proto_rawDescGZIP(), []int{97}
 }
 
 var File_apprunner_v1_app_runner_proto protoreflect.FileDescriptor
@@ -5748,14 +5849,15 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\fsource_image\x18\x03 \x01(\tR\vsourceImage\"4\n" +
 	"\aVMCDROM\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
-	"\biso_name\x18\x02 \x01(\tR\aisoName\"\x88\x01\n" +
+	"\biso_name\x18\x02 \x01(\tR\aisoName\"\xa6\x01\n" +
 	"\x05VMNIC\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12-\n" +
 	"\x04mode\x18\x02 \x01(\x0e2\x19.apprunner.v1.NetworkModeR\x04mode\x12\x1f\n" +
 	"\vbridge_name\x18\x03 \x01(\tR\n" +
 	"bridgeName\x12\x1f\n" +
 	"\vmac_address\x18\x04 \x01(\tR\n" +
-	"macAddress\"J\n" +
+	"macAddress\x12\x1c\n" +
+	"\taddresses\x18\x05 \x03(\tR\taddresses\"J\n" +
 	"\n" +
 	"VMDiskSpec\x12\x19\n" +
 	"\bsize_gib\x18\x01 \x01(\rR\asizeGib\x12!\n" +
@@ -5864,14 +5966,18 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\x0fRebootVMRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"Y\n" +
 	"\x10RebootVMResponse\x12E\n" +
-	"\x0fvirtual_machine\x18\x01 \x01(\v2\x1c.apprunner.v1.VirtualMachineR\x0evirtualMachine\"\x8a\x01\n" +
+	"\x0fvirtual_machine\x18\x01 \x01(\v2\x1c.apprunner.v1.VirtualMachineR\x0evirtualMachine\"\xcf\x01\n" +
 	"\x0fUpdateVMRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
-	"\vdescription\x18\x03 \x01(\tR\vdescription\x12\x12\n" +
-	"\x04cpus\x18\x04 \x01(\rR\x04cpus\x12\x1d\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
+	"\x04name\x18\x02 \x01(\tH\x00R\x04name\x88\x01\x01\x12%\n" +
+	"\vdescription\x18\x03 \x01(\tH\x01R\vdescription\x88\x01\x01\x12\x17\n" +
+	"\x04cpus\x18\x04 \x01(\rH\x02R\x04cpus\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"memory_mib\x18\x05 \x01(\rR\tmemoryMib\"Y\n" +
+	"memory_mib\x18\x05 \x01(\rH\x03R\tmemoryMib\x88\x01\x01B\a\n" +
+	"\x05_nameB\x0e\n" +
+	"\f_descriptionB\a\n" +
+	"\x05_cpusB\r\n" +
+	"\v_memory_mib\"Y\n" +
 	"\x10UpdateVMResponse\x12E\n" +
 	"\x0fvirtual_machine\x18\x01 \x01(\v2\x1c.apprunner.v1.VirtualMachineR\x0evirtualMachine\"L\n" +
 	"\x0fAddVMNICRequest\x12\x0e\n" +
@@ -6043,23 +6149,28 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\x1aRevertNetworkChangeRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"U\n" +
 	"\x1bRevertNetworkChangeResponse\x126\n" +
-	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\"\xb0\x02\n" +
-	"\x1aConfigureBridgeDHCPRequest\x12\x1f\n" +
+	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\"\xb5\x02\n" +
+	"\x16ConfigureBridgeRequest\x12\x1f\n" +
 	"\vbridge_name\x18\x01 \x01(\tR\n" +
-	"bridgeName\x12\x18\n" +
-	"\aenabled\x18\x02 \x01(\bR\aenabled\x12\x12\n" +
-	"\x04cidr\x18\x03 \x01(\tR\x04cidr\x12\x1f\n" +
-	"\vnat_enabled\x18\x04 \x01(\bR\n" +
+	"bridgeName\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12!\n" +
+	"\fdhcp_enabled\x18\x03 \x01(\bR\vdhcpEnabled\x12\x12\n" +
+	"\x04cidr\x18\x04 \x01(\tR\x04cidr\x12\x1f\n" +
+	"\vnat_enabled\x18\x05 \x01(\bR\n" +
 	"natEnabled\x12\x1f\n" +
-	"\vdns_enabled\x18\x05 \x01(\bR\n" +
+	"\vdns_enabled\x18\x06 \x01(\bR\n" +
 	"dnsEnabled\x12%\n" +
-	"\x0edns_forwarders\x18\x06 \x03(\tR\rdnsForwarders\x12\x19\n" +
-	"\bauto_dns\x18\a \x01(\bR\aautoDns\x12\x1d\n" +
+	"\x0edns_forwarders\x18\a \x03(\tR\rdnsForwarders\x12\x19\n" +
+	"\bauto_dns\x18\b \x01(\bR\aautoDns\x12\x1d\n" +
 	"\n" +
-	"dns_suffix\x18\b \x01(\tR\tdnsSuffix\x12 \n" +
-	"\vdescription\x18\t \x01(\tR\vdescription\"U\n" +
-	"\x1bConfigureBridgeDHCPResponse\x126\n" +
-	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\"?\n" +
+	"dns_suffix\x18\t \x01(\tR\tdnsSuffix\"Q\n" +
+	"\x17ConfigureBridgeResponse\x126\n" +
+	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\":\n" +
+	"\x17ListBridgeLeasesRequest\x12\x1f\n" +
+	"\vbridge_name\x18\x01 \x01(\tR\n" +
+	"bridgeName\"K\n" +
+	"\x18ListBridgeLeasesResponse\x12/\n" +
+	"\x06leases\x18\x01 \x03(\v2\x17.apprunner.v1.DHCPLeaseR\x06leases\"?\n" +
 	"\x1cClearBridgeDHCPLeasesRequest\x12\x1f\n" +
 	"\vbridge_name\x18\x01 \x01(\tR\n" +
 	"bridgeName\"W\n" +
@@ -6134,7 +6245,7 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"!NETWORK_CHANGE_TYPE_SET_BRIDGE_UP\x10\x03\x12'\n" +
 	"#NETWORK_CHANGE_TYPE_SET_BRIDGE_DOWN\x10\x04\x12(\n" +
 	"$NETWORK_CHANGE_TYPE_ATTACH_INTERFACE\x10\x05\x12(\n" +
-	"$NETWORK_CHANGE_TYPE_DETACH_INTERFACE\x10\x062\xa3\x1a\n" +
+	"$NETWORK_CHANGE_TYPE_DETACH_INTERFACE\x10\x062\xfa\x1a\n" +
 	"\x10AppRunnerService\x12X\n" +
 	"\rGetHostStatus\x12\".apprunner.v1.GetHostStatusRequest\x1a#.apprunner.v1.GetHostStatusResponse\x12I\n" +
 	"\bListISOs\x12\x1d.apprunner.v1.ListISOsRequest\x1a\x1e.apprunner.v1.ListISOsResponse\x12[\n" +
@@ -6164,8 +6275,9 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\x13GetNetworkingStatus\x12(.apprunner.v1.GetNetworkingStatusRequest\x1a).apprunner.v1.GetNetworkingStatusResponse\x12g\n" +
 	"\x12ApplyNetworkChange\x12'.apprunner.v1.ApplyNetworkChangeRequest\x1a(.apprunner.v1.ApplyNetworkChangeResponse\x12m\n" +
 	"\x14ConfirmNetworkChange\x12).apprunner.v1.ConfirmNetworkChangeRequest\x1a*.apprunner.v1.ConfirmNetworkChangeResponse\x12j\n" +
-	"\x13RevertNetworkChange\x12(.apprunner.v1.RevertNetworkChangeRequest\x1a).apprunner.v1.RevertNetworkChangeResponse\x12j\n" +
-	"\x13ConfigureBridgeDHCP\x12(.apprunner.v1.ConfigureBridgeDHCPRequest\x1a).apprunner.v1.ConfigureBridgeDHCPResponse\x12p\n" +
+	"\x13RevertNetworkChange\x12(.apprunner.v1.RevertNetworkChangeRequest\x1a).apprunner.v1.RevertNetworkChangeResponse\x12^\n" +
+	"\x0fConfigureBridge\x12$.apprunner.v1.ConfigureBridgeRequest\x1a%.apprunner.v1.ConfigureBridgeResponse\x12a\n" +
+	"\x10ListBridgeLeases\x12%.apprunner.v1.ListBridgeLeasesRequest\x1a&.apprunner.v1.ListBridgeLeasesResponse\x12p\n" +
 	"\x15ClearBridgeDHCPLeases\x12*.apprunner.v1.ClearBridgeDHCPLeasesRequest\x1a+.apprunner.v1.ClearBridgeDHCPLeasesResponse\x12p\n" +
 	"\x15DeleteBridgeDHCPLease\x12*.apprunner.v1.DeleteBridgeDHCPLeaseRequest\x1a+.apprunner.v1.DeleteBridgeDHCPLeaseResponse\x12y\n" +
 	"\x18SetBridgeDHCPStaticLease\x12-.apprunner.v1.SetBridgeDHCPStaticLeaseRequest\x1a..apprunner.v1.SetBridgeDHCPStaticLeaseResponse\x12s\n" +
@@ -6187,7 +6299,7 @@ func file_apprunner_v1_app_runner_proto_rawDescGZIP() []byte {
 }
 
 var file_apprunner_v1_app_runner_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_apprunner_v1_app_runner_proto_msgTypes = make([]protoimpl.MessageInfo, 96)
+var file_apprunner_v1_app_runner_proto_msgTypes = make([]protoimpl.MessageInfo, 98)
 var file_apprunner_v1_app_runner_proto_goTypes = []any{
 	(VMStatus)(0),                            // 0: apprunner.v1.VMStatus
 	(NetworkMode)(0),                         // 1: apprunner.v1.NetworkMode
@@ -6274,23 +6386,25 @@ var file_apprunner_v1_app_runner_proto_goTypes = []any{
 	(*ConfirmNetworkChangeResponse)(nil),     // 82: apprunner.v1.ConfirmNetworkChangeResponse
 	(*RevertNetworkChangeRequest)(nil),       // 83: apprunner.v1.RevertNetworkChangeRequest
 	(*RevertNetworkChangeResponse)(nil),      // 84: apprunner.v1.RevertNetworkChangeResponse
-	(*ConfigureBridgeDHCPRequest)(nil),       // 85: apprunner.v1.ConfigureBridgeDHCPRequest
-	(*ConfigureBridgeDHCPResponse)(nil),      // 86: apprunner.v1.ConfigureBridgeDHCPResponse
-	(*ClearBridgeDHCPLeasesRequest)(nil),     // 87: apprunner.v1.ClearBridgeDHCPLeasesRequest
-	(*ClearBridgeDHCPLeasesResponse)(nil),    // 88: apprunner.v1.ClearBridgeDHCPLeasesResponse
-	(*DeleteBridgeDHCPLeaseRequest)(nil),     // 89: apprunner.v1.DeleteBridgeDHCPLeaseRequest
-	(*DeleteBridgeDHCPLeaseResponse)(nil),    // 90: apprunner.v1.DeleteBridgeDHCPLeaseResponse
-	(*SetBridgeDHCPStaticLeaseRequest)(nil),  // 91: apprunner.v1.SetBridgeDHCPStaticLeaseRequest
-	(*SetBridgeDHCPStaticLeaseResponse)(nil), // 92: apprunner.v1.SetBridgeDHCPStaticLeaseResponse
-	(*CloudInitTemplate)(nil),                // 93: apprunner.v1.CloudInitTemplate
-	(*ListCloudInitTemplatesRequest)(nil),    // 94: apprunner.v1.ListCloudInitTemplatesRequest
-	(*ListCloudInitTemplatesResponse)(nil),   // 95: apprunner.v1.ListCloudInitTemplatesResponse
-	(*CreateCloudInitTemplateRequest)(nil),   // 96: apprunner.v1.CreateCloudInitTemplateRequest
-	(*CreateCloudInitTemplateResponse)(nil),  // 97: apprunner.v1.CreateCloudInitTemplateResponse
-	(*UpdateCloudInitTemplateRequest)(nil),   // 98: apprunner.v1.UpdateCloudInitTemplateRequest
-	(*UpdateCloudInitTemplateResponse)(nil),  // 99: apprunner.v1.UpdateCloudInitTemplateResponse
-	(*DeleteCloudInitTemplateRequest)(nil),   // 100: apprunner.v1.DeleteCloudInitTemplateRequest
-	(*DeleteCloudInitTemplateResponse)(nil),  // 101: apprunner.v1.DeleteCloudInitTemplateResponse
+	(*ConfigureBridgeRequest)(nil),           // 85: apprunner.v1.ConfigureBridgeRequest
+	(*ConfigureBridgeResponse)(nil),          // 86: apprunner.v1.ConfigureBridgeResponse
+	(*ListBridgeLeasesRequest)(nil),          // 87: apprunner.v1.ListBridgeLeasesRequest
+	(*ListBridgeLeasesResponse)(nil),         // 88: apprunner.v1.ListBridgeLeasesResponse
+	(*ClearBridgeDHCPLeasesRequest)(nil),     // 89: apprunner.v1.ClearBridgeDHCPLeasesRequest
+	(*ClearBridgeDHCPLeasesResponse)(nil),    // 90: apprunner.v1.ClearBridgeDHCPLeasesResponse
+	(*DeleteBridgeDHCPLeaseRequest)(nil),     // 91: apprunner.v1.DeleteBridgeDHCPLeaseRequest
+	(*DeleteBridgeDHCPLeaseResponse)(nil),    // 92: apprunner.v1.DeleteBridgeDHCPLeaseResponse
+	(*SetBridgeDHCPStaticLeaseRequest)(nil),  // 93: apprunner.v1.SetBridgeDHCPStaticLeaseRequest
+	(*SetBridgeDHCPStaticLeaseResponse)(nil), // 94: apprunner.v1.SetBridgeDHCPStaticLeaseResponse
+	(*CloudInitTemplate)(nil),                // 95: apprunner.v1.CloudInitTemplate
+	(*ListCloudInitTemplatesRequest)(nil),    // 96: apprunner.v1.ListCloudInitTemplatesRequest
+	(*ListCloudInitTemplatesResponse)(nil),   // 97: apprunner.v1.ListCloudInitTemplatesResponse
+	(*CreateCloudInitTemplateRequest)(nil),   // 98: apprunner.v1.CreateCloudInitTemplateRequest
+	(*CreateCloudInitTemplateResponse)(nil),  // 99: apprunner.v1.CreateCloudInitTemplateResponse
+	(*UpdateCloudInitTemplateRequest)(nil),   // 100: apprunner.v1.UpdateCloudInitTemplateRequest
+	(*UpdateCloudInitTemplateResponse)(nil),  // 101: apprunner.v1.UpdateCloudInitTemplateResponse
+	(*DeleteCloudInitTemplateRequest)(nil),   // 102: apprunner.v1.DeleteCloudInitTemplateRequest
+	(*DeleteCloudInitTemplateResponse)(nil),  // 103: apprunner.v1.DeleteCloudInitTemplateResponse
 }
 var file_apprunner_v1_app_runner_proto_depIdxs = []int32{
 	2,   // 0: apprunner.v1.VirtualMachine.firmware:type_name -> apprunner.v1.VMFirmware
@@ -6350,90 +6464,93 @@ var file_apprunner_v1_app_runner_proto_depIdxs = []int32{
 	75,  // 54: apprunner.v1.ApplyNetworkChangeResponse.pending_change:type_name -> apprunner.v1.PendingNetworkChange
 	76,  // 55: apprunner.v1.ConfirmNetworkChangeResponse.status:type_name -> apprunner.v1.NetworkingStatus
 	76,  // 56: apprunner.v1.RevertNetworkChangeResponse.status:type_name -> apprunner.v1.NetworkingStatus
-	76,  // 57: apprunner.v1.ConfigureBridgeDHCPResponse.status:type_name -> apprunner.v1.NetworkingStatus
-	76,  // 58: apprunner.v1.ClearBridgeDHCPLeasesResponse.status:type_name -> apprunner.v1.NetworkingStatus
-	76,  // 59: apprunner.v1.DeleteBridgeDHCPLeaseResponse.status:type_name -> apprunner.v1.NetworkingStatus
-	76,  // 60: apprunner.v1.SetBridgeDHCPStaticLeaseResponse.status:type_name -> apprunner.v1.NetworkingStatus
-	93,  // 61: apprunner.v1.ListCloudInitTemplatesResponse.templates:type_name -> apprunner.v1.CloudInitTemplate
-	93,  // 62: apprunner.v1.CreateCloudInitTemplateResponse.template:type_name -> apprunner.v1.CloudInitTemplate
-	93,  // 63: apprunner.v1.UpdateCloudInitTemplateResponse.template:type_name -> apprunner.v1.CloudInitTemplate
-	17,  // 64: apprunner.v1.AppRunnerService.GetHostStatus:input_type -> apprunner.v1.GetHostStatusRequest
-	19,  // 65: apprunner.v1.AppRunnerService.ListISOs:input_type -> apprunner.v1.ListISOsRequest
-	22,  // 66: apprunner.v1.AppRunnerService.ListDiskImages:input_type -> apprunner.v1.ListDiskImagesRequest
-	26,  // 67: apprunner.v1.AppRunnerService.ListStorage:input_type -> apprunner.v1.ListStorageRequest
-	28,  // 68: apprunner.v1.AppRunnerService.DownloadStorageFile:input_type -> apprunner.v1.DownloadStorageFileRequest
-	30,  // 69: apprunner.v1.AppRunnerService.ListVMs:input_type -> apprunner.v1.ListVMsRequest
-	32,  // 70: apprunner.v1.AppRunnerService.GetVM:input_type -> apprunner.v1.GetVMRequest
-	34,  // 71: apprunner.v1.AppRunnerService.CreateVM:input_type -> apprunner.v1.CreateVMRequest
-	36,  // 72: apprunner.v1.AppRunnerService.CloneVM:input_type -> apprunner.v1.CloneVMRequest
-	38,  // 73: apprunner.v1.AppRunnerService.StartVM:input_type -> apprunner.v1.StartVMRequest
-	40,  // 74: apprunner.v1.AppRunnerService.StopVM:input_type -> apprunner.v1.StopVMRequest
-	42,  // 75: apprunner.v1.AppRunnerService.RebootVM:input_type -> apprunner.v1.RebootVMRequest
-	44,  // 76: apprunner.v1.AppRunnerService.UpdateVM:input_type -> apprunner.v1.UpdateVMRequest
-	46,  // 77: apprunner.v1.AppRunnerService.AddVMNIC:input_type -> apprunner.v1.AddVMNICRequest
-	48,  // 78: apprunner.v1.AppRunnerService.UpdateVMNIC:input_type -> apprunner.v1.UpdateVMNICRequest
-	50,  // 79: apprunner.v1.AppRunnerService.RemoveVMNIC:input_type -> apprunner.v1.RemoveVMNICRequest
-	52,  // 80: apprunner.v1.AppRunnerService.AddVMDisk:input_type -> apprunner.v1.AddVMDiskRequest
-	54,  // 81: apprunner.v1.AppRunnerService.RemoveVMDisk:input_type -> apprunner.v1.RemoveVMDiskRequest
-	56,  // 82: apprunner.v1.AppRunnerService.AddVMCDROM:input_type -> apprunner.v1.AddVMCDROMRequest
-	58,  // 83: apprunner.v1.AppRunnerService.UpdateVMCDROM:input_type -> apprunner.v1.UpdateVMCDROMRequest
-	60,  // 84: apprunner.v1.AppRunnerService.RemoveVMCDROM:input_type -> apprunner.v1.RemoveVMCDROMRequest
-	62,  // 85: apprunner.v1.AppRunnerService.ConfigureVMCloudInit:input_type -> apprunner.v1.ConfigureVMCloudInitRequest
-	64,  // 86: apprunner.v1.AppRunnerService.ConfigureVMIPMI:input_type -> apprunner.v1.ConfigureVMIPMIRequest
-	66,  // 87: apprunner.v1.AppRunnerService.DeleteVM:input_type -> apprunner.v1.DeleteVMRequest
-	77,  // 88: apprunner.v1.AppRunnerService.GetNetworkingStatus:input_type -> apprunner.v1.GetNetworkingStatusRequest
-	79,  // 89: apprunner.v1.AppRunnerService.ApplyNetworkChange:input_type -> apprunner.v1.ApplyNetworkChangeRequest
-	81,  // 90: apprunner.v1.AppRunnerService.ConfirmNetworkChange:input_type -> apprunner.v1.ConfirmNetworkChangeRequest
-	83,  // 91: apprunner.v1.AppRunnerService.RevertNetworkChange:input_type -> apprunner.v1.RevertNetworkChangeRequest
-	85,  // 92: apprunner.v1.AppRunnerService.ConfigureBridgeDHCP:input_type -> apprunner.v1.ConfigureBridgeDHCPRequest
-	87,  // 93: apprunner.v1.AppRunnerService.ClearBridgeDHCPLeases:input_type -> apprunner.v1.ClearBridgeDHCPLeasesRequest
-	89,  // 94: apprunner.v1.AppRunnerService.DeleteBridgeDHCPLease:input_type -> apprunner.v1.DeleteBridgeDHCPLeaseRequest
-	91,  // 95: apprunner.v1.AppRunnerService.SetBridgeDHCPStaticLease:input_type -> apprunner.v1.SetBridgeDHCPStaticLeaseRequest
-	94,  // 96: apprunner.v1.AppRunnerService.ListCloudInitTemplates:input_type -> apprunner.v1.ListCloudInitTemplatesRequest
-	96,  // 97: apprunner.v1.AppRunnerService.CreateCloudInitTemplate:input_type -> apprunner.v1.CreateCloudInitTemplateRequest
-	98,  // 98: apprunner.v1.AppRunnerService.UpdateCloudInitTemplate:input_type -> apprunner.v1.UpdateCloudInitTemplateRequest
-	100, // 99: apprunner.v1.AppRunnerService.DeleteCloudInitTemplate:input_type -> apprunner.v1.DeleteCloudInitTemplateRequest
-	18,  // 100: apprunner.v1.AppRunnerService.GetHostStatus:output_type -> apprunner.v1.GetHostStatusResponse
-	20,  // 101: apprunner.v1.AppRunnerService.ListISOs:output_type -> apprunner.v1.ListISOsResponse
-	23,  // 102: apprunner.v1.AppRunnerService.ListDiskImages:output_type -> apprunner.v1.ListDiskImagesResponse
-	27,  // 103: apprunner.v1.AppRunnerService.ListStorage:output_type -> apprunner.v1.ListStorageResponse
-	29,  // 104: apprunner.v1.AppRunnerService.DownloadStorageFile:output_type -> apprunner.v1.DownloadStorageFileResponse
-	31,  // 105: apprunner.v1.AppRunnerService.ListVMs:output_type -> apprunner.v1.ListVMsResponse
-	33,  // 106: apprunner.v1.AppRunnerService.GetVM:output_type -> apprunner.v1.GetVMResponse
-	35,  // 107: apprunner.v1.AppRunnerService.CreateVM:output_type -> apprunner.v1.CreateVMResponse
-	37,  // 108: apprunner.v1.AppRunnerService.CloneVM:output_type -> apprunner.v1.CloneVMResponse
-	39,  // 109: apprunner.v1.AppRunnerService.StartVM:output_type -> apprunner.v1.StartVMResponse
-	41,  // 110: apprunner.v1.AppRunnerService.StopVM:output_type -> apprunner.v1.StopVMResponse
-	43,  // 111: apprunner.v1.AppRunnerService.RebootVM:output_type -> apprunner.v1.RebootVMResponse
-	45,  // 112: apprunner.v1.AppRunnerService.UpdateVM:output_type -> apprunner.v1.UpdateVMResponse
-	47,  // 113: apprunner.v1.AppRunnerService.AddVMNIC:output_type -> apprunner.v1.AddVMNICResponse
-	49,  // 114: apprunner.v1.AppRunnerService.UpdateVMNIC:output_type -> apprunner.v1.UpdateVMNICResponse
-	51,  // 115: apprunner.v1.AppRunnerService.RemoveVMNIC:output_type -> apprunner.v1.RemoveVMNICResponse
-	53,  // 116: apprunner.v1.AppRunnerService.AddVMDisk:output_type -> apprunner.v1.AddVMDiskResponse
-	55,  // 117: apprunner.v1.AppRunnerService.RemoveVMDisk:output_type -> apprunner.v1.RemoveVMDiskResponse
-	57,  // 118: apprunner.v1.AppRunnerService.AddVMCDROM:output_type -> apprunner.v1.AddVMCDROMResponse
-	59,  // 119: apprunner.v1.AppRunnerService.UpdateVMCDROM:output_type -> apprunner.v1.UpdateVMCDROMResponse
-	61,  // 120: apprunner.v1.AppRunnerService.RemoveVMCDROM:output_type -> apprunner.v1.RemoveVMCDROMResponse
-	63,  // 121: apprunner.v1.AppRunnerService.ConfigureVMCloudInit:output_type -> apprunner.v1.ConfigureVMCloudInitResponse
-	65,  // 122: apprunner.v1.AppRunnerService.ConfigureVMIPMI:output_type -> apprunner.v1.ConfigureVMIPMIResponse
-	67,  // 123: apprunner.v1.AppRunnerService.DeleteVM:output_type -> apprunner.v1.DeleteVMResponse
-	78,  // 124: apprunner.v1.AppRunnerService.GetNetworkingStatus:output_type -> apprunner.v1.GetNetworkingStatusResponse
-	80,  // 125: apprunner.v1.AppRunnerService.ApplyNetworkChange:output_type -> apprunner.v1.ApplyNetworkChangeResponse
-	82,  // 126: apprunner.v1.AppRunnerService.ConfirmNetworkChange:output_type -> apprunner.v1.ConfirmNetworkChangeResponse
-	84,  // 127: apprunner.v1.AppRunnerService.RevertNetworkChange:output_type -> apprunner.v1.RevertNetworkChangeResponse
-	86,  // 128: apprunner.v1.AppRunnerService.ConfigureBridgeDHCP:output_type -> apprunner.v1.ConfigureBridgeDHCPResponse
-	88,  // 129: apprunner.v1.AppRunnerService.ClearBridgeDHCPLeases:output_type -> apprunner.v1.ClearBridgeDHCPLeasesResponse
-	90,  // 130: apprunner.v1.AppRunnerService.DeleteBridgeDHCPLease:output_type -> apprunner.v1.DeleteBridgeDHCPLeaseResponse
-	92,  // 131: apprunner.v1.AppRunnerService.SetBridgeDHCPStaticLease:output_type -> apprunner.v1.SetBridgeDHCPStaticLeaseResponse
-	95,  // 132: apprunner.v1.AppRunnerService.ListCloudInitTemplates:output_type -> apprunner.v1.ListCloudInitTemplatesResponse
-	97,  // 133: apprunner.v1.AppRunnerService.CreateCloudInitTemplate:output_type -> apprunner.v1.CreateCloudInitTemplateResponse
-	99,  // 134: apprunner.v1.AppRunnerService.UpdateCloudInitTemplate:output_type -> apprunner.v1.UpdateCloudInitTemplateResponse
-	101, // 135: apprunner.v1.AppRunnerService.DeleteCloudInitTemplate:output_type -> apprunner.v1.DeleteCloudInitTemplateResponse
-	100, // [100:136] is the sub-list for method output_type
-	64,  // [64:100] is the sub-list for method input_type
-	64,  // [64:64] is the sub-list for extension type_name
-	64,  // [64:64] is the sub-list for extension extendee
-	0,   // [0:64] is the sub-list for field type_name
+	76,  // 57: apprunner.v1.ConfigureBridgeResponse.status:type_name -> apprunner.v1.NetworkingStatus
+	74,  // 58: apprunner.v1.ListBridgeLeasesResponse.leases:type_name -> apprunner.v1.DHCPLease
+	76,  // 59: apprunner.v1.ClearBridgeDHCPLeasesResponse.status:type_name -> apprunner.v1.NetworkingStatus
+	76,  // 60: apprunner.v1.DeleteBridgeDHCPLeaseResponse.status:type_name -> apprunner.v1.NetworkingStatus
+	76,  // 61: apprunner.v1.SetBridgeDHCPStaticLeaseResponse.status:type_name -> apprunner.v1.NetworkingStatus
+	95,  // 62: apprunner.v1.ListCloudInitTemplatesResponse.templates:type_name -> apprunner.v1.CloudInitTemplate
+	95,  // 63: apprunner.v1.CreateCloudInitTemplateResponse.template:type_name -> apprunner.v1.CloudInitTemplate
+	95,  // 64: apprunner.v1.UpdateCloudInitTemplateResponse.template:type_name -> apprunner.v1.CloudInitTemplate
+	17,  // 65: apprunner.v1.AppRunnerService.GetHostStatus:input_type -> apprunner.v1.GetHostStatusRequest
+	19,  // 66: apprunner.v1.AppRunnerService.ListISOs:input_type -> apprunner.v1.ListISOsRequest
+	22,  // 67: apprunner.v1.AppRunnerService.ListDiskImages:input_type -> apprunner.v1.ListDiskImagesRequest
+	26,  // 68: apprunner.v1.AppRunnerService.ListStorage:input_type -> apprunner.v1.ListStorageRequest
+	28,  // 69: apprunner.v1.AppRunnerService.DownloadStorageFile:input_type -> apprunner.v1.DownloadStorageFileRequest
+	30,  // 70: apprunner.v1.AppRunnerService.ListVMs:input_type -> apprunner.v1.ListVMsRequest
+	32,  // 71: apprunner.v1.AppRunnerService.GetVM:input_type -> apprunner.v1.GetVMRequest
+	34,  // 72: apprunner.v1.AppRunnerService.CreateVM:input_type -> apprunner.v1.CreateVMRequest
+	36,  // 73: apprunner.v1.AppRunnerService.CloneVM:input_type -> apprunner.v1.CloneVMRequest
+	38,  // 74: apprunner.v1.AppRunnerService.StartVM:input_type -> apprunner.v1.StartVMRequest
+	40,  // 75: apprunner.v1.AppRunnerService.StopVM:input_type -> apprunner.v1.StopVMRequest
+	42,  // 76: apprunner.v1.AppRunnerService.RebootVM:input_type -> apprunner.v1.RebootVMRequest
+	44,  // 77: apprunner.v1.AppRunnerService.UpdateVM:input_type -> apprunner.v1.UpdateVMRequest
+	46,  // 78: apprunner.v1.AppRunnerService.AddVMNIC:input_type -> apprunner.v1.AddVMNICRequest
+	48,  // 79: apprunner.v1.AppRunnerService.UpdateVMNIC:input_type -> apprunner.v1.UpdateVMNICRequest
+	50,  // 80: apprunner.v1.AppRunnerService.RemoveVMNIC:input_type -> apprunner.v1.RemoveVMNICRequest
+	52,  // 81: apprunner.v1.AppRunnerService.AddVMDisk:input_type -> apprunner.v1.AddVMDiskRequest
+	54,  // 82: apprunner.v1.AppRunnerService.RemoveVMDisk:input_type -> apprunner.v1.RemoveVMDiskRequest
+	56,  // 83: apprunner.v1.AppRunnerService.AddVMCDROM:input_type -> apprunner.v1.AddVMCDROMRequest
+	58,  // 84: apprunner.v1.AppRunnerService.UpdateVMCDROM:input_type -> apprunner.v1.UpdateVMCDROMRequest
+	60,  // 85: apprunner.v1.AppRunnerService.RemoveVMCDROM:input_type -> apprunner.v1.RemoveVMCDROMRequest
+	62,  // 86: apprunner.v1.AppRunnerService.ConfigureVMCloudInit:input_type -> apprunner.v1.ConfigureVMCloudInitRequest
+	64,  // 87: apprunner.v1.AppRunnerService.ConfigureVMIPMI:input_type -> apprunner.v1.ConfigureVMIPMIRequest
+	66,  // 88: apprunner.v1.AppRunnerService.DeleteVM:input_type -> apprunner.v1.DeleteVMRequest
+	77,  // 89: apprunner.v1.AppRunnerService.GetNetworkingStatus:input_type -> apprunner.v1.GetNetworkingStatusRequest
+	79,  // 90: apprunner.v1.AppRunnerService.ApplyNetworkChange:input_type -> apprunner.v1.ApplyNetworkChangeRequest
+	81,  // 91: apprunner.v1.AppRunnerService.ConfirmNetworkChange:input_type -> apprunner.v1.ConfirmNetworkChangeRequest
+	83,  // 92: apprunner.v1.AppRunnerService.RevertNetworkChange:input_type -> apprunner.v1.RevertNetworkChangeRequest
+	85,  // 93: apprunner.v1.AppRunnerService.ConfigureBridge:input_type -> apprunner.v1.ConfigureBridgeRequest
+	87,  // 94: apprunner.v1.AppRunnerService.ListBridgeLeases:input_type -> apprunner.v1.ListBridgeLeasesRequest
+	89,  // 95: apprunner.v1.AppRunnerService.ClearBridgeDHCPLeases:input_type -> apprunner.v1.ClearBridgeDHCPLeasesRequest
+	91,  // 96: apprunner.v1.AppRunnerService.DeleteBridgeDHCPLease:input_type -> apprunner.v1.DeleteBridgeDHCPLeaseRequest
+	93,  // 97: apprunner.v1.AppRunnerService.SetBridgeDHCPStaticLease:input_type -> apprunner.v1.SetBridgeDHCPStaticLeaseRequest
+	96,  // 98: apprunner.v1.AppRunnerService.ListCloudInitTemplates:input_type -> apprunner.v1.ListCloudInitTemplatesRequest
+	98,  // 99: apprunner.v1.AppRunnerService.CreateCloudInitTemplate:input_type -> apprunner.v1.CreateCloudInitTemplateRequest
+	100, // 100: apprunner.v1.AppRunnerService.UpdateCloudInitTemplate:input_type -> apprunner.v1.UpdateCloudInitTemplateRequest
+	102, // 101: apprunner.v1.AppRunnerService.DeleteCloudInitTemplate:input_type -> apprunner.v1.DeleteCloudInitTemplateRequest
+	18,  // 102: apprunner.v1.AppRunnerService.GetHostStatus:output_type -> apprunner.v1.GetHostStatusResponse
+	20,  // 103: apprunner.v1.AppRunnerService.ListISOs:output_type -> apprunner.v1.ListISOsResponse
+	23,  // 104: apprunner.v1.AppRunnerService.ListDiskImages:output_type -> apprunner.v1.ListDiskImagesResponse
+	27,  // 105: apprunner.v1.AppRunnerService.ListStorage:output_type -> apprunner.v1.ListStorageResponse
+	29,  // 106: apprunner.v1.AppRunnerService.DownloadStorageFile:output_type -> apprunner.v1.DownloadStorageFileResponse
+	31,  // 107: apprunner.v1.AppRunnerService.ListVMs:output_type -> apprunner.v1.ListVMsResponse
+	33,  // 108: apprunner.v1.AppRunnerService.GetVM:output_type -> apprunner.v1.GetVMResponse
+	35,  // 109: apprunner.v1.AppRunnerService.CreateVM:output_type -> apprunner.v1.CreateVMResponse
+	37,  // 110: apprunner.v1.AppRunnerService.CloneVM:output_type -> apprunner.v1.CloneVMResponse
+	39,  // 111: apprunner.v1.AppRunnerService.StartVM:output_type -> apprunner.v1.StartVMResponse
+	41,  // 112: apprunner.v1.AppRunnerService.StopVM:output_type -> apprunner.v1.StopVMResponse
+	43,  // 113: apprunner.v1.AppRunnerService.RebootVM:output_type -> apprunner.v1.RebootVMResponse
+	45,  // 114: apprunner.v1.AppRunnerService.UpdateVM:output_type -> apprunner.v1.UpdateVMResponse
+	47,  // 115: apprunner.v1.AppRunnerService.AddVMNIC:output_type -> apprunner.v1.AddVMNICResponse
+	49,  // 116: apprunner.v1.AppRunnerService.UpdateVMNIC:output_type -> apprunner.v1.UpdateVMNICResponse
+	51,  // 117: apprunner.v1.AppRunnerService.RemoveVMNIC:output_type -> apprunner.v1.RemoveVMNICResponse
+	53,  // 118: apprunner.v1.AppRunnerService.AddVMDisk:output_type -> apprunner.v1.AddVMDiskResponse
+	55,  // 119: apprunner.v1.AppRunnerService.RemoveVMDisk:output_type -> apprunner.v1.RemoveVMDiskResponse
+	57,  // 120: apprunner.v1.AppRunnerService.AddVMCDROM:output_type -> apprunner.v1.AddVMCDROMResponse
+	59,  // 121: apprunner.v1.AppRunnerService.UpdateVMCDROM:output_type -> apprunner.v1.UpdateVMCDROMResponse
+	61,  // 122: apprunner.v1.AppRunnerService.RemoveVMCDROM:output_type -> apprunner.v1.RemoveVMCDROMResponse
+	63,  // 123: apprunner.v1.AppRunnerService.ConfigureVMCloudInit:output_type -> apprunner.v1.ConfigureVMCloudInitResponse
+	65,  // 124: apprunner.v1.AppRunnerService.ConfigureVMIPMI:output_type -> apprunner.v1.ConfigureVMIPMIResponse
+	67,  // 125: apprunner.v1.AppRunnerService.DeleteVM:output_type -> apprunner.v1.DeleteVMResponse
+	78,  // 126: apprunner.v1.AppRunnerService.GetNetworkingStatus:output_type -> apprunner.v1.GetNetworkingStatusResponse
+	80,  // 127: apprunner.v1.AppRunnerService.ApplyNetworkChange:output_type -> apprunner.v1.ApplyNetworkChangeResponse
+	82,  // 128: apprunner.v1.AppRunnerService.ConfirmNetworkChange:output_type -> apprunner.v1.ConfirmNetworkChangeResponse
+	84,  // 129: apprunner.v1.AppRunnerService.RevertNetworkChange:output_type -> apprunner.v1.RevertNetworkChangeResponse
+	86,  // 130: apprunner.v1.AppRunnerService.ConfigureBridge:output_type -> apprunner.v1.ConfigureBridgeResponse
+	88,  // 131: apprunner.v1.AppRunnerService.ListBridgeLeases:output_type -> apprunner.v1.ListBridgeLeasesResponse
+	90,  // 132: apprunner.v1.AppRunnerService.ClearBridgeDHCPLeases:output_type -> apprunner.v1.ClearBridgeDHCPLeasesResponse
+	92,  // 133: apprunner.v1.AppRunnerService.DeleteBridgeDHCPLease:output_type -> apprunner.v1.DeleteBridgeDHCPLeaseResponse
+	94,  // 134: apprunner.v1.AppRunnerService.SetBridgeDHCPStaticLease:output_type -> apprunner.v1.SetBridgeDHCPStaticLeaseResponse
+	97,  // 135: apprunner.v1.AppRunnerService.ListCloudInitTemplates:output_type -> apprunner.v1.ListCloudInitTemplatesResponse
+	99,  // 136: apprunner.v1.AppRunnerService.CreateCloudInitTemplate:output_type -> apprunner.v1.CreateCloudInitTemplateResponse
+	101, // 137: apprunner.v1.AppRunnerService.UpdateCloudInitTemplate:output_type -> apprunner.v1.UpdateCloudInitTemplateResponse
+	103, // 138: apprunner.v1.AppRunnerService.DeleteCloudInitTemplate:output_type -> apprunner.v1.DeleteCloudInitTemplateResponse
+	102, // [102:139] is the sub-list for method output_type
+	65,  // [65:102] is the sub-list for method input_type
+	65,  // [65:65] is the sub-list for extension type_name
+	65,  // [65:65] is the sub-list for extension extendee
+	0,   // [0:65] is the sub-list for field type_name
 }
 
 func init() { file_apprunner_v1_app_runner_proto_init() }
@@ -6441,13 +6558,14 @@ func file_apprunner_v1_app_runner_proto_init() {
 	if File_apprunner_v1_app_runner_proto != nil {
 		return
 	}
+	file_apprunner_v1_app_runner_proto_msgTypes[38].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_apprunner_v1_app_runner_proto_rawDesc), len(file_apprunner_v1_app_runner_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   96,
+			NumMessages:   98,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

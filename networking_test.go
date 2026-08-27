@@ -1,6 +1,7 @@
 package apprunner
 
 import (
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -261,6 +262,38 @@ func TestNetworkingRejectsAutoDNSWhenLegacyVMNameIsInvalid(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Auto DNS was enabled for a bridge with an invalid legacy VM name")
+	}
+}
+
+func TestNetworkManagerReportsValidationAndLookupErrorsDistinctly(t *testing.T) {
+	vms, _, settings := newTestVMManager(t)
+	dhcp, err := newDHCPManager(settings.StateDir, &fakeDHCPBridgeProvider{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeNetworkProvider{status: networkingStatus{Bridges: []networkBridgeInfo{{Name: "br0"}}}}
+	manager, err := newNetworkManager(networkManagerOptions{Provider: provider, VMs: vms, DHCP: dhcp, StateDirectory: settings.StateDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fieldErr *fieldError
+	if err := manager.ConfigureBridgeSettings("br0", "", true, "not-a-cidr", false, bridgeDNSConfig{}); !errors.As(err, &fieldErr) || fieldErr.field != "cidr" {
+		t.Fatalf("invalid CIDR = %v, want a cidr field error", err)
+	}
+	if err := manager.ConfigureBridgeSettings("missing", "", true, defaultBridgeDHCPCIDR, false, bridgeDNSConfig{}); !errors.Is(err, errBridgeNotFound) {
+		t.Fatalf("missing bridge = %v, want errBridgeNotFound", err)
+	}
+	if err := manager.Confirm("no-such-change"); !errors.Is(err, errPendingChangeNotFound) {
+		t.Fatalf("unknown change = %v, want errPendingChangeNotFound", err)
+	}
+	if _, err := manager.Leases("br0"); !errors.Is(err, errBridgeNotFound) {
+		t.Fatalf("leases without DHCP = %v, want errBridgeNotFound", err)
+	}
+	if err := manager.ConfigureBridgeSettings("br0", "", true, defaultBridgeDHCPCIDR, false, bridgeDNSConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	if leases, err := manager.Leases("br0"); err != nil || len(leases) != 0 {
+		t.Fatalf("leases = %#v, %v", leases, err)
 	}
 }
 

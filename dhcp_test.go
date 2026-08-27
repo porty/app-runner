@@ -695,3 +695,23 @@ func TestDHCPShutdownClosesListenersButKeepsNAT(t *testing.T) {
 		t.Fatalf("shutdown tore down NAT that running guests still need: running=%v stopped=%v", nat.Running("br0"), nat.stopped)
 	}
 }
+
+func TestDHCPAddressesListsActiveLeasesForAMAC(t *testing.T) {
+	manager, err := newDHCPManager(t.TempDir(), &fakeDHCPBridgeProvider{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
+	manager.now = func() time.Time { return now }
+	manager.state.Leases["br0"] = map[string]dhcpLease{
+		"active":  {HardwareAddress: "52:54:00:00:00:02", Address: "192.168.100.51", ExpiresAt: now.Add(time.Hour)},
+		"expired": {HardwareAddress: "52:54:00:00:00:02", Address: "192.168.100.52", ExpiresAt: now.Add(-time.Hour)},
+		"other":   {HardwareAddress: "52:54:00:00:00:03", Address: "192.168.100.53", ExpiresAt: now.Add(time.Hour)},
+	}
+	if got := manager.Addresses("br0", "52:54:00:00:00:02"); len(got) != 1 || got[0] != "192.168.100.51" {
+		t.Fatalf("Addresses = %v", got)
+	}
+	if got := manager.Addresses("br1", "52:54:00:00:00:02"); len(got) != 0 {
+		t.Fatalf("Addresses on another bridge = %v", got)
+	}
+}

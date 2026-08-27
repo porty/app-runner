@@ -40,23 +40,23 @@ func RunServer(args []string, frontend fs.FS) error {
 	}
 
 	networkProvider := newLinuxNetworkProvider()
-	manager, err := newVMManager(vmManagerOptions{
-		Settings: settings, Store: newJSONVMStore(settings.StateDir), Hypervisor: newQEMUHypervisor(settings),
-		Capabilities: capabilities, BridgeCapability: networkProvider.BridgeCapability,
-	})
-	if err != nil {
-		return err
-	}
-	templates, err := newCloudInitTemplateManager(newJSONCloudInitTemplateStore(settings.StateDir))
-	if err != nil {
-		return err
-	}
 	nat, err := newNATManager(settings.StateDir)
 	if err != nil {
 		return err
 	}
 	dns := newDNSManager()
 	dhcp, err := newDHCPManager(settings.StateDir, networkProvider, nat, dns)
+	if err != nil {
+		return err
+	}
+	manager, err := newVMManager(vmManagerOptions{
+		Settings: settings, Store: newJSONVMStore(settings.StateDir), Hypervisor: newQEMUHypervisor(settings),
+		Capabilities: capabilities, BridgeCapability: networkProvider.BridgeCapability, Addresses: dhcp.Addresses,
+	})
+	if err != nil {
+		return err
+	}
+	templates, err := newCloudInitTemplateManager(newJSONCloudInitTemplateStore(settings.StateDir))
 	if err != nil {
 		return err
 	}
