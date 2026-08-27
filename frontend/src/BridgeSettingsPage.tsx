@@ -28,7 +28,7 @@ import { Link, useParams } from 'react-router-dom'
 
 import {
   clearBridgeDHCPLeases,
-  configureBridgeDHCP,
+  configureBridge,
   deleteBridgeDHCPLease,
   getNetworkingStatus,
   setBridgeDHCPStaticLease,
@@ -126,10 +126,10 @@ export default function BridgeSettingsPage({ refreshInterval }: { refreshInterva
     }
   }
 
-  const save = () => run(() => configureBridgeDHCP({
+  const save = () => run(() => configureBridge({
     bridge_name: bridgeName,
     description: description.trim(),
-    enabled,
+    dhcp_enabled: enabled,
     cidr: cidr.trim(),
     nat_enabled: enabled && natEnabled,
     dns_enabled: enabled && dnsEnabled,

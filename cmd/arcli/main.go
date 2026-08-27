@@ -719,8 +719,8 @@ func vmID(ctx context.Context, c apprunnerv1.AppRunnerService, reference string)
 // addressPollInterval is how often "vm address --wait" re-reads the leases.
 var addressPollInterval = 2 * time.Second
 
-// vmAddress prints the managed DHCP leases held by a bridged VM, optionally
-// waiting for the guest to obtain one.
+// vmAddress prints the managed DHCP addresses held by a VM's bridged
+// interfaces, optionally waiting for a guest to obtain one.
 func vmAddress(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	f := flags("vm address")
 	wait := f.Duration("wait", 0, "wait up to this long for a DHCP lease")
@@ -734,28 +734,21 @@ func vmAddress(ctx context.Context, c apprunnerv1.AppRunnerService, args []strin
 	if e != nil {
 		return e
 	}
-	var bridged []*apprunnerv1.VMNIC
-	for _, nic := range vm.GetNics() {
-		if nic.GetMode() == apprunnerv1.NetworkMode_NETWORK_MODE_BRIDGE {
-			bridged = append(bridged, nic)
-		}
-	}
-	if len(bridged) == 0 {
-		return fmt.Errorf("virtual machine %s has no bridged network interface; the host does not track its addresses", vm.GetName())
-	}
 	deadline := time.Now().Add(*wait)
 	for {
-		var matched []*apprunnerv1.DHCPLease
-		for _, nic := range bridged {
-			leases, e := bridgeLeases(ctx, c, nic.GetBridgeName())
-			if e != nil {
-				return e
+		var bridged []*apprunnerv1.VMNIC
+		var matched []*vmAddressRow
+		for _, nic := range vm.GetNics() {
+			if nic.GetMode() != apprunnerv1.NetworkMode_NETWORK_MODE_BRIDGE {
+				continue
 			}
-			for _, lease := range leases {
-				if strings.EqualFold(lease.GetHardwareAddress(), nic.GetMacAddress()) {
-					matched = append(matched, lease)
-				}
+			bridged = append(bridged, nic)
+			for _, address := range nic.GetAddresses() {
+				matched = append(matched, &vmAddressRow{NIC: nic.GetId(), Bridge: nic.GetBridgeName(), MAC: nic.GetMacAddress(), Address: address})
 			}
+		}
+		if len(bridged) == 0 {
+			return fmt.Errorf("virtual machine %s has no bridged network interface; the host does not track its addresses", vm.GetName())
 		}
 		if len(matched) > 0 {
 			return write(output, matched)
@@ -764,20 +757,27 @@ func vmAddress(ctx context.Context, c apprunnerv1.AppRunnerService, args []strin
 			return fmt.Errorf("virtual machine %s holds no DHCP lease on its bridged interfaces", vm.GetName())
 		}
 		time.Sleep(addressPollInterval)
+		r, e := c.GetVM(ctx, &apprunnerv1.GetVMRequest{Id: vm.GetId()})
+		if e != nil {
+			return e
+		}
+		vm = r.GetVirtualMachine()
 	}
 }
 
+type vmAddressRow struct {
+	NIC     string `json:"nic_id"`
+	Bridge  string `json:"bridge_name"`
+	MAC     string `json:"mac_address"`
+	Address string `json:"address"`
+}
+
 func bridgeLeases(ctx context.Context, c apprunnerv1.AppRunnerService, bridge string) ([]*apprunnerv1.DHCPLease, error) {
-	r, err := c.GetNetworkingStatus(ctx, &apprunnerv1.GetNetworkingStatusRequest{})
+	r, err := c.ListBridgeLeases(ctx, &apprunnerv1.ListBridgeLeasesRequest{BridgeName: bridge})
 	if err != nil {
 		return nil, err
 	}
-	for _, candidate := range r.GetStatus().GetBridges() {
-		if candidate.GetName() == bridge {
-			return candidate.GetDhcp().GetLeases(), nil
-		}
-	}
-	return nil, fmt.Errorf("bridge %q was not found", bridge)
+	return r.GetLeases(), nil
 }
 func updateVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	f := flags("vm update")
@@ -791,22 +791,23 @@ func updateVM(ctx context.Context, c apprunnerv1.AppRunnerService, args []string
 	if e := require(f.Args(), 1, "usage: arcli vm update VM [--name NAME] [--description TEXT] [--cpus N] [--memory MIB]"); e != nil {
 		return e
 	}
-	// UpdateVM replaces every field, so unspecified flags keep current values.
-	current, e := lookupVM(ctx, c, f.Args()[0])
+	id, e := vmID(ctx, c, f.Args()[0])
 	if e != nil {
 		return e
 	}
-	request := &apprunnerv1.UpdateVMRequest{Id: current.GetId(), Name: current.GetName(), Description: current.GetDescription(), Cpus: current.GetCpus(), MemoryMib: current.GetMemoryMib()}
+	// UpdateVM only changes the fields that are present, so just the given
+	// flags are sent.
+	request := &apprunnerv1.UpdateVMRequest{Id: id}
 	f.Visit(func(flag *flag.Flag) {
 		switch flag.Name {
 		case "name":
-			request.Name = *name
+			request.Name = proto.String(*name)
 		case "description":
-			request.Description = *description
+			request.Description = proto.String(*description)
 		case "cpus":
-			request.Cpus = uint32(*cpus)
+			request.Cpus = proto.Uint32(uint32(*cpus))
 		case "memory":
-			request.MemoryMib = uint32(*memory)
+			request.MemoryMib = proto.Uint32(uint32(*memory))
 		}
 	})
 	r, e := c.UpdateVM(ctx, request)
@@ -1019,7 +1020,7 @@ func vmIPMI(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, 
 
 func network(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) == 0 || args[0] == "help" {
-		_, err := fmt.Fprintln(output, "usage: arcli net status|leases|apply|confirm|revert|dhcp")
+		_, err := fmt.Fprintln(output, "usage: arcli net status|leases|apply|confirm|revert|bridge|dhcp")
 		return err
 	}
 	switch args[0] {
@@ -1072,37 +1073,47 @@ func network(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 			return e
 		}
 		return write(output, leases)
+	case "bridge":
+		return networkBridge(ctx, c, args[1:], output)
 	case "dhcp":
 		return networkDHCP(ctx, c, args[1:], output)
 	default:
 		return fmt.Errorf("unknown network operation %q", args[0])
 	}
 }
+func networkBridge(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
+	usage := "usage: arcli net bridge configure BRIDGE [--description TEXT] [--dhcp] [--cidr CIDR] [--nat] [--dns] [--dns-forwarders A,B] [--auto-dns] [--dns-suffix SUFFIX]"
+	if len(args) == 0 || args[0] != "configure" {
+		return errors.New(usage)
+	}
+	f := flags("net bridge configure")
+	description := f.String("description", "", "description")
+	dhcp := f.Bool("dhcp", false, "enable managed DHCP on the bridge")
+	cidr := f.String("cidr", "", "DHCP subnet CIDR (default 192.168.100.0/24)")
+	nat := f.Bool("nat", false, "enable NAT and outbound routing for the DHCP range")
+	dns := f.Bool("dns", false, "enable the managed forwarding DNS server")
+	forwarders := f.String("dns-forwarders", "", "comma-separated upstream DNS servers")
+	autoDNS := f.Bool("auto-dns", false, "publish A records for VMs on the bridge under --dns-suffix")
+	suffix := f.String("dns-suffix", "", "Auto DNS suffix (default BRIDGE.internal)")
+	if e := parseFlags(f, args[1:]); e != nil {
+		return e
+	}
+	if e := require(f.Args(), 1, usage); e != nil {
+		return e
+	}
+	r, e := c.ConfigureBridge(ctx, &apprunnerv1.ConfigureBridgeRequest{
+		BridgeName: f.Args()[0], Description: *description, DhcpEnabled: *dhcp, Cidr: *cidr, NatEnabled: *nat,
+		DnsEnabled: *dns, DnsForwarders: split(*forwarders), AutoDns: *autoDNS, DnsSuffix: *suffix,
+	})
+	if e != nil {
+		return e
+	}
+	return write(output, r.GetStatus())
+}
+
 func networkDHCP(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
 	if len(args) == 0 {
-		return errors.New("usage: arcli net dhcp configure|clear-leases|delete-lease|set-static")
-	}
-	if args[0] == "configure" {
-		f := flags("net dhcp configure")
-		enabled := f.Bool("enabled", true, "enable DHCP")
-		cidr := f.String("cidr", "", "subnet CIDR")
-		nat := f.Bool("nat", true, "enable NAT")
-		dns := f.Bool("dns", true, "enable DNS")
-		forwarders := f.String("dns-forwarders", "", "comma-separated DNS forwarders")
-		autoDNS := f.Bool("auto-dns", true, "use host resolvers")
-		suffix := f.String("dns-suffix", "", "DNS suffix")
-		description := f.String("description", "", "description")
-		if e := parseFlags(f, args[1:]); e != nil {
-			return e
-		}
-		if e := require(f.Args(), 1, "bridge name is required"); e != nil {
-			return e
-		}
-		r, e := c.ConfigureBridgeDHCP(ctx, &apprunnerv1.ConfigureBridgeDHCPRequest{BridgeName: f.Args()[0], Enabled: *enabled, Cidr: *cidr, NatEnabled: *nat, DnsEnabled: *dns, DnsForwarders: split(*forwarders), AutoDns: *autoDNS, DnsSuffix: *suffix, Description: *description})
-		if e != nil {
-			return e
-		}
-		return write(output, r.GetStatus())
+		return errors.New("usage: arcli net dhcp clear-leases|delete-lease|set-static")
 	}
 	if args[0] == "clear-leases" {
 		if e := require(args[1:], 1, "bridge name is required"); e != nil {
@@ -1134,7 +1145,7 @@ func networkDHCP(ctx context.Context, c apprunnerv1.AppRunnerService, args []str
 		}
 		return write(output, r.GetStatus())
 	}
-	return errors.New("usage: arcli net dhcp configure|clear-leases|delete-lease|set-static")
+	return errors.New("usage: arcli net dhcp clear-leases|delete-lease|set-static")
 }
 
 func cloudInit(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {

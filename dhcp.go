@@ -20,6 +20,8 @@ import (
 	"github.com/insomniacslk/dhcp/dhcpv4/server4"
 )
 
+var errLeaseNotFound = errors.New("DHCP lease not found")
+
 const (
 	defaultBridgeDHCPCIDR = "192.168.100.0/24"
 	dhcpPoolStartOffset   = uint32(50)
@@ -131,17 +133,17 @@ func newInProcessDHCPServer(bridge string, handler server4.Handler) (managedDHCP
 
 func (m *dhcpManager) Configure(bridge string, enabled bool, cidr string, natEnabled bool, dnsConfig bridgeDNSConfig) error {
 	if err := validateInterfaceName(bridge); err != nil {
-		return fmt.Errorf("bridge name %w", err)
+		return &fieldError{field: "bridge_name", message: err.Error()}
 	}
 	parsed := dhcpRange{}
 	if natEnabled && !enabled {
-		return errors.New("NAT requires managed DHCP to be enabled")
+		return &fieldError{field: "nat_enabled", message: "NAT requires managed DHCP to be enabled"}
 	}
 	if dnsConfig.Enabled && !enabled {
-		return errors.New("DNS requires managed DHCP to be enabled")
+		return &fieldError{field: "dns_enabled", message: "DNS requires managed DHCP to be enabled"}
 	}
 	if dnsConfig.Auto && !dnsConfig.Enabled {
-		return errors.New("Auto DNS requires managed DNS to be enabled")
+		return &fieldError{field: "auto_dns", message: "Auto DNS requires managed DNS to be enabled"}
 	}
 	if enabled {
 		if strings.TrimSpace(cidr) == "" {
@@ -150,7 +152,7 @@ func (m *dhcpManager) Configure(bridge string, enabled bool, cidr string, natEna
 		var err error
 		parsed, err = parseDHCPRange(cidr)
 		if err != nil {
-			return err
+			return &fieldError{field: "cidr", message: err.Error()}
 		}
 		if err := m.provider.ValidateBridgeDHCP(bridge, parsed); err != nil {
 			return err
@@ -158,7 +160,7 @@ func (m *dhcpManager) Configure(bridge string, enabled bool, cidr string, natEna
 		if dnsConfig.Enabled {
 			forwarders, err := normalizeDNSForwarders(dnsConfig.Forwarders, parsed.Server)
 			if err != nil {
-				return err
+				return &fieldError{field: "dns_forwarders", message: err.Error()}
 			}
 			dnsConfig.Forwarders = forwarders
 			if dnsConfig.Auto {
@@ -167,7 +169,7 @@ func (m *dhcpManager) Configure(bridge string, enabled bool, cidr string, natEna
 				}
 				dnsConfig.Suffix, err = normalizeDNSSuffix(dnsConfig.Suffix)
 				if err != nil {
-					return err
+					return &fieldError{field: "dns_suffix", message: err.Error()}
 				}
 			} else {
 				dnsConfig.Suffix = ""
@@ -273,6 +275,22 @@ func (m *dhcpManager) Status(bridge string) bridgeDHCPStatus {
 		return status.Leases[i].HardwareAddress < status.Leases[j].HardwareAddress
 	})
 	return status
+}
+
+// Addresses lists the active managed-DHCP leases a MAC address holds on a
+// bridge.
+func (m *dhcpManager) Addresses(bridge, macAddress string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now()
+	var result []string
+	for _, lease := range m.state.Leases[bridge] {
+		if strings.EqualFold(lease.HardwareAddress, macAddress) && (lease.Static || lease.ExpiresAt.After(now)) {
+			result = append(result, lease.Address)
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func (m *dhcpManager) suggestCIDRLocked(bridge string) string {
@@ -820,7 +838,7 @@ func (m *dhcpManager) DeleteLease(bridge, hardwareAddress string) error {
 		}
 	}
 	if !deleted {
-		return fmt.Errorf("no DHCP lease found for hardware address %s", hardwareAddress)
+		return fmt.Errorf("%w: no DHCP lease for hardware address %s", errLeaseNotFound, hardwareAddress)
 	}
 	return m.saveLocked()
 }
@@ -830,7 +848,7 @@ func (m *dhcpManager) SetStaticLease(bridge, hardwareAddress, addressValue strin
 	defer m.mu.Unlock()
 	config, found := m.state.Bridges[bridge]
 	if !found || !config.Enabled {
-		return fmt.Errorf("DHCP is not enabled on bridge %s", bridge)
+		return fmt.Errorf("%w: DHCP is not enabled on bridge %s", errBridgeNotFound, bridge)
 	}
 	network, err := parseDHCPRange(config.CIDR)
 	if err != nil {
@@ -838,11 +856,11 @@ func (m *dhcpManager) SetStaticLease(bridge, hardwareAddress, addressValue strin
 	}
 	hardwareAddress = strings.ToLower(strings.TrimSpace(hardwareAddress))
 	if _, err := net.ParseMAC(hardwareAddress); err != nil {
-		return fmt.Errorf("hardware address must be a valid MAC address")
+		return &fieldError{field: "hardware_address", message: "must be a valid MAC address"}
 	}
 	address, err := netip.ParseAddr(strings.TrimSpace(addressValue))
 	if err != nil || !addressInStaticDHCPRange(network, address) {
-		return fmt.Errorf("static address must be within %s before the DHCP pool (%s)", network.Prefix, network.PoolStart)
+		return &fieldError{field: "address", message: fmt.Sprintf("must be within %s before the DHCP pool (%s)", network.Prefix, network.PoolStart)}
 	}
 	leases := m.state.Leases[bridge]
 	if leases == nil {

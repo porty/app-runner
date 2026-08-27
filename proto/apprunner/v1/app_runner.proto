@@ -33,7 +33,8 @@ service AppRunnerService {
   rpc ApplyNetworkChange(ApplyNetworkChangeRequest) returns (ApplyNetworkChangeResponse);
   rpc ConfirmNetworkChange(ConfirmNetworkChangeRequest) returns (ConfirmNetworkChangeResponse);
   rpc RevertNetworkChange(RevertNetworkChangeRequest) returns (RevertNetworkChangeResponse);
-  rpc ConfigureBridgeDHCP(ConfigureBridgeDHCPRequest) returns (ConfigureBridgeDHCPResponse);
+  rpc ConfigureBridge(ConfigureBridgeRequest) returns (ConfigureBridgeResponse);
+  rpc ListBridgeLeases(ListBridgeLeasesRequest) returns (ListBridgeLeasesResponse);
   rpc ClearBridgeDHCPLeases(ClearBridgeDHCPLeasesRequest) returns (ClearBridgeDHCPLeasesResponse);
   rpc DeleteBridgeDHCPLease(DeleteBridgeDHCPLeaseRequest) returns (DeleteBridgeDHCPLeaseResponse);
   rpc SetBridgeDHCPStaticLease(SetBridgeDHCPStaticLeaseRequest) returns (SetBridgeDHCPStaticLeaseResponse);
@@ -96,11 +97,14 @@ message VMCDROM {
   string iso_name = 2;
 }
 
+// addresses lists the IPv4 addresses currently leased to the interface by
+// App Runner's managed DHCP on its bridge; NAT interfaces have none.
 message VMNIC {
   string id = 1;
   NetworkMode mode = 2;
   string bridge_name = 3;
   string mac_address = 4;
+  repeated string addresses = 5;
 }
 
 message VMDiskSpec {
@@ -274,12 +278,13 @@ message RebootVMResponse {
   VirtualMachine virtual_machine = 1;
 }
 
+// Only fields that are present are changed.
 message UpdateVMRequest {
   string id = 1;
-  string name = 2;
-  string description = 3;
-  uint32 cpus = 4;
-  uint32 memory_mib = 5;
+  optional string name = 2;
+  optional string description = 3;
+  optional uint32 cpus = 4;
+  optional uint32 memory_mib = 5;
 }
 
 message UpdateVMResponse {
@@ -534,20 +539,30 @@ message RevertNetworkChangeResponse {
   NetworkingStatus status = 1;
 }
 
-message ConfigureBridgeDHCPRequest {
+// ConfigureBridge sets a bridge's description and its managed guest
+// network services (DHCP, and NAT and DNS on top of it).
+message ConfigureBridgeRequest {
   string bridge_name = 1;
-  bool enabled = 2;
-  string cidr = 3;
-  bool nat_enabled = 4;
-  bool dns_enabled = 5;
-  repeated string dns_forwarders = 6;
-  bool auto_dns = 7;
-  string dns_suffix = 8;
-  string description = 9;
+  string description = 2;
+  bool dhcp_enabled = 3;
+  string cidr = 4;
+  bool nat_enabled = 5;
+  bool dns_enabled = 6;
+  repeated string dns_forwarders = 7;
+  bool auto_dns = 8;
+  string dns_suffix = 9;
 }
 
-message ConfigureBridgeDHCPResponse {
+message ConfigureBridgeResponse {
   NetworkingStatus status = 1;
+}
+
+message ListBridgeLeasesRequest {
+  string bridge_name = 1;
+}
+
+message ListBridgeLeasesResponse {
+  repeated DHCPLease leases = 1;
 }
 
 message ClearBridgeDHCPLeasesRequest {

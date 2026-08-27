@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { addVMNIC, applyNetworkChange, cloneVM, configureBridgeDHCP, configureVMCloudInit, configureVMIPMI, createCloudInitTemplate, createVM, deleteCloudInitTemplate, downloadStorageFile, getNetworkingStatus, listCloudInitTemplates, listDiskImages, listStorage, listVMs, rebootVM, updateCloudInitTemplate, uploadStorageFiles } from './api'
+import { addVMNIC, applyNetworkChange, cloneVM, configureBridge, configureVMCloudInit, configureVMIPMI, createCloudInitTemplate, createVM, deleteCloudInitTemplate, downloadStorageFile, getNetworkingStatus, listCloudInitTemplates, listDiskImages, listStorage, listVMs, rebootVM, updateCloudInitTemplate, uploadStorageFiles } from './api'
 
 describe('Twirp API client', () => {
   afterEach(() => {
@@ -184,7 +184,7 @@ describe('Twirp API client', () => {
     )
   })
 
-  it('configures DHCP for a specific bridge', async () => {
+  it('configures a bridge and its guest network services', async () => {
     const status = {
       user: {
         username: 'app-runner', uid: 1000, is_root: false, has_cap_net_admin: true,
@@ -202,12 +202,12 @@ describe('Twirp API client', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const configuration = {
-      bridge_name: 'br0', description: 'VM network', enabled: true, cidr: '192.168.100.0/24', nat_enabled: true,
+      bridge_name: 'br0', description: 'VM network', dhcp_enabled: true, cidr: '192.168.100.0/24', nat_enabled: true,
       dns_enabled: true, dns_forwarders: ['1.1.1.1', '9.9.9.9'], auto_dns: true, dns_suffix: 'br0.internal',
     }
-    await expect(configureBridgeDHCP(configuration)).resolves.toEqual(status)
+    await expect(configureBridge(configuration)).resolves.toEqual(status)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/twirp/apprunner.v1.AppRunnerService/ConfigureBridgeDHCP',
+      '/twirp/apprunner.v1.AppRunnerService/ConfigureBridge',
       expect.objectContaining({
         body: JSON.stringify(configuration),
       }),

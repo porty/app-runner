@@ -60,6 +60,24 @@ const macAddressPattern = /^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/
 
 type SettingsTab = 'general' | 'storage' | 'cloud-init' | 'networking'
 
+interface GeneralSettings {
+  id: string
+  name: string
+  description: string
+  cpus: number
+  memory_mib: number
+}
+
+// Only the general fields that differ from the VM are sent.
+function generalUpdate(general: GeneralSettings, vm: VirtualMachine): UpdateVMRequest {
+  const request: UpdateVMRequest = { id: general.id }
+  if (general.name.trim() !== vm.name) request.name = general.name.trim()
+  if (general.description.trim() !== (vm.description ?? '')) request.description = general.description.trim()
+  if (general.cpus !== vm.cpus) request.cpus = general.cpus
+  if (general.memory_mib !== vm.memory_mib) request.memory_mib = general.memory_mib
+  return request
+}
+
 function nicSpecValid(spec: VMNICSpec): boolean {
   if (spec.mode === 'NETWORK_MODE_BRIDGE' && !spec.bridge_name) return false
   if (spec.mac_address && !(macAddressPattern.test(spec.mac_address) && (Number.parseInt(spec.mac_address.slice(0, 2), 16) & 1) === 0)) return false
@@ -73,7 +91,7 @@ export default function VirtualMachineSettingsPage() {
   const [diskImages, setDiskImages] = useState<DiskImage[]>([])
   const [networking, setNetworking] = useState<NetworkingStatus | null>(null)
   const [virtualMachines, setVirtualMachines] = useState<VirtualMachine[]>([])
-  const [general, setGeneral] = useState<UpdateVMRequest | null>(null)
+  const [general, setGeneral] = useState<GeneralSettings | null>(null)
   const [ipmi, setIPMI] = useState<VMIPMIConfiguration | null>(null)
   const [cloudInit, setCloudInit] = useState<VMCloudInitConfiguration | null>(null)
   const [cloudInitTemplates, setCloudInitTemplates] = useState<CloudInitTemplate[]>([])
@@ -177,7 +195,7 @@ export default function VirtualMachineSettingsPage() {
     setBusy(true)
     setError('')
     try {
-      if (generalDirty) await updateVM({ ...general, name: general.name.trim(), description: general.description.trim() })
+      if (generalDirty) await updateVM(generalUpdate(general, vm))
       if (ipmiDirty) await configureVMIPMI(ipmi)
       if (cloudInitDirty) await configureVMCloudInit(cloudInit)
       applyLoadedVM(await getVM(id), bridges, virtualMachines)

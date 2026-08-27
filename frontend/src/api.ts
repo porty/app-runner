@@ -47,6 +47,7 @@ export interface VMNIC {
   mode: NetworkMode
   bridge_name?: string
   mac_address: string
+  addresses?: string[]
 }
 
 export interface VMDiskSpec {
@@ -69,12 +70,13 @@ export interface VMCloudInit {
   user_data: string
 }
 
+// Only the fields that are present are changed.
 export interface UpdateVMRequest {
   id: string
-  name: string
-  description: string
-  cpus: number
-  memory_mib: number
+  name?: string
+  description?: string
+  cpus?: number
+  memory_mib?: number
 }
 
 export interface VMIPMIStatus {
@@ -229,10 +231,10 @@ export interface DHCPLease {
   is_static: boolean
 }
 
-export interface BridgeDHCPConfiguration {
+export interface BridgeConfiguration {
   bridge_name: string
   description: string
-  enabled: boolean
+  dhcp_enabled: boolean
   cidr: string
   nat_enabled: boolean
   dns_enabled: boolean
@@ -491,9 +493,14 @@ export async function revertNetworkChange(id: string): Promise<NetworkingStatus>
   return response.status
 }
 
-export async function configureBridgeDHCP(configuration: BridgeDHCPConfiguration): Promise<NetworkingStatus> {
-  const response = await callTwirp<{ status: NetworkingStatus }>('ConfigureBridgeDHCP', configuration)
+export async function configureBridge(configuration: BridgeConfiguration): Promise<NetworkingStatus> {
+  const response = await callTwirp<{ status: NetworkingStatus }>('ConfigureBridge', configuration)
   return response.status
+}
+
+export async function listBridgeLeases(bridgeName: string): Promise<DHCPLease[]> {
+  const response = await callTwirp<{ leases?: DHCPLease[] }>('ListBridgeLeases', { bridge_name: bridgeName })
+  return response.leases ?? []
 }
 
 export async function clearBridgeDHCPLeases(bridgeName: string): Promise<NetworkingStatus> {

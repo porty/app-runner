@@ -137,7 +137,9 @@ func (s *appRunnerService) RebootVM(_ context.Context, request *apprunnerv1.Rebo
 }
 
 func (s *appRunnerService) UpdateVM(_ context.Context, request *apprunnerv1.UpdateVMRequest) (*apprunnerv1.UpdateVMResponse, error) {
-	vm, err := s.manager.Update(request.GetId(), request.GetName(), request.GetDescription(), request.GetCpus(), request.GetMemoryMib())
+	vm, err := s.manager.Update(request.GetId(), vmUpdate{
+		Name: request.Name, Description: request.Description, CPUs: request.Cpus, MemoryMiB: request.MemoryMib,
+	})
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -297,14 +299,14 @@ func (s *appRunnerService) ApplyNetworkChange(ctx context.Context, request *appr
 	}
 	pending, err := s.networking.Apply(ctx, change)
 	if err != nil {
-		return nil, twirp.NewError(twirp.FailedPrecondition, err.Error())
+		return nil, networkRPCError(err)
 	}
 	return &apprunnerv1.ApplyNetworkChangeResponse{PendingChange: pendingNetworkChangeToProto(&pending)}, nil
 }
 
 func (s *appRunnerService) ConfirmNetworkChange(ctx context.Context, request *apprunnerv1.ConfirmNetworkChangeRequest) (*apprunnerv1.ConfirmNetworkChangeResponse, error) {
 	if err := s.networking.Confirm(request.GetId()); err != nil {
-		return nil, twirp.NotFoundError(err.Error())
+		return nil, networkRPCError(err)
 	}
 	status, err := s.networking.Status()
 	if err != nil {
@@ -315,7 +317,7 @@ func (s *appRunnerService) ConfirmNetworkChange(ctx context.Context, request *ap
 
 func (s *appRunnerService) RevertNetworkChange(ctx context.Context, request *apprunnerv1.RevertNetworkChangeRequest) (*apprunnerv1.RevertNetworkChangeResponse, error) {
 	if err := s.networking.Revert(request.GetId()); err != nil {
-		return nil, twirp.NewError(twirp.FailedPrecondition, err.Error())
+		return nil, networkRPCError(err)
 	}
 	status, err := s.networking.Status()
 	if err != nil {
@@ -324,21 +326,33 @@ func (s *appRunnerService) RevertNetworkChange(ctx context.Context, request *app
 	return &apprunnerv1.RevertNetworkChangeResponse{Status: networkingStatusToProto(status)}, nil
 }
 
-func (s *appRunnerService) ConfigureBridgeDHCP(ctx context.Context, request *apprunnerv1.ConfigureBridgeDHCPRequest) (*apprunnerv1.ConfigureBridgeDHCPResponse, error) {
+func (s *appRunnerService) ConfigureBridge(ctx context.Context, request *apprunnerv1.ConfigureBridgeRequest) (*apprunnerv1.ConfigureBridgeResponse, error) {
 	if err := s.networking.ConfigureBridgeSettings(
-		request.GetBridgeName(), request.GetDescription(), request.GetEnabled(), request.GetCidr(), request.GetNatEnabled(),
+		request.GetBridgeName(), request.GetDescription(), request.GetDhcpEnabled(), request.GetCidr(), request.GetNatEnabled(),
 		bridgeDNSConfig{
 			Enabled: request.GetDnsEnabled(), Forwarders: request.GetDnsForwarders(),
 			Auto: request.GetAutoDns(), Suffix: request.GetDnsSuffix(),
 		},
 	); err != nil {
-		return nil, twirp.NewError(twirp.FailedPrecondition, err.Error())
+		return nil, networkRPCError(err)
 	}
 	status, err := s.networking.Status()
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return &apprunnerv1.ConfigureBridgeDHCPResponse{Status: networkingStatusToProto(status)}, nil
+	return &apprunnerv1.ConfigureBridgeResponse{Status: networkingStatusToProto(status)}, nil
+}
+
+func (s *appRunnerService) ListBridgeLeases(_ context.Context, request *apprunnerv1.ListBridgeLeasesRequest) (*apprunnerv1.ListBridgeLeasesResponse, error) {
+	leases, err := s.networking.Leases(request.GetBridgeName())
+	if err != nil {
+		return nil, networkRPCError(err)
+	}
+	response := &apprunnerv1.ListBridgeLeasesResponse{Leases: make([]*apprunnerv1.DHCPLease, 0, len(leases))}
+	for _, lease := range leases {
+		response.Leases = append(response.Leases, dhcpLeaseToProto(lease))
+	}
+	return response, nil
 }
 
 func (s *appRunnerService) ClearBridgeDHCPLeases(ctx context.Context, request *apprunnerv1.ClearBridgeDHCPLeasesRequest) (*apprunnerv1.ClearBridgeDHCPLeasesResponse, error) {
@@ -373,7 +387,7 @@ func (s *appRunnerService) SetBridgeDHCPStaticLease(ctx context.Context, request
 
 func (s *appRunnerService) updateBridgeDHCPLeases(bridge string, update func() error) (networkingStatus, error) {
 	if err := update(); err != nil {
-		return networkingStatus{}, twirp.NewError(twirp.FailedPrecondition, err.Error())
+		return networkingStatus{}, networkRPCError(err)
 	}
 	status, err := s.networking.Status()
 	if err != nil {
@@ -414,6 +428,7 @@ func virtualMachineToProto(vm virtualMachine) *apprunnerv1.VirtualMachine {
 	for _, nic := range vm.NICs {
 		result.Nics = append(result.Nics, &apprunnerv1.VMNIC{
 			Id: nic.ID, Mode: networkModeToProto(nic.Mode), BridgeName: nic.BridgeName, MacAddress: nic.MACAddress,
+			Addresses: nic.Addresses,
 		})
 	}
 	return result
@@ -479,6 +494,22 @@ func networkModeFromProto(mode apprunnerv1.NetworkMode) (networkMode, error) {
 		return networkModeBridge, nil
 	default:
 		return "", twirp.InvalidArgumentError("mode", "must be NAT or bridge")
+	}
+}
+
+// networkRPCError maps host networking and guest service errors. Unknown
+// errors are reported as failed preconditions because they describe host
+// state (conflicting addresses, missing bridges, running workloads) rather
+// than server faults.
+func networkRPCError(err error) error {
+	var invalidField *fieldError
+	switch {
+	case errors.As(err, &invalidField):
+		return twirp.InvalidArgumentError(invalidField.field, invalidField.message)
+	case errors.Is(err, errBridgeNotFound), errors.Is(err, errPendingChangeNotFound), errors.Is(err, errLeaseNotFound), errors.Is(err, errVMNotFound):
+		return twirp.NotFoundError(err.Error())
+	default:
+		return twirp.NewError(twirp.FailedPrecondition, err.Error())
 	}
 }
 
@@ -553,6 +584,13 @@ func networkingStatusToProto(status networkingStatus) *apprunnerv1.NetworkingSta
 		response.Bridges = append(response.Bridges, mapped)
 	}
 	return response
+}
+
+func dhcpLeaseToProto(lease dhcpLease) *apprunnerv1.DHCPLease {
+	return &apprunnerv1.DHCPLease{
+		HardwareAddress: lease.HardwareAddress, Address: lease.Address, ExpiresAt: lease.ExpiresAt.UTC().Format(time.RFC3339),
+		VmName: lease.VMName, IsStatic: lease.Static,
+	}
 }
 
 func networkDiagnosticToProto(diagnostic networkDiagnostic) *apprunnerv1.NetworkDiagnostic {

@@ -101,6 +101,8 @@ func (h *fakeHypervisor) ChangeCDROMMedia(_ virtualMachine, cdromID, isoPath str
 	return nil
 }
 
+func ptr[T any](value T) *T { return &value }
+
 func testCapabilities() hostCapabilities {
 	return hostCapabilities{QEMUAvailable: true, KVMAvailable: true}
 }
@@ -324,7 +326,7 @@ func TestVMManagerManagesCloudInitISOThroughoutVMLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCloudInitISOContents(t, manager.cloudInitISOPath(vm.ID), "vm-id\ncloud-vm\n#!/bin/sh\necho ready\n")
-	vm, err = manager.Update(vm.ID, "renamed-cloud-vm", vm.Description, vm.CPUs, vm.MemoryMiB)
+	vm, err = manager.Update(vm.ID, vmUpdate{Name: ptr("renamed-cloud-vm")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +384,7 @@ func TestVMManagerClonesStoppedVMWithIndependentIdentityAndDisks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err = manager.Update(source.ID, source.Name, "Build template", source.CPUs, source.MemoryMiB)
+	source, err = manager.Update(source.ID, vmUpdate{Description: ptr("Build template")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +505,7 @@ func TestVMManagerUpdatesSettingsAndDevices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	vm, err = manager.Update(vm.ID, "renamed-vm", "Build worker", 4, 4096)
+	vm, err = manager.Update(vm.ID, vmUpdate{Name: ptr("renamed-vm"), Description: ptr("Build worker"), CPUs: ptr(uint32(4)), MemoryMiB: ptr(uint32(4096))})
 	if err != nil || vm.Name != "renamed-vm" || vm.Description != "Build worker" || vm.CPUs != 4 || vm.MemoryMiB != 4096 {
 		t.Fatalf("settings were not persisted while running: %#v, %v", vm, err)
 	}
@@ -849,5 +851,48 @@ func TestGracefulStopEscalatesToForceAfterTimeout(t *testing.T) {
 	time.Sleep(80 * time.Millisecond)
 	if hypervisor.forcedStop {
 		t.Fatal("a guest that exited before the deadline was still forced off")
+	}
+}
+
+func TestVMManagerUpdateChangesOnlyPresentFields(t *testing.T) {
+	manager, _, _ := newTestVMManager(t)
+	vm, err := manager.Create(context.Background(), installerVMOptions("partial"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := manager.Update(vm.ID, vmUpdate{MemoryMiB: ptr(uint32(4096))})
+	if err != nil || updated.MemoryMiB != 4096 || updated.Name != "partial" || updated.CPUs != vm.CPUs {
+		t.Fatalf("partial update changed other fields: %#v, %v", updated, err)
+	}
+	if _, err := manager.Update(vm.ID, vmUpdate{CPUs: ptr(uint32(0))}); err == nil {
+		t.Fatal("invalid CPU count was accepted")
+	}
+	if _, err := manager.Update(vm.ID, vmUpdate{}); err != nil {
+		t.Fatalf("empty update returned %v", err)
+	}
+}
+
+func TestVMManagerReportsLeasedAddressesPerInterface(t *testing.T) {
+	manager, _, _ := newTestVMManager(t)
+	manager.addresses = func(bridge, macAddress string) []string {
+		if bridge == "br0" {
+			return []string{"192.168.100.50"}
+		}
+		return nil
+	}
+	vm, err := manager.Create(context.Background(), bridgedVMOptions("leased", "br0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vm, err = manager.AddNIC(vm.ID, vmNICSpec{Mode: networkModeNAT})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(vm.NICs[0].Addresses, []string{"192.168.100.50"}) || len(vm.NICs[1].Addresses) != 0 {
+		t.Fatalf("addresses were not resolved per interface: %#v", vm.NICs)
+	}
+	listed, err := manager.List()
+	if err != nil || !slices.Equal(listed[0].NICs[0].Addresses, []string{"192.168.100.50"}) {
+		t.Fatalf("List did not resolve addresses: %#v, %v", listed, err)
 	}
 }
