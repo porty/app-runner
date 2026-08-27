@@ -25,8 +25,18 @@ type ipmiRuntime struct {
 	bridge     string
 	address    netip.Addr
 	prefixBits int
+	username   string
+	password   string
 	running    bool
 	lastError  string
+}
+
+// serves reports whether a running listener already matches the requested
+// endpoint and credentials, in which case reconfiguring would only drop
+// active sessions for no change.
+func (r *ipmiRuntime) serves(config vmIPMIConfig, address netip.Addr) bool {
+	return r.running && r.bridge == config.BridgeName && r.address == address &&
+		r.username == config.Username && r.password == config.Password
 }
 
 type ipmiManager struct {
@@ -48,6 +58,9 @@ func (m *ipmiManager) Configure(vm virtualMachine) error {
 		return nil
 	}
 	address, _ := netip.ParseAddr(vm.IPMI.Address)
+	if runtime := m.runtimes[vm.ID]; runtime != nil && runtime.serves(vm.IPMI, address) {
+		return nil
+	}
 	prefix, err := m.bridgePrefix(vm.IPMI.BridgeName, address)
 	if err != nil {
 		return err
@@ -82,7 +95,10 @@ func (m *ipmiManager) Configure(vm virtualMachine) error {
 	user.SetPassword([]byte(vm.IPMI.Password))
 	user.Enabled = true
 	user.ChannelAccess[1] = bmc.UserChannelAccess{MaxPrivilege: bmc.PrivilegeLevelAdministrator, Enabled: true}
-	runtime := &ipmiRuntime{bridge: vm.IPMI.BridgeName, address: address, prefixBits: prefix.Bits(), running: true}
+	runtime := &ipmiRuntime{
+		bridge: vm.IPMI.BridgeName, address: address, prefixBits: prefix.Bits(),
+		username: vm.IPMI.Username, password: vm.IPMI.Password, running: true,
+	}
 	runtime.server = server.NewServer(device, connection, server.WithCipherSuites([]types.CipherSuiteID{types.CipherSuiteID17}), server.WithV15Disabled())
 	m.runtimes[vm.ID] = runtime
 	go func() {
