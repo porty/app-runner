@@ -36,8 +36,8 @@ create_vm() {
   else
     user_data "$name" >"$OUT/$name-user-data.yaml"
     log "Creating $name ($cpus vCPU, ${memory} MiB, ${disk} GiB) from $IMAGE"
-    arcli vm create --name "$name" --cpus "$cpus" --memory "$memory" --disk "$disk" \
-      --image "$IMAGE" --network bridge --bridge "$BRIDGE" \
+    arcli vm create --name "$name" --cpus "$cpus" --memory "$memory" --disk "$disk:$IMAGE" \
+      --nic "bridge:$BRIDGE" \
       --cloud-init-file "$OUT/$name-user-data.yaml" >/dev/null
   fi
   if [[ $IPMI_ENABLED == true ]]; then

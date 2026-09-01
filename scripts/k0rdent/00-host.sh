@@ -19,7 +19,7 @@ fi
 bridge_json=$(arcli -o json net status | jq --arg b "$BRIDGE" '.bridges[] | select(.name == $b)')
 if ! jq -e '.dhcp.enabled == true' <<<"$bridge_json" >/dev/null; then
   log "Enabling managed DHCP, DNS and NAT on $BRIDGE ($CIDR)"
-  arcli net dhcp configure "$BRIDGE" --cidr "$CIDR" --nat --dns --auto-dns --dns-forwarders "$DNS_FORWARDERS" \
+  arcli net bridge configure "$BRIDGE" --dhcp --cidr "$CIDR" --nat --dns --auto-dns --dns-forwarders "$DNS_FORWARDERS" \
     --dns-suffix "$DNS_SUFFIX" --description "k0rdent lab" >/dev/null
 fi
 jq -e '.usable_by_qemu == true' <<<"$bridge_json" >/dev/null || {

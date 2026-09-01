@@ -13,9 +13,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 : "${DISK_DIR:=$ROOT/disk}"                   # App Runner disk_dir
 
 # Guest network: one managed bridge with DHCP, DNS and NAT ---------------------
-: "${BRIDGE:=rofl}"
-: "${CIDR:=192.168.100.0/24}"
-: "${DNS_SUFFIX:=rofl.internal}"
+: "${BRIDGE:=k0rdent}"
+: "${CIDR:=192.168.101.0/24}"
+: "${DNS_SUFFIX:=k0rdent.internal}"
 : "${DNS_FORWARDERS:=1.1.1.1,8.8.8.8}"
 
 # Ubuntu Server cloud image. The lab was written against the 26.04 (resolute)
@@ -36,7 +36,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Virtual BMCs: one IPMI endpoint per VM on the bridge, outside the DHCP pool.
 : "${IPMI_ENABLED:=true}"
 : "${IPMI_USER:=admin}" "${IPMI_PASSWORD:=k0rdent}"
-: "${IPMI_BASE:=192.168.100.20}"              # k0-mgmt=.20, k0-node1=.21, ...
+: "${IPMI_BASE:=192.168.101.20}"              # k0-mgmt=.20, k0-node1=.21, ...
 
 # k0rdent --------------------------------------------------------------------------
 : "${KCM_VERSION:=1.11.0}"                     # helm chart oci://ghcr.io/k0rdent/kcm/charts/kcm
