@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -33,13 +34,15 @@ const (
 	DefaultCIDR     = "192.168.100.0/24"
 	poolStartOffset = uint32(50)
 	leaseDuration   = 24 * time.Hour
+	httpBootClass   = "HTTPClient"
 )
 
 type BridgeConfig struct {
-	Enabled bool       `json:"enabled"`
-	CIDR    string     `json:"cidr"`
-	NAT     bool       `json:"nat,omitempty"`
-	DNS     dns.Config `json:"dns,omitempty"`
+	Enabled     bool       `json:"enabled"`
+	CIDR        string     `json:"cidr"`
+	NAT         bool       `json:"nat,omitempty"`
+	DNS         dns.Config `json:"dns,omitempty"`
+	HTTPBootURL string     `json:"http_boot_url,omitempty"`
 }
 
 type Lease struct {
@@ -72,6 +75,7 @@ type BridgeStatus struct {
 	AutoDNS       bool
 	DNSSuffix     string
 	DNSRunning    bool
+	HTTPBootURL   string
 	Leases        []Lease
 }
 
@@ -154,13 +158,22 @@ func newInProcessServer(bridge string, handler server4.Handler) (Server, error) 
 	return server4.NewServer(bridge, &net.UDPAddr{IP: net.IPv4zero, Port: dhcpv4.ServerPort}, handler)
 }
 
-func (m *Manager) Configure(bridge string, enabled bool, cidr string, natEnabled bool, dnsConfig dns.Config) error {
+func (m *Manager) Configure(bridge string, enabled bool, cidr string, natEnabled bool, dnsConfig dns.Config, httpBootURL string) error {
 	if err := validate.InterfaceName(bridge); err != nil {
 		return validate.Field("bridge_name", err.Error())
 	}
 	parsed := Range{}
 	if natEnabled && !enabled {
 		return validate.Field("nat_enabled", "NAT requires managed DHCP to be enabled")
+	}
+	httpBootURL = strings.TrimSpace(httpBootURL)
+	if httpBootURL != "" {
+		if !enabled {
+			return validate.Field("http_boot_url", "HTTP boot requires managed DHCP to be enabled")
+		}
+		if err := validateHTTPBootURL(httpBootURL); err != nil {
+			return validate.Field("http_boot_url", err.Error())
+		}
 	}
 	if dnsConfig.Enabled && !enabled {
 		return validate.Field("dns_enabled", "DNS requires managed DHCP to be enabled")
@@ -221,7 +234,7 @@ func (m *Manager) Configure(bridge string, enabled bool, cidr string, natEnabled
 	previous, found := m.state.Bridges[bridge]
 	previousLeases := m.state.Leases[bridge]
 	if enabled {
-		m.state.Bridges[bridge] = BridgeConfig{Enabled: true, CIDR: parsed.Prefix.String(), NAT: natEnabled, DNS: dnsConfig}
+		m.state.Bridges[bridge] = BridgeConfig{Enabled: true, CIDR: parsed.Prefix.String(), NAT: natEnabled, DNS: dnsConfig, HTTPBootURL: httpBootURL}
 	} else {
 		delete(m.state.Bridges, bridge)
 	}
@@ -270,6 +283,7 @@ func (m *Manager) Status(bridge string) BridgeStatus {
 	if config.DNS.Auto {
 		status.DNSSuffix = config.DNS.Suffix
 	}
+	status.HTTPBootURL = config.HTTPBootURL
 	status.CIDR = config.CIDR
 	parsed, err := ParseRange(config.CIDR)
 	if err != nil {
@@ -619,6 +633,7 @@ func (m *Manager) handlePacket(bridge string, network Range, config BridgeConfig
 		"message_type", messageType.String(),
 		"requested_address", requestedAddressValue,
 		"hostname", request.HostName(),
+		"vendor_class", request.ClassIdentifier(),
 	)
 	if messageType == dhcpv4.MessageTypeRelease || messageType == dhcpv4.MessageTypeDecline {
 		m.releaseLease(bridge, clientKey(request))
@@ -682,6 +697,13 @@ func (m *Manager) handlePacket(bridge string, network Range, config BridgeConfig
 		}
 		if messageType != dhcpv4.MessageTypeInform {
 			reply.UpdateOption(dhcpv4.OptIPAddressLeaseTime(leaseDuration))
+		}
+		// UEFI HTTP boot (UEFI spec 2.5+ §24.7) identifies itself with the
+		// HTTPClient vendor class and expects the same class echoed back with
+		// the boot file URI in option 67.
+		if config.HTTPBootURL != "" && strings.HasPrefix(request.ClassIdentifier(), httpBootClass) {
+			reply.UpdateOption(dhcpv4.OptClassIdentifier(httpBootClass))
+			reply.UpdateOption(dhcpv4.OptBootFileName(config.HTTPBootURL))
 		}
 	}
 	packet := reply.ToBytes()
@@ -966,6 +988,20 @@ func (m *Manager) saveLocked() error {
 	contents = append(contents, '\n')
 	if err := fsutil.WriteFileAtomic(m.path, contents, 0o600); err != nil {
 		return fmt.Errorf("write DHCP state: %w", err)
+	}
+	return nil
+}
+
+func validateHTTPBootURL(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return err
+	}
+	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.Path == "" || parsed.Path == "/" {
+		return errors.New("must be an http or https URL naming a boot file")
+	}
+	if len(value) > 255 {
+		return errors.New("must be at most 255 characters")
 	}
 	return nil
 }

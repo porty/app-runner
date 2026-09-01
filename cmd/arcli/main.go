@@ -1083,7 +1083,7 @@ func network(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 	}
 }
 func networkBridge(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
-	usage := "usage: arcli net bridge configure BRIDGE [--description TEXT] [--dhcp] [--cidr CIDR] [--nat] [--dns] [--dns-forwarders A,B] [--auto-dns] [--dns-suffix SUFFIX]"
+	usage := "usage: arcli net bridge configure BRIDGE [--description TEXT] [--dhcp] [--cidr CIDR] [--nat] [--dns] [--dns-forwarders A,B] [--auto-dns] [--dns-suffix SUFFIX] [--http-boot-url URL]"
 	if len(args) == 0 || args[0] != "configure" {
 		return errors.New(usage)
 	}
@@ -1096,6 +1096,7 @@ func networkBridge(ctx context.Context, c apprunnerv1.AppRunnerService, args []s
 	forwarders := f.String("dns-forwarders", "", "comma-separated upstream DNS servers")
 	autoDNS := f.Bool("auto-dns", false, "publish A records for VMs on the bridge under --dns-suffix")
 	suffix := f.String("dns-suffix", "", "Auto DNS suffix (default BRIDGE.internal)")
+	httpBootURL := f.String("http-boot-url", "", "boot file URL offered to UEFI HTTP boot clients")
 	if e := parseFlags(f, args[1:]); e != nil {
 		return e
 	}
@@ -1104,7 +1105,7 @@ func networkBridge(ctx context.Context, c apprunnerv1.AppRunnerService, args []s
 	}
 	r, e := c.ConfigureBridge(ctx, &apprunnerv1.ConfigureBridgeRequest{
 		BridgeName: f.Args()[0], Description: *description, DhcpEnabled: *dhcp, Cidr: *cidr, NatEnabled: *nat,
-		DnsEnabled: *dns, DnsForwarders: split(*forwarders), AutoDns: *autoDNS, DnsSuffix: *suffix,
+		DnsEnabled: *dns, DnsForwarders: split(*forwarders), AutoDns: *autoDNS, DnsSuffix: *suffix, HttpBootUrl: *httpBootURL,
 	})
 	if e != nil {
 		return e

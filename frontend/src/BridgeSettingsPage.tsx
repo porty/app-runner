@@ -75,6 +75,7 @@ export default function BridgeSettingsPage({ refreshInterval }: { refreshInterva
   const [dnsForwarders, setDNSForwarders] = useState('')
   const [autoDNS, setAutoDNS] = useState(false)
   const [dnsSuffix, setDNSSuffix] = useState('')
+  const [httpBootURL, setHTTPBootURL] = useState('')
   const [staticLease, setStaticLease] = useState<DHCPLease | null>(null)
   const [staticAddress, setStaticAddress] = useState('')
   const [loadedBridgeName, setLoadedBridgeName] = useState('')
@@ -111,6 +112,7 @@ export default function BridgeSettingsPage({ refreshInterval }: { refreshInterva
     setDNSForwarders((bridge.dhcp?.dns_forwarders ?? []).join('\n'))
     setAutoDNS(Boolean(bridge.dhcp?.auto_dns))
     setDNSSuffix(bridge.dhcp?.dns_suffix || `${bridge.name.toLowerCase()}.internal`)
+    setHTTPBootURL(bridge.dhcp?.http_boot_url ?? '')
     setLoadedBridgeName(bridgeName)
   }, [bridge, bridgeName, loadedBridgeName])
 
@@ -136,6 +138,7 @@ export default function BridgeSettingsPage({ refreshInterval }: { refreshInterva
     dns_forwarders: dnsEnabled ? dnsForwarders.split(/[\s,]+/).filter(Boolean) : [],
     auto_dns: enabled && dnsEnabled && autoDNS,
     dns_suffix: autoDNS ? dnsSuffix.trim() : '',
+    http_boot_url: enabled ? httpBootURL.trim() : '',
   }))
 
   const openStatic = (lease: DHCPLease) => {
@@ -174,6 +177,8 @@ export default function BridgeSettingsPage({ refreshInterval }: { refreshInterva
           <TextField fullWidth multiline minRows={2} label="Forwarding DNS servers" value={dnsForwarders} onChange={(event) => setDNSForwarders(event.target.value)} disabled={!enabled || !dnsEnabled || runningWorkloads} helperText="One IP address per line, or separate addresses with commas. An optional port is supported." />
           <FormControlLabel control={<Checkbox checked={autoDNS} disabled={!enabled || !dnsEnabled || runningWorkloads} onChange={(event) => setAutoDNS(event.target.checked)} />} label="Auto DNS for virtual machines on this bridge" />
           <TextField fullWidth label="Auto DNS suffix" value={dnsSuffix} onChange={(event) => setDNSSuffix(event.target.value)} disabled={!enabled || !dnsEnabled || !autoDNS || runningWorkloads} error={enabled && dnsEnabled && autoDNS && !dnsSuffixValid} helperText={dnsSuffixValid ? `VMs are published as VM-NAME.${dnsSuffix}` : 'Use one or more DNS labels separated by dots'} />
+          <Divider />
+          <TextField fullWidth label="UEFI HTTP boot URL" value={httpBootURL} onChange={(event) => setHTTPBootURL(event.target.value)} disabled={!enabled || runningWorkloads} placeholder="http://192.168.100.50/boot/bootx64.efi" helperText="Offered as the boot file to UEFI HTTP boot clients on this bridge. Leave empty to disable." />
           <Stack direction="row" sx={{ justifyContent: 'flex-end' }}><Button variant="contained" disabled={busy || (enabled && (!cidr.trim() || (dnsEnabled && (!dnsForwarders.trim() || (autoDNS && !dnsSuffixValid)))))} onClick={() => void save()}>Save settings</Button></Stack>
         </Stack>
       </Card>
