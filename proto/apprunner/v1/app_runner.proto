@@ -481,6 +481,9 @@ message BridgeDHCPStatus {
   string dns_suffix = 14;
   bool dns_running = 15;
   repeated DHCPLease leases = 16;
+  // http_boot_url is offered to UEFI HTTP boot clients (vendor class
+  // "HTTPClient") as their boot file; empty disables HTTP boot.
+  string http_boot_url = 17;
 }
 
 message DHCPLease {
@@ -551,6 +554,7 @@ message ConfigureBridgeRequest {
   repeated string dns_forwarders = 7;
   bool auto_dns = 8;
   string dns_suffix = 9;
+  string http_boot_url = 10;
 }
 
 message ConfigureBridgeResponse {

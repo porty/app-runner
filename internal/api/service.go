@@ -344,6 +344,7 @@ func (s *Service) ConfigureBridge(ctx context.Context, request *apprunnerv1.Conf
 			Enabled: request.GetDnsEnabled(), Forwarders: request.GetDnsForwarders(),
 			Auto: request.GetAutoDns(), Suffix: request.GetDnsSuffix(),
 		},
+		request.GetHttpBootUrl(),
 	); err != nil {
 		return nil, networkRPCError(err)
 	}
@@ -576,6 +577,7 @@ func networkingStatusToProto(status hostnet.Status) *apprunnerv1.NetworkingStatu
 				NatEnabled: bridge.DHCP.NATEnabled, NatRunning: bridge.DHCP.NATRunning,
 				DnsEnabled: bridge.DHCP.DNSEnabled, DnsForwarders: bridge.DHCP.DNSForwarders,
 				AutoDns: bridge.DHCP.AutoDNS, DnsSuffix: bridge.DHCP.DNSSuffix, DnsRunning: bridge.DHCP.DNSRunning,
+				HttpBootUrl: bridge.DHCP.HTTPBootURL,
 			},
 		}
 		for _, diagnostic := range bridge.Diagnostics {

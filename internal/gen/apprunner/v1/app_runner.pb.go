@@ -7,12 +7,11 @@
 package apprunnerv1
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -4126,6 +4125,9 @@ type BridgeDHCPStatus struct {
 	DnsSuffix     string                 `protobuf:"bytes,14,opt,name=dns_suffix,json=dnsSuffix,proto3" json:"dns_suffix,omitempty"`
 	DnsRunning    bool                   `protobuf:"varint,15,opt,name=dns_running,json=dnsRunning,proto3" json:"dns_running,omitempty"`
 	Leases        []*DHCPLease           `protobuf:"bytes,16,rep,name=leases,proto3" json:"leases,omitempty"`
+	// http_boot_url is offered to UEFI HTTP boot clients (vendor class
+	// "HTTPClient") as their boot file; empty disables HTTP boot.
+	HttpBootUrl   string `protobuf:"bytes,17,opt,name=http_boot_url,json=httpBootUrl,proto3" json:"http_boot_url,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4270,6 +4272,13 @@ func (x *BridgeDHCPStatus) GetLeases() []*DHCPLease {
 		return x.Leases
 	}
 	return nil
+}
+
+func (x *BridgeDHCPStatus) GetHttpBootUrl() string {
+	if x != nil {
+		return x.HttpBootUrl
+	}
+	return ""
 }
 
 type DHCPLease struct {
@@ -4873,6 +4882,7 @@ type ConfigureBridgeRequest struct {
 	DnsForwarders []string               `protobuf:"bytes,7,rep,name=dns_forwarders,json=dnsForwarders,proto3" json:"dns_forwarders,omitempty"`
 	AutoDns       bool                   `protobuf:"varint,8,opt,name=auto_dns,json=autoDns,proto3" json:"auto_dns,omitempty"`
 	DnsSuffix     string                 `protobuf:"bytes,9,opt,name=dns_suffix,json=dnsSuffix,proto3" json:"dns_suffix,omitempty"`
+	HttpBootUrl   string                 `protobuf:"bytes,10,opt,name=http_boot_url,json=httpBootUrl,proto3" json:"http_boot_url,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4966,6 +4976,13 @@ func (x *ConfigureBridgeRequest) GetAutoDns() bool {
 func (x *ConfigureBridgeRequest) GetDnsSuffix() string {
 	if x != nil {
 		return x.DnsSuffix
+	}
+	return ""
+}
+
+func (x *ConfigureBridgeRequest) GetHttpBootUrl() string {
+	if x != nil {
+		return x.HttpBootUrl
 	}
 	return ""
 }
@@ -6084,7 +6101,7 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\x0eusable_by_qemu\x18\t \x01(\bR\fusableByQemu\x122\n" +
 	"\x04dhcp\x18\n" +
 	" \x01(\v2\x1e.apprunner.v1.BridgeDHCPStatusR\x04dhcp\x12 \n" +
-	"\vdescription\x18\v \x01(\tR\vdescription\"\x95\x04\n" +
+	"\vdescription\x18\v \x01(\tR\vdescription\"\xb9\x04\n" +
 	"\x10BridgeDHCPStatus\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x12\n" +
 	"\x04cidr\x18\x02 \x01(\tR\x04cidr\x12%\n" +
@@ -6109,7 +6126,8 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"dns_suffix\x18\x0e \x01(\tR\tdnsSuffix\x12\x1f\n" +
 	"\vdns_running\x18\x0f \x01(\bR\n" +
 	"dnsRunning\x12/\n" +
-	"\x06leases\x18\x10 \x03(\v2\x17.apprunner.v1.DHCPLeaseR\x06leases\"\xa5\x01\n" +
+	"\x06leases\x18\x10 \x03(\v2\x17.apprunner.v1.DHCPLeaseR\x06leases\x12\"\n" +
+	"\rhttp_boot_url\x18\x11 \x01(\tR\vhttpBootUrl\"\xa5\x01\n" +
 	"\tDHCPLease\x12)\n" +
 	"\x10hardware_address\x18\x01 \x01(\tR\x0fhardwareAddress\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x1d\n" +
@@ -6150,7 +6168,7 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\x1aRevertNetworkChangeRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"U\n" +
 	"\x1bRevertNetworkChangeResponse\x126\n" +
-	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\"\xb5\x02\n" +
+	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\"\xd9\x02\n" +
 	"\x16ConfigureBridgeRequest\x12\x1f\n" +
 	"\vbridge_name\x18\x01 \x01(\tR\n" +
 	"bridgeName\x12 \n" +
@@ -6164,7 +6182,9 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\x0edns_forwarders\x18\a \x03(\tR\rdnsForwarders\x12\x19\n" +
 	"\bauto_dns\x18\b \x01(\bR\aautoDns\x12\x1d\n" +
 	"\n" +
-	"dns_suffix\x18\t \x01(\tR\tdnsSuffix\"Q\n" +
+	"dns_suffix\x18\t \x01(\tR\tdnsSuffix\x12\"\n" +
+	"\rhttp_boot_url\x18\n" +
+	" \x01(\tR\vhttpBootUrl\"Q\n" +
 	"\x17ConfigureBridgeResponse\x126\n" +
 	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\":\n" +
 	"\x17ListBridgeLeasesRequest\x12\x1f\n" +

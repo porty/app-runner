@@ -220,6 +220,7 @@ export interface BridgeDHCPStatus {
   auto_dns: boolean
   dns_suffix?: string
   dns_running: boolean
+  http_boot_url?: string
   leases?: DHCPLease[]
 }
 
@@ -241,6 +242,7 @@ export interface BridgeConfiguration {
   dns_forwarders: string[]
   auto_dns: boolean
   dns_suffix: string
+  http_boot_url: string
 }
 
 export interface PendingNetworkChange {

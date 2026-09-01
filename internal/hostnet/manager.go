@@ -311,7 +311,7 @@ func (m *Manager) SetBridgeDHCPStaticLease(bridge, hardwareAddress, address stri
 	return m.dhcp.SetStaticLease(bridge, hardwareAddress, address)
 }
 
-func (m *Manager) ConfigureBridgeSettings(bridge, description string, enabled bool, cidr string, natEnabled bool, dnsConfig dns.Config) error {
+func (m *Manager) ConfigureBridgeSettings(bridge, description string, enabled bool, cidr string, natEnabled bool, dnsConfig dns.Config, httpBootURL string) error {
 	if m.dhcp == nil {
 		return errors.New("DHCP manager is not configured")
 	}
@@ -358,14 +358,14 @@ func (m *Manager) ConfigureBridgeSettings(bridge, description string, enabled bo
 		return errors.New("bridge descriptions are not supported by the network provider")
 	}
 	currentDHCP := m.dhcp.Status(bridge)
-	servicesChanged := bridgeServicesChanged(currentDHCP, enabled, cidr, natEnabled, dnsConfig)
+	servicesChanged := bridgeServicesChanged(currentDHCP, enabled, cidr, natEnabled, dnsConfig, httpBootURL)
 	if descriptionChanged {
 		if err := descriptionProvider.SetBridgeDescription(bridge, description); err != nil {
 			return err
 		}
 	}
 	if servicesChanged {
-		if err := m.dhcp.Configure(bridge, enabled, cidr, natEnabled, dnsConfig); err != nil {
+		if err := m.dhcp.Configure(bridge, enabled, cidr, natEnabled, dnsConfig, httpBootURL); err != nil {
 			if descriptionChanged {
 				_ = descriptionProvider.SetBridgeDescription(bridge, currentDescription)
 			}
@@ -375,7 +375,7 @@ func (m *Manager) ConfigureBridgeSettings(bridge, description string, enabled bo
 	return nil
 }
 
-func bridgeServicesChanged(current dhcp.BridgeStatus, enabled bool, cidr string, natEnabled bool, dnsConfig dns.Config) bool {
+func bridgeServicesChanged(current dhcp.BridgeStatus, enabled bool, cidr string, natEnabled bool, dnsConfig dns.Config, httpBootURL string) bool {
 	if current.Enabled != enabled {
 		return true
 	}
@@ -383,6 +383,9 @@ func bridgeServicesChanged(current dhcp.BridgeStatus, enabled bool, cidr string,
 		return false
 	}
 	if current.CIDR != strings.TrimSpace(cidr) || current.NATEnabled != natEnabled || current.DNSEnabled != dnsConfig.Enabled {
+		return true
+	}
+	if current.HTTPBootURL != strings.TrimSpace(httpBootURL) {
 		return true
 	}
 	if !dnsConfig.Enabled {
