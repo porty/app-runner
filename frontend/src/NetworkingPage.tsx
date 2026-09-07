@@ -301,6 +301,14 @@ function IdentitySummary({ status }: { status: NetworkingStatus }) {
   )
 }
 
+function ServiceChip({ label, running }: { label: string, running: boolean }) {
+  return (
+    <Tooltip title={`${label.toUpperCase()} ${running ? 'running' : 'enabled but not running'}`}>
+      <Chip size="small" color={running ? 'success' : 'primary'} label={label} />
+    </Tooltip>
+  )
+}
+
 function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply, onRestore, onAttach }: {
   bridge: import('./api').NetworkBridge
   disabled: boolean
@@ -376,13 +384,13 @@ function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply
           </Stack>
         </TableCell>
         <TableCell sx={{ verticalAlign: 'top', minWidth: 190 }}>
-          {!dhcp?.enabled && <Chip size="small" label="Disabled" />}
+          {!dhcp?.enabled && <Chip size="small" label="none" />}
           {dhcp?.enabled && (
             <Stack spacing={0.75} sx={{ alignItems: 'flex-start' }}>
               <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
-                <Chip size="small" color={dhcp.running ? 'success' : 'primary'} label={dhcp.running ? 'DHCP running' : 'DHCP enabled'} />
-                {dhcp.nat_enabled && <Chip size="small" color={dhcp.nat_running ? 'success' : 'primary'} label={dhcp.nat_running ? 'NAT running' : 'NAT enabled'} />}
-                {dhcp.dns_enabled && <Chip size="small" color={dhcp.dns_running ? 'success' : 'primary'} label={dhcp.dns_running ? 'DNS running' : 'DNS enabled'} />}
+                <ServiceChip label="dhcp" running={dhcp.running} />
+                {dhcp.nat_enabled && <ServiceChip label="nat" running={dhcp.nat_running} />}
+                {dhcp.dns_enabled && <ServiceChip label="dns" running={dhcp.dns_running} />}
               </Stack>
               <Typography variant="caption" color="text.secondary">{dhcp.cidr} · {dhcp.active_leases} active lease{dhcp.active_leases === 1 ? '' : 's'}</Typography>
               {dhcp.last_error && <Typography variant="caption" color="error">{dhcp.last_error}</Typography>}
