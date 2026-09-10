@@ -1,5 +1,5 @@
-// Package api implements the Twirp service, the console WebSocket proxy,
-// and the HTTP handler that serves the embedded frontend.
+// Package api implements the Twirp service, the console proxy (raw RFB or
+// websocket), and the HTTP handler that serves the embedded frontend.
 package api
 
 import (
