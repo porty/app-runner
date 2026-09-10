@@ -14,12 +14,17 @@ import (
 	"time"
 
 	"github.com/roflware/app-runner/internal/config"
+	"github.com/roflware/app-runner/internal/serialconsole"
 	"github.com/roflware/app-runner/internal/vm"
 )
 
+func newTestHypervisor(settings config.Config) *Hypervisor {
+	return New(settings, serialconsole.New(settings.SerialSocketPath))
+}
+
 func TestQEMUArgumentsUseRequiredVirtualisationProfile(t *testing.T) {
 	settings := config.Default(t.TempDir())
-	qemu := New(settings)
+	qemu := newTestHypervisor(settings)
 	machine := vm.VirtualMachine{
 		ID: "machine-id", Name: "test VM", CPUs: 4, MemoryMiB: 4096,
 		Disks:  []vm.Disk{{ID: "d0", SizeGiB: 20}},
@@ -39,6 +44,8 @@ func TestQEMUArgumentsUseRequiredVirtualisationProfile(t *testing.T) {
 		"user,id=net0",
 		"virtio-net-pci,netdev=net0,mac=52:54:00:11:22:33",
 		"unix:" + settings.VNCSocketPath("machine-id"),
+		"socket,id=serial0,path=" + settings.SerialSocketPath("machine-id") + ",server=on,wait=on",
+		"chardev:serial0",
 	} {
 		if !slices.Contains(arguments, expected) {
 			t.Errorf("QEMU arguments do not contain %q: %#v", expected, arguments)
@@ -95,7 +102,7 @@ func TestExecuteQMPNegotiatesAndSendsCommand(t *testing.T) {
 
 func TestQEMUArgumentsSupportMultipleNetworkInterfaces(t *testing.T) {
 	settings := config.Default(t.TempDir())
-	qemu := New(settings)
+	qemu := newTestHypervisor(settings)
 	arguments := qemu.arguments(vm.VirtualMachine{ID: "machine-id", NICs: []vm.NIC{
 		{ID: "n0", Mode: vm.NetworkModeBridge, BridgeName: "lab0", MACAddress: "52:54:00:00:00:01"},
 		{ID: "n1", Mode: vm.NetworkModeNAT, MACAddress: "52:54:00:00:00:02"},
@@ -112,7 +119,8 @@ func TestQEMUArgumentsSupportMultipleNetworkInterfaces(t *testing.T) {
 }
 
 func TestQEMUArgumentsOmitDevicesTheVMDoesNotHave(t *testing.T) {
-	arguments := New(config.Default(t.TempDir())).arguments(vm.VirtualMachine{ID: "machine-id", Name: "bare"})
+	settings := config.Default(t.TempDir())
+	arguments := newTestHypervisor(settings).arguments(vm.VirtualMachine{ID: "machine-id", Name: "bare"})
 	for _, argument := range arguments {
 		if strings.HasPrefix(argument, "file=") || strings.HasPrefix(argument, "virtio-net") || strings.HasPrefix(argument, "user,") || strings.HasPrefix(argument, "bridge,") {
 			t.Fatalf("device-less VM received device argument %q: %#v", argument, arguments)
@@ -122,7 +130,7 @@ func TestQEMUArgumentsOmitDevicesTheVMDoesNotHave(t *testing.T) {
 
 func TestQEMUArgumentsMountCloudInitISO(t *testing.T) {
 	settings := config.Default(t.TempDir())
-	qemu := New(settings)
+	qemu := newTestHypervisor(settings)
 	arguments := qemu.arguments(vm.VirtualMachine{ID: "machine-id", CloudInit: vm.CloudInit{Enabled: true}})
 
 	for _, expected := range []string{
@@ -147,7 +155,7 @@ func TestQEMUCreatesLinkedQCow2Disk(t *testing.T) {
 	}
 	settings := config.Default(directory)
 	settings.QEMUImgBinary = qemuImg
-	qemu := New(settings)
+	qemu := newTestHypervisor(settings)
 	overlayPath := filepath.Join(directory, "overlay.qcow2")
 	if err := qemu.CreateLinkedDisk(context.Background(), overlayPath, backingPath, 20); err != nil {
 		t.Fatal(err)
@@ -172,7 +180,7 @@ func TestQEMUCreatesLinkedQCow2Disk(t *testing.T) {
 func TestQEMUArgumentsUsePersistentUEFIFirmware(t *testing.T) {
 	settings := config.Default(t.TempDir())
 	settings.UEFICodePath = "/firmware/OVMF_CODE.fd"
-	qemu := New(settings)
+	qemu := newTestHypervisor(settings)
 	arguments := qemu.arguments(vm.VirtualMachine{ID: "machine-id", Firmware: vm.FirmwareUEFI})
 	for _, expected := range []string{
 		"if=pflash,format=raw,unit=0,readonly=on,file=/firmware/OVMF_CODE.fd",
@@ -185,7 +193,8 @@ func TestQEMUArgumentsUsePersistentUEFIFirmware(t *testing.T) {
 }
 
 func TestQEMUArgumentsHonorIPMIBootDevice(t *testing.T) {
-	qemu := New(config.Default(t.TempDir()))
+	settings := config.Default(t.TempDir())
+	qemu := newTestHypervisor(settings)
 	arguments := qemu.arguments(vm.VirtualMachine{ID: "machine-id", IPMI: vm.IPMIConfig{BootDevice: uint8(1)}})
 	if !slices.Contains(arguments, "order=ncd,menu=on") {
 		t.Fatalf("PXE boot order is missing: %#v", arguments)
@@ -194,7 +203,7 @@ func TestQEMUArgumentsHonorIPMIBootDevice(t *testing.T) {
 
 func TestIsRunningRequiresTheVMsOwnQEMUProcess(t *testing.T) {
 	settings := config.Default(t.TempDir())
-	qemu := New(settings)
+	qemu := newTestHypervisor(settings)
 	socketPath := settings.QMPSocketPath("machine-id")
 	// A process that merely exists (this test binary) is not the VM.
 	if qemu.IsRunning(vm.VirtualMachine{ID: "machine-id", PID: os.Getpid()}) {

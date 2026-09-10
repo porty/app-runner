@@ -356,14 +356,17 @@ type VirtualMachine struct {
 	// GET with "Upgrade: rfb" switches the connection to the raw RFB byte
 	// stream for native clients; a websocket upgrade carries the same stream
 	// in binary messages for browsers.
-	ConsolePath   string        `protobuf:"bytes,10,opt,name=console_path,json=consolePath,proto3" json:"console_path,omitempty"`
-	Disks         []*VMDisk     `protobuf:"bytes,11,rep,name=disks,proto3" json:"disks,omitempty"`
-	Cdroms        []*VMCDROM    `protobuf:"bytes,12,rep,name=cdroms,proto3" json:"cdroms,omitempty"`
-	Nics          []*VMNIC      `protobuf:"bytes,13,rep,name=nics,proto3" json:"nics,omitempty"`
-	CloudInit     *VMCloudInit  `protobuf:"bytes,14,opt,name=cloud_init,json=cloudInit,proto3" json:"cloud_init,omitempty"`
-	Ipmi          *VMIPMIStatus `protobuf:"bytes,15,opt,name=ipmi,proto3" json:"ipmi,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ConsolePath string        `protobuf:"bytes,10,opt,name=console_path,json=consolePath,proto3" json:"console_path,omitempty"`
+	Disks       []*VMDisk     `protobuf:"bytes,11,rep,name=disks,proto3" json:"disks,omitempty"`
+	Cdroms      []*VMCDROM    `protobuf:"bytes,12,rep,name=cdroms,proto3" json:"cdroms,omitempty"`
+	Nics        []*VMNIC      `protobuf:"bytes,13,rep,name=nics,proto3" json:"nics,omitempty"`
+	CloudInit   *VMCloudInit  `protobuf:"bytes,14,opt,name=cloud_init,json=cloudInit,proto3" json:"cloud_init,omitempty"`
+	Ipmi        *VMIPMIStatus `protobuf:"bytes,15,opt,name=ipmi,proto3" json:"ipmi,omitempty"`
+	// serial_console_path is the HTTP path of the VM's raw serial console.
+	// Native clients use "Upgrade: serial"; browsers use a websocket.
+	SerialConsolePath string `protobuf:"bytes,16,opt,name=serial_console_path,json=serialConsolePath,proto3" json:"serial_console_path,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *VirtualMachine) Reset() {
@@ -499,6 +502,13 @@ func (x *VirtualMachine) GetIpmi() *VMIPMIStatus {
 		return x.Ipmi
 	}
 	return nil
+}
+
+func (x *VirtualMachine) GetSerialConsolePath() string {
+	if x != nil {
+		return x.SerialConsolePath
+	}
+	return ""
 }
 
 // Disks attach in list order; the first disk is the boot disk. source_image
@@ -5843,7 +5853,7 @@ var File_apprunner_v1_app_runner_proto protoreflect.FileDescriptor
 
 const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\n" +
-	"\x1dapprunner/v1/app_runner.proto\x12\fapprunner.v1\"\xbe\x04\n" +
+	"\x1dapprunner/v1/app_runner.proto\x12\fapprunner.v1\"\xee\x04\n" +
 	"\x0eVirtualMachine\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -5864,7 +5874,8 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\x04nics\x18\r \x03(\v2\x13.apprunner.v1.VMNICR\x04nics\x128\n" +
 	"\n" +
 	"cloud_init\x18\x0e \x01(\v2\x19.apprunner.v1.VMCloudInitR\tcloudInit\x12.\n" +
-	"\x04ipmi\x18\x0f \x01(\v2\x1a.apprunner.v1.VMIPMIStatusR\x04ipmi\"V\n" +
+	"\x04ipmi\x18\x0f \x01(\v2\x1a.apprunner.v1.VMIPMIStatusR\x04ipmi\x12.\n" +
+	"\x13serial_console_path\x18\x10 \x01(\tR\x11serialConsolePath\"V\n" +
 	"\x06VMDisk\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bsize_gib\x18\x02 \x01(\rR\asizeGib\x12!\n" +

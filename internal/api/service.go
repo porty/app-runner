@@ -424,7 +424,8 @@ func virtualMachineToProto(machine vm.VirtualMachine) *apprunnerv1.VirtualMachin
 		Id: machine.ID, Name: machine.Name, Description: machine.Description, Cpus: machine.CPUs, MemoryMib: machine.MemoryMiB,
 		Firmware: firmwareToProto(machine.Firmware), Status: status,
 		CreatedAt: machine.CreatedAt.Format(time.RFC3339), LastError: machine.LastError,
-		ConsolePath: "/console/" + machine.ID,
+		ConsolePath:       "/console/" + machine.ID,
+		SerialConsolePath: "/serial-console/" + machine.ID,
 		Ipmi: &apprunnerv1.VMIPMIStatus{
 			Enabled: machine.IPMI.Enabled, BridgeName: machine.IPMI.BridgeName, Address: machine.IPMI.Address,
 			Port: ipmi.Port, Username: machine.IPMI.Username, Running: machine.IPMIRunning, LastError: machine.IPMIError,

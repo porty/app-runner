@@ -10,9 +10,9 @@ build:
 	CGO_ENABLED=0 go build -tags production -o bin/app-runner ./cmd/app-runner
 	CGO_ENABLED=0 go build -o bin/arcli ./cmd/arcli
 
-# The Qt desktop client needs cgo and the Qt 6 development packages
-# (qt6-base-dev on Debian/Ubuntu); the first build compiles the bindings and
-# takes several minutes.
+# The Qt desktop client needs cgo, Qt 6, and QTermWidget development packages
+# (qt6-base-dev and libqtermwidget6-2-dev on Debian/Ubuntu); the first build
+# compiles the bindings and takes several minutes.
 argui:
 	mkdir -p bin
 	go build -o bin/argui ./cmd/argui

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { Alert, Box, Button, Chip, CircularProgress, ListItemIcon, ListItemText, Menu, MenuItem, Stack, Typography } from '@mui/material'
-import { ArrowDropDownRounded, KeyboardRounded, PlayArrowRounded, PowerOffRounded, PowerSettingsNewRounded, RefreshRounded, RestartAltRounded } from '@mui/icons-material'
+import { Alert, Box, Button, Chip, CircularProgress, ListItemIcon, ListItemText, Menu, MenuItem, Stack, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material'
+import { ArrowDropDownRounded, ClearAllRounded, DesktopWindowsRounded, KeyboardRounded, PlayArrowRounded, PowerOffRounded, PowerSettingsNewRounded, RefreshRounded, RestartAltRounded, TerminalRounded } from '@mui/icons-material'
 import { Link, useParams } from 'react-router-dom'
 import RFB from '@novnc/novnc'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
 
 import { getVM, rebootVM, startVM, stopVM, type VirtualMachine } from './api'
 import { canAccessVMConsole } from './vmConsoleAccess'
@@ -11,6 +14,7 @@ export default function ConsolePage() {
   const { id = '' } = useParams()
   const target = useRef<HTMLDivElement | null>(null)
   const rfb = useRef<RFB | null>(null)
+  const terminal = useRef<Terminal | null>(null)
   const expectedDisconnect = useRef(false)
   const [vm, setVM] = useState<VirtualMachine | null>(null)
   const [connection, setConnection] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
@@ -18,6 +22,7 @@ export default function ConsolePage() {
   const [starting, setStarting] = useState(false)
   const [powerMenuAnchor, setPowerMenuAnchor] = useState<HTMLElement | null>(null)
   const [powerBusy, setPowerBusy] = useState<'shutdown' | 'force-off' | 'reboot' | null>(null)
+  const [consoleKind, setConsoleKind] = useState<'display' | 'serial'>('display')
   const consoleAvailable = vm ? canAccessVMConsole(vm.status) : false
 
   const start = async () => {
@@ -51,7 +56,8 @@ export default function ConsolePage() {
   }, [id, vm?.status])
 
   useEffect(() => {
-    if (!vm || !consoleAvailable || !target.current) return
+    if (!vm || !consoleAvailable || consoleKind !== 'display' || !target.current) return
+    setConnection('connecting')
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const client = new RFB(target.current, `${protocol}//${window.location.host}${vm.console_path}`, { shared: true })
     client.scaleViewport = true
@@ -75,7 +81,57 @@ export default function ConsolePage() {
       client.disconnect()
       rfb.current = null
     }
-  }, [consoleAvailable, vm?.console_path])
+  }, [consoleAvailable, consoleKind, vm?.console_path])
+
+  useEffect(() => {
+    if (!vm || !consoleAvailable || consoleKind !== 'serial' || !target.current) return
+    setConnection('connecting')
+    const instance = new Terminal({
+      cursorBlink: true,
+      scrollback: 10_000,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+      fontSize: 14,
+      theme: { background: '#050505' },
+    })
+    const fit = new FitAddon()
+    instance.loadAddon(fit)
+    instance.open(target.current)
+    fit.fit()
+    terminal.current = instance
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const socket = new WebSocket(`${protocol}//${window.location.host}${vm.serial_console_path}`)
+    socket.binaryType = 'arraybuffer'
+    let opened = false
+    const input = instance.onData((data) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(new TextEncoder().encode(data))
+    })
+    socket.onopen = () => {
+      opened = true
+      expectedDisconnect.current = false
+      setConnection('connected')
+      instance.focus()
+    }
+    socket.onmessage = (event) => {
+      if (event.data instanceof ArrayBuffer) instance.write(new Uint8Array(event.data))
+    }
+    socket.onclose = () => {
+      setConnection('disconnected')
+      if (!expectedDisconnect.current) {
+        setError(opened ? 'The serial console connection ended unexpectedly.' : 'The serial console could not be opened.')
+      }
+    }
+    const resize = new ResizeObserver(() => fit.fit())
+    resize.observe(target.current)
+    return () => {
+      resize.disconnect()
+      input.dispose()
+      socket.onclose = null
+      socket.close()
+      instance.dispose()
+      terminal.current = null
+    }
+  }, [consoleAvailable, consoleKind, vm?.serial_console_path])
 
   const openPowerMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
     setPowerMenuAnchor(event.currentTarget)
@@ -135,13 +191,29 @@ export default function ConsolePage() {
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' }, mb: 2 }}>
         <Box>
           <Typography variant="h4">{vm.name}</Typography>
-          <Typography color="text.secondary">Interactive noVNC console</Typography>
+          <Typography color="text.secondary">Interactive {consoleKind === 'display' ? 'display' : 'serial'} console</Typography>
         </Box>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={consoleKind}
+            onChange={(_, value: 'display' | 'serial' | null) => { if (value) setConsoleKind(value) }}
+            aria-label="Console type"
+          >
+            <ToggleButton value="display" aria-label="Display console"><DesktopWindowsRounded fontSize="small" sx={{ mr: 0.75 }} />Display</ToggleButton>
+            <ToggleButton value="serial" aria-label="Serial console"><TerminalRounded fontSize="small" sx={{ mr: 0.75 }} />Serial</ToggleButton>
+          </ToggleButtonGroup>
           <Chip size="small" color={connection === 'connected' ? 'success' : 'default'} label={connection} />
-          <Button variant="outlined" startIcon={<KeyboardRounded />} onClick={() => rfb.current?.sendCtrlAltDel()} disabled={connection !== 'connected'}>
-            Ctrl+Alt+Del
-          </Button>
+          {consoleKind === 'display' ? (
+            <Button variant="outlined" startIcon={<KeyboardRounded />} onClick={() => rfb.current?.sendCtrlAltDel()} disabled={connection !== 'connected'}>
+              Ctrl+Alt+Del
+            </Button>
+          ) : (
+            <Button variant="outlined" startIcon={<ClearAllRounded />} onClick={() => terminal.current?.clear()} disabled={connection !== 'connected'}>
+              Clear
+            </Button>
+          )}
           <Button
             variant="outlined"
             color="inherit"
@@ -174,6 +246,7 @@ export default function ConsolePage() {
       </Stack>
       {error && <Alert severity="error" onClose={() => setError('')} sx={{ mb: 2 }}>{error}</Alert>}
       <Box
+        key={consoleKind}
         ref={target}
         sx={{
           height: 'calc(100vh - 220px)',
@@ -184,6 +257,7 @@ export default function ConsolePage() {
           borderRadius: 2,
           overflow: 'hidden',
           '& canvas': { display: 'block' },
+          '& .xterm': { height: '100%', p: 1 },
         }}
       />
     </Box>

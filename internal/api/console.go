@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/roflware/app-runner/internal/rfb"
+	"github.com/roflware/app-runner/internal/serialconsole"
 	"github.com/roflware/app-runner/internal/vm"
 )
 
@@ -42,14 +44,47 @@ func consoleProxyHandler(manager *vm.Manager) http.Handler {
 		defer vncConnection.Close()
 
 		if rfb.IsUpgradeRequest(request) {
-			serveRawConsole(response, vncConnection)
+			serveRawConsole(response, vncConnection, rfb.UpgradeProtocol)
 			return
 		}
 		serveWebsocketConsole(response, request, vncConnection)
 	})
 }
 
-func serveRawConsole(response http.ResponseWriter, vncConnection net.Conn) {
+func serialConsoleProxyHandler(manager *vm.Manager, hub *serialconsole.Hub) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet {
+			http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		id := strings.TrimPrefix(request.URL.Path, "/serial-console/")
+		if id == "" || strings.Contains(id, "/") {
+			http.NotFound(response, request)
+			return
+		}
+		if _, err := manager.ConsoleSocket(id); err != nil {
+			http.Error(response, err.Error(), http.StatusConflict)
+			return
+		}
+		stream, err := hub.Attach(id)
+		if err != nil {
+			status := http.StatusServiceUnavailable
+			if errors.Is(err, serialconsole.ErrInUse) {
+				status = http.StatusConflict
+			}
+			http.Error(response, err.Error(), status)
+			return
+		}
+		defer stream.Close()
+		if serialconsole.IsUpgradeRequest(request) {
+			serveRawConsole(response, stream, serialconsole.UpgradeProtocol)
+			return
+		}
+		serveWebsocketConsole(response, request, stream)
+	})
+}
+
+func serveRawConsole(response http.ResponseWriter, console io.ReadWriter, protocol string) {
 	hijacker, ok := response.(http.Hijacker)
 	if !ok {
 		http.Error(response, "the connection cannot be upgraded", http.StatusInternalServerError)
@@ -61,7 +96,7 @@ func serveRawConsole(response http.ResponseWriter, vncConnection net.Conn) {
 		return
 	}
 	defer clientConnection.Close()
-	_, _ = buffered.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: " + rfb.UpgradeProtocol + "\r\nConnection: Upgrade\r\n\r\n")
+	_, _ = buffered.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: " + protocol + "\r\nConnection: Upgrade\r\n\r\n")
 	if err := buffered.Flush(); err != nil {
 		return
 	}
@@ -69,10 +104,10 @@ func serveRawConsole(response http.ResponseWriter, vncConnection net.Conn) {
 	relay(struct {
 		io.Reader
 		io.Writer
-	}{buffered.Reader, clientConnection}, vncConnection)
+	}{buffered.Reader, clientConnection}, console)
 }
 
-func serveWebsocketConsole(response http.ResponseWriter, request *http.Request, vncConnection net.Conn) {
+func serveWebsocketConsole(response http.ResponseWriter, request *http.Request, console io.ReadWriter) {
 	websocketConnection, err := websocket.Accept(response, request, nil)
 	if err != nil {
 		return
@@ -83,7 +118,7 @@ func serveWebsocketConsole(response http.ResponseWriter, request *http.Request, 
 	defer cancel()
 	browserConnection := websocket.NetConn(ctx, websocketConnection, websocket.MessageBinary)
 	defer browserConnection.Close()
-	relay(browserConnection, vncConnection)
+	relay(browserConnection, console)
 }
 
 // relay copies in both directions until either side stops.

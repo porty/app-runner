@@ -12,17 +12,19 @@ import (
 
 	"github.com/roflware/app-runner/internal/cloudinit"
 	"github.com/roflware/app-runner/internal/hostnet"
+	"github.com/roflware/app-runner/internal/serialconsole"
 	"github.com/roflware/app-runner/internal/storage"
 	"github.com/roflware/app-runner/internal/vm"
 )
 
 // Runtime is everything the API serves.
 type Runtime struct {
-	VMs          *vm.Manager
-	Networking   *hostnet.Manager
-	Storage      *storage.Service
-	Templates    *cloudinit.TemplateManager
-	Capabilities func() vm.HostCapabilities
+	VMs            *vm.Manager
+	SerialConsoles *serialconsole.Hub
+	Networking     *hostnet.Manager
+	Storage        *storage.Service
+	Templates      *cloudinit.TemplateManager
+	Capabilities   func() vm.HostCapabilities
 }
 
 func NewHandler(frontend fs.FS, runtime Runtime) http.Handler {
@@ -36,6 +38,9 @@ func NewHandler(frontend fs.FS, runtime Runtime) http.Handler {
 	}
 	if runtime.VMs != nil {
 		mux.Handle("/console/", consoleProxyHandler(runtime.VMs))
+		if runtime.SerialConsoles != nil {
+			mux.Handle("/serial-console/", serialConsoleProxyHandler(runtime.VMs, runtime.SerialConsoles))
+		}
 	}
 
 	if frontend == nil {
