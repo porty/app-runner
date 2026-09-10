@@ -78,9 +78,9 @@ The Go code is split into packages under `internal/` along those boundaries: `vm
 
 ## Consoles stay behind the control plane
 
-**Decision:** QEMU exposes VNC through a local Unix socket, and App Runner proxies that connection to the embedded browser console.
+**Decision:** QEMU exposes VNC through a local Unix socket, and App Runner proxies that connection over its own HTTP listener at the VM's `console_path`. Browsers reach it through a websocket upgrade; native clients such as `argui` request `Upgrade: rfb` and receive the raw RFB byte stream on the same connection.
 
-**Rationale:** Console access is part of VM management and should not require a separately exposed QEMU TCP listener.
+**Rationale:** Console access is part of VM management and should not require a separately exposed QEMU TCP listener. Websocket framing exists only for browsers, so a desktop client gets the plain stream instead of re-implementing it.
 
 **Consequences:** Console availability depends on App Runner, and access inherits the control plane's trust model rather than having an independent authentication boundary.
 
