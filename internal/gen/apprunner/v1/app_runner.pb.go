@@ -342,22 +342,26 @@ func (NetworkChangeType) EnumDescriptor() ([]byte, []int) {
 // A virtual machine has zero or more disks, CD-ROM drives, and network
 // interfaces; none are implied.
 type VirtualMachine struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
-	Cpus          uint32                 `protobuf:"varint,4,opt,name=cpus,proto3" json:"cpus,omitempty"`
-	MemoryMib     uint32                 `protobuf:"varint,5,opt,name=memory_mib,json=memoryMib,proto3" json:"memory_mib,omitempty"`
-	Firmware      VMFirmware             `protobuf:"varint,6,opt,name=firmware,proto3,enum=apprunner.v1.VMFirmware" json:"firmware,omitempty"`
-	Status        VMStatus               `protobuf:"varint,7,opt,name=status,proto3,enum=apprunner.v1.VMStatus" json:"status,omitempty"`
-	CreatedAt     string                 `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	LastError     string                 `protobuf:"bytes,9,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
-	ConsolePath   string                 `protobuf:"bytes,10,opt,name=console_path,json=consolePath,proto3" json:"console_path,omitempty"`
-	Disks         []*VMDisk              `protobuf:"bytes,11,rep,name=disks,proto3" json:"disks,omitempty"`
-	Cdroms        []*VMCDROM             `protobuf:"bytes,12,rep,name=cdroms,proto3" json:"cdroms,omitempty"`
-	Nics          []*VMNIC               `protobuf:"bytes,13,rep,name=nics,proto3" json:"nics,omitempty"`
-	CloudInit     *VMCloudInit           `protobuf:"bytes,14,opt,name=cloud_init,json=cloudInit,proto3" json:"cloud_init,omitempty"`
-	Ipmi          *VMIPMIStatus          `protobuf:"bytes,15,opt,name=ipmi,proto3" json:"ipmi,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name        string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Description string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	Cpus        uint32                 `protobuf:"varint,4,opt,name=cpus,proto3" json:"cpus,omitempty"`
+	MemoryMib   uint32                 `protobuf:"varint,5,opt,name=memory_mib,json=memoryMib,proto3" json:"memory_mib,omitempty"`
+	Firmware    VMFirmware             `protobuf:"varint,6,opt,name=firmware,proto3,enum=apprunner.v1.VMFirmware" json:"firmware,omitempty"`
+	Status      VMStatus               `protobuf:"varint,7,opt,name=status,proto3,enum=apprunner.v1.VMStatus" json:"status,omitempty"`
+	CreatedAt   string                 `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	LastError   string                 `protobuf:"bytes,9,opt,name=last_error,json=lastError,proto3" json:"last_error,omitempty"`
+	// console_path is the HTTP path of the VM's VNC console while it runs. A
+	// GET with "Upgrade: rfb" switches the connection to the raw RFB byte
+	// stream for native clients; a websocket upgrade carries the same stream
+	// in binary messages for browsers.
+	ConsolePath   string        `protobuf:"bytes,10,opt,name=console_path,json=consolePath,proto3" json:"console_path,omitempty"`
+	Disks         []*VMDisk     `protobuf:"bytes,11,rep,name=disks,proto3" json:"disks,omitempty"`
+	Cdroms        []*VMCDROM    `protobuf:"bytes,12,rep,name=cdroms,proto3" json:"cdroms,omitempty"`
+	Nics          []*VMNIC      `protobuf:"bytes,13,rep,name=nics,proto3" json:"nics,omitempty"`
+	CloudInit     *VMCloudInit  `protobuf:"bytes,14,opt,name=cloud_init,json=cloudInit,proto3" json:"cloud_init,omitempty"`
+	Ipmi          *VMIPMIStatus `protobuf:"bytes,15,opt,name=ipmi,proto3" json:"ipmi,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

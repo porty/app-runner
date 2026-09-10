@@ -1,4 +1,4 @@
-.PHONY: build dev generate test
+.PHONY: build argui dev generate test
 
 build:
 	npm --prefix frontend ci
@@ -9,6 +9,13 @@ build:
 	mkdir -p bin
 	CGO_ENABLED=0 go build -tags production -o bin/app-runner ./cmd/app-runner
 	CGO_ENABLED=0 go build -o bin/arcli ./cmd/arcli
+
+# The Qt desktop client needs cgo and the Qt 6 development packages
+# (qt6-base-dev on Debian/Ubuntu); the first build compiles the bindings and
+# takes several minutes.
+argui:
+	mkdir -p bin
+	go build -o bin/argui ./cmd/argui
 
 dev:
 	npm --prefix frontend install

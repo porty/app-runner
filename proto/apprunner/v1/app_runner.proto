@@ -76,6 +76,10 @@ message VirtualMachine {
   VMStatus status = 7;
   string created_at = 8;
   string last_error = 9;
+  // console_path is the HTTP path of the VM's VNC console while it runs. A
+  // GET with "Upgrade: rfb" switches the connection to the raw RFB byte
+  // stream for native clients; a websocket upgrade carries the same stream
+  // in binary messages for browsers.
   string console_path = 10;
   repeated VMDisk disks = 11;
   repeated VMCDROM cdroms = 12;
