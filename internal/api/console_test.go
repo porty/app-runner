@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/roflware/app-runner/internal/rfb"
+	"github.com/roflware/app-runner/internal/serialconsole"
 	"github.com/roflware/app-runner/internal/vm/vmtest"
 )
 
@@ -26,6 +27,129 @@ func TestConsoleProxyRejectsInactiveVM(t *testing.T) {
 
 	if response.Code != http.StatusConflict {
 		t.Fatalf("expected status %d, got %d", http.StatusConflict, response.Code)
+	}
+}
+
+func startSerialConsoleServer(t *testing.T) (string, *httptest.Server, <-chan error) {
+	t.Helper()
+	manager, _, settings := vmtest.NewManager(t)
+	machine, err := manager.Create(context.Background(), vmtest.InstallerOptions("serial-machine"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine, err = manager.Start(machine.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", settings.SerialSocketPath(machine.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	hub := serialconsole.New(settings.SerialSocketPath)
+	t.Cleanup(hub.Close)
+	if err := hub.Start(machine.ID); err != nil {
+		t.Fatal(err)
+	}
+	upstream, err := listener.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = upstream.Close() })
+
+	finished := make(chan error, 1)
+	go func() {
+		if _, err := upstream.Write([]byte("login: ")); err != nil {
+			finished <- err
+			return
+		}
+		input := make([]byte, 5)
+		if _, err := io.ReadFull(upstream, input); err != nil {
+			finished <- err
+			return
+		}
+		_, err := upstream.Write(append([]byte("echo "), input...))
+		finished <- err
+	}()
+	server := httptest.NewServer(serialConsoleProxyHandler(manager, hub))
+	t.Cleanup(server.Close)
+	return "/serial-console/" + machine.ID, server, finished
+}
+
+func TestSerialConsoleProxyRelaysRawStream(t *testing.T) {
+	consolePath, server, serverFinished := startSerialConsoleServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	stream, err := serialconsole.DialHTTP(ctx, server.URL+consolePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	output := make([]byte, 7)
+	if _, err := io.ReadFull(stream, output); err != nil {
+		t.Fatal(err)
+	}
+	if string(output) != "login: " {
+		t.Fatalf("serial output = %q", output)
+	}
+	if _, err := stream.Write([]byte("root\n")); err != nil {
+		t.Fatal(err)
+	}
+	reply := make([]byte, 10)
+	if _, err := io.ReadFull(stream, reply); err != nil {
+		t.Fatal(err)
+	}
+	if string(reply) != "echo root\n" {
+		t.Fatalf("serial reply = %q", reply)
+	}
+	if err := <-serverFinished; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSerialConsoleProxyRejectsASecondAttachment(t *testing.T) {
+	consolePath, server, _ := startSerialConsoleServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	first, err := serialconsole.DialHTTP(ctx, server.URL+consolePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	if _, err := serialconsole.DialHTTP(ctx, server.URL+consolePath); err == nil || !strings.Contains(err.Error(), "already in use") {
+		t.Fatalf("second serial attachment error = %v", err)
+	}
+}
+
+func TestSerialConsoleProxyRelaysBinaryWebsocket(t *testing.T) {
+	consolePath, server, serverFinished := startSerialConsoleServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	websocketURL := "ws" + strings.TrimPrefix(server.URL, "http") + consolePath
+	connection, _, err := websocket.Dial(ctx, websocketURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.CloseNow()
+	messageType, output, err := connection.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageType != websocket.MessageBinary || string(output) != "login: " {
+		t.Fatalf("unexpected serial output: type=%v contents=%q", messageType, output)
+	}
+	if err := connection.Write(ctx, websocket.MessageBinary, []byte("root\n")); err != nil {
+		t.Fatal(err)
+	}
+	_, reply, err := connection.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(reply) != "echo root\n" {
+		t.Fatalf("serial reply = %q", reply)
+	}
+	if err := <-serverFinished; err != nil {
+		t.Fatal(err)
 	}
 }
 

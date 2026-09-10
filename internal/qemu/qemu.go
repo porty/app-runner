@@ -20,15 +20,17 @@ import (
 
 	"github.com/roflware/app-runner/internal/config"
 	"github.com/roflware/app-runner/internal/fsutil"
+	"github.com/roflware/app-runner/internal/serialconsole"
 	"github.com/roflware/app-runner/internal/vm"
 )
 
 type Hypervisor struct {
 	settings config.Config
+	serial   *serialconsole.Hub
 }
 
-func New(settings config.Config) *Hypervisor {
-	return &Hypervisor{settings: settings}
+func New(settings config.Config, serial *serialconsole.Hub) *Hypervisor {
+	return &Hypervisor{settings: settings, serial: serial}
 }
 
 func (q *Hypervisor) CreateDisk(ctx context.Context, path string, sizeGiB uint32) error {
@@ -72,7 +74,7 @@ func (q *Hypervisor) CreateLinkedDisk(ctx context.Context, path, backingPath str
 }
 
 func (q *Hypervisor) Start(machine vm.VirtualMachine, onExit func(int, error)) (int, error) {
-	for _, socket := range []string{q.qmpSocket(machine.ID), q.vncSocket(machine.ID)} {
+	for _, socket := range []string{q.qmpSocket(machine.ID), q.vncSocket(machine.ID), q.serialSocket(machine.ID)} {
 		if err := fsutil.RemoveIfExists(socket); err != nil {
 			return 0, fmt.Errorf("remove stale runtime socket: %w", err)
 		}
@@ -84,9 +86,18 @@ func (q *Hypervisor) Start(machine vm.VirtualMachine, onExit func(int, error)) (
 	if err := command.Start(); err != nil {
 		return 0, err
 	}
+	if err := q.serial.Start(machine.ID); err != nil {
+		_ = command.Process.Kill()
+		_, _ = command.Process.Wait()
+		for _, socket := range []string{q.qmpSocket(machine.ID), q.vncSocket(machine.ID), q.serialSocket(machine.ID)} {
+			_ = fsutil.RemoveIfExists(socket)
+		}
+		return 0, fmt.Errorf("connect serial console: %w", err)
+	}
 	go func() {
 		err := command.Wait()
-		for _, socket := range []string{q.qmpSocket(machine.ID), q.vncSocket(machine.ID)} {
+		q.serial.Stop(machine.ID)
+		for _, socket := range []string{q.qmpSocket(machine.ID), q.vncSocket(machine.ID), q.serialSocket(machine.ID)} {
 			_ = fsutil.RemoveIfExists(socket)
 		}
 		onExit(command.Process.Pid, err)
@@ -162,7 +173,8 @@ func (q *Hypervisor) arguments(machine vm.VirtualMachine) []string {
 		"-no-user-config",
 		"-display", "none",
 		"-monitor", "none",
-		"-serial", "none",
+		"-chardev", "socket,id=serial0,path=" + q.serialSocket(machine.ID) + ",server=on,wait=on",
+		"-serial", "chardev:serial0",
 		"-device", "virtio-vga",
 		"-device", "qemu-xhci,id=usb",
 		"-device", "usb-kbd,bus=usb.0",
@@ -234,6 +246,10 @@ func (q *Hypervisor) qmpSocket(id string) string {
 
 func (q *Hypervisor) vncSocket(id string) string {
 	return q.settings.VNCSocketPath(id)
+}
+
+func (q *Hypervisor) serialSocket(id string) string {
+	return q.settings.SerialSocketPath(id)
 }
 
 func executeQMP(socketPath, command string) error {

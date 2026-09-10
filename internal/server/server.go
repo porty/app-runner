@@ -22,6 +22,7 @@ import (
 	"github.com/roflware/app-runner/internal/ipmi"
 	"github.com/roflware/app-runner/internal/nat"
 	"github.com/roflware/app-runner/internal/qemu"
+	"github.com/roflware/app-runner/internal/serialconsole"
 	"github.com/roflware/app-runner/internal/storage"
 	"github.com/roflware/app-runner/internal/vm"
 )
@@ -62,8 +63,10 @@ func Run(args []string, frontend fs.FS) error {
 	if err != nil {
 		return err
 	}
+	serialConsoles := serialconsole.New(settings.SerialSocketPath)
+	defer serialConsoles.Close()
 	machines, err := vm.NewManager(vm.ManagerOptions{
-		Settings: settings, Store: vm.NewJSONStore(settings.StateDir), Hypervisor: qemu.New(settings),
+		Settings: settings, Store: vm.NewJSONStore(settings.StateDir), Hypervisor: qemu.New(settings, serialConsoles),
 		Capabilities: capabilities, BridgeCapability: linuxNetwork.BridgeCapability, Addresses: dhcpService.Addresses,
 		NetworkLifecycle: dhcpService,
 	})
@@ -86,6 +89,13 @@ func Run(args []string, frontend fs.FS) error {
 	vms, err := machines.List()
 	if err != nil {
 		return err
+	}
+	for _, machine := range vms {
+		if machine.Status == vm.StatusRunning || machine.Status == vm.StatusStopping {
+			if err := serialConsoles.Start(machine.ID); err != nil {
+				slog.Warn("restore serial console", "vm", machine.Name, "error", err)
+			}
+		}
 	}
 	if err := dhcpService.Reconcile(vms); err != nil {
 		slog.Warn("restore managed bridge network services", "error", err)
@@ -110,7 +120,7 @@ func Run(args []string, frontend fs.FS) error {
 	server := &http.Server{
 		Addr: settings.Listen,
 		Handler: api.NewHandler(frontend, api.Runtime{
-			VMs: machines, Networking: hostNetwork, Storage: storage.NewService(settings), Templates: templates, Capabilities: capabilities,
+			VMs: machines, SerialConsoles: serialConsoles, Networking: hostNetwork, Storage: storage.NewService(settings), Templates: templates, Capabilities: capabilities,
 		}),
 		// Console WebSockets and large uploads are long-lived, so only the
 		// header read and idle keep-alives are bounded.

@@ -189,6 +189,10 @@ func (c Config) VNCSocketPath(id string) string {
 	return filepath.Join(c.RunDir, id+".vnc.sock")
 }
 
+func (c Config) SerialSocketPath(id string) string {
+	return filepath.Join(c.RunDir, id+".serial.sock")
+}
+
 func (c Config) ISOPath(name string) string {
 	return filepath.Join(c.ISODir, name)
 }

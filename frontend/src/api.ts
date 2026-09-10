@@ -24,6 +24,7 @@ export interface VirtualMachine {
   created_at: string
   last_error?: string
   console_path: string
+  serial_console_path: string
   disks?: VMDisk[]
   cdroms?: VMCDROM[]
   nics?: VMNIC[]
