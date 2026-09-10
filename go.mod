@@ -9,6 +9,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/google/nftables v0.3.0
 	github.com/insomniacslk/dhcp v0.0.0-20260728151720-c308df0fdcef
+	github.com/mappu/miqt v0.14.0
 	github.com/miekg/dns v1.1.73
 	github.com/twitchtv/twirp v8.1.3+incompatible
 	github.com/vishvananda/netlink v1.3.1
