@@ -86,6 +86,9 @@ message VirtualMachine {
   repeated VMNIC nics = 13;
   VMCloudInit cloud_init = 14;
   VMIPMIStatus ipmi = 15;
+  // serial_console_path is the HTTP path of the VM's raw serial console.
+  // Native clients use "Upgrade: serial"; browsers use a websocket.
+  string serial_console_path = 16;
 }
 
 // Disks attach in list order; the first disk is the boot disk. source_image

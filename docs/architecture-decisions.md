@@ -84,6 +84,14 @@ The Go code is split into packages under `internal/` along those boundaries: `vm
 
 **Consequences:** Console availability depends on App Runner, and access inherits the control plane's trust model rather than having an independent authentication boundary.
 
+## Serial consoles are brokered separately from display consoles
+
+**Decision:** Every VM receives a standard serial port backed by a private QEMU Unix socket. App Runner holds the upstream connection, captures a bounded in-memory transcript, and exposes one interactive attachment over a websocket or `Upgrade: serial`. The existing VNC console remains available.
+
+**Rationale:** Server-oriented Linux images frequently use a serial console before networking is available. A broker captures early boot output and prevents competing clients from interleaving input, while keeping terminal emulation in the web and desktop clients. The stream remains a direct HTTP endpoint because a long-lived duplex byte stream is unsuitable for a unary Twirp RPC.
+
+**Consequences:** Serial terminal dimensions are not negotiated with the guest, captured output is lost when App Runner restarts, and only one client may interact with a VM's serial console at a time.
+
 ## Virtual IPMI is an interoperability edge
 
 **Decision:** A VM may expose a persistent virtual BMC on a selected management bridge, translating a constrained IPMI 2.0 command set into App Runner lifecycle and QMP operations.

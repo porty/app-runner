@@ -1,0 +1,58 @@
+package serialconsole
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+)
+
+// UpgradeProtocol is used by native clients to request a raw serial stream.
+const UpgradeProtocol = "serial"
+
+func IsUpgradeRequest(request *http.Request) bool {
+	return strings.EqualFold(request.Header.Get("Upgrade"), UpgradeProtocol)
+}
+
+var httpTransport = &http.Transport{
+	Proxy:     http.ProxyFromEnvironment,
+	Protocols: http1Only(),
+}
+
+func http1Only() *http.Protocols {
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	return protocols
+}
+
+// DialHTTP upgrades serialURL to a raw byte stream. The returned stream must
+// be closed by the caller.
+func DialHTTP(ctx context.Context, serialURL string) (io.ReadWriteCloser, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, serialURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", UpgradeProtocol)
+	response, err := httpTransport.RoundTrip(request)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode != http.StatusSwitchingProtocols {
+		defer response.Body.Close()
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		message := strings.TrimSpace(string(body))
+		if message == "" {
+			message = response.Status
+		}
+		return nil, errors.New(message)
+	}
+	stream, ok := response.Body.(io.ReadWriteCloser)
+	if !ok {
+		response.Body.Close()
+		return nil, fmt.Errorf("the serial console connection cannot be written to")
+	}
+	return stream, nil
+}

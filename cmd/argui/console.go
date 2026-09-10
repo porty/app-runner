@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -11,10 +12,11 @@ import (
 
 	apprunnerv1 "github.com/roflware/app-runner/internal/gen/apprunner/v1"
 	"github.com/roflware/app-runner/internal/rfb"
+	"github.com/roflware/app-runner/internal/serialconsole"
 )
 
 // consoleWindow is a VM's console: its own window with a power menu, key
-// chords, the VNC display, and a status bar.
+// chords, graphical and serial views, and a status bar.
 type consoleWindow struct {
 	*qt6.QMainWindow
 	mw       *mainWindow
@@ -22,17 +24,22 @@ type consoleWindow struct {
 	onClosed func()
 
 	stack                               *qt6.QStackedWidget
+	consoleTabs                         *qt6.QTabWidget
 	offLabel                            *qt6.QLabel
 	startBtn                            *qt6.QPushButton
 	vnc                                 *vncWidget
+	serial                              *serialTerminalWidget
 	banner                              *messageWidget
 	toolbar                             *qt6.QToolBar
 	scaleBox                            *qt6.QCheckBox
+	sendKeysButton                      *qt6.QToolButton
 	statusConn, statusVM, statusAddress *qt6.QLabel
+	statusMode                          *qt6.QLabel
 
 	startAction, shutdownAction, rebootAction, forceAction, reconnectAction, fullAction *qt6.QAction
 
 	client     *rfb.Client
+	serialConn io.ReadWriteCloser
 	connecting bool
 	expected   bool
 	generation int
@@ -54,6 +61,7 @@ func newConsoleWindow(mw *mainWindow, vm *apprunnerv1.VirtualMachine) *consoleWi
 		c.closed = true
 		c.timer.Stop()
 		c.disconnect(true)
+		c.serial.destroy()
 		if c.onClosed != nil {
 			c.onClosed()
 		}
@@ -65,6 +73,7 @@ func newConsoleWindow(mw *mainWindow, vm *apprunnerv1.VirtualMachine) *consoleWi
 
 func (c *consoleWindow) build() {
 	c.vnc = newVNCWidget()
+	c.serial = newSerialTerminalWidget()
 	c.vnc.setScale(c.mw.settings.consoleScaleToWindow())
 	c.vnc.onCut = func(text string) { qt6.QGuiApplication_Clipboard().SetText(text) }
 
@@ -100,11 +109,15 @@ func (c *consoleWindow) build() {
 	sendKeys := c.buildSendKeyMenu()
 	input.AddMenu(sendKeys)
 	input.AddAction(c.mw.action("&Paste Clipboard as Keystrokes", "edit-paste", 0, "Ctrl+Shift+V", func() {
-		c.vnc.typeText(qt6.QGuiApplication_Clipboard().Text())
+		if c.consoleTabs.CurrentIndex() == 1 {
+			c.serial.paste()
+		} else {
+			c.vnc.typeText(qt6.QGuiApplication_Clipboard().Text())
+		}
 	}))
 	help := bar.AddMenuWithTitle("&Help")
 	help.AddAction(c.mw.action("Console &Help", "help-contents", 0, "", func() {
-		qt6.QMessageBox_Information(c.QWidget, "Console", "Click the display to give the guest keyboard focus; every key, including application shortcuts, then goes to the guest. Use Input → Send Key for chords the desktop intercepts, such as Ctrl+Alt+Del. Shut Down asks the guest to power off via ACPI; Force Off stops QEMU immediately.")
+		qt6.QMessageBox_Information(c.QWidget, "Console", "Display is the graphical VNC console; Serial connects to the guest's COM1 terminal. Click either view to give it keyboard focus. Input → Send Key applies to Display only. Shut Down asks the guest to power off via ACPI; Force Off stops QEMU immediately.")
 	}))
 
 	c.toolbar = qt6.NewQToolBar2("Console")
@@ -125,6 +138,7 @@ func (c *consoleWindow) build() {
 	c.toolbar.AddWidget(power.QWidget)
 	c.toolbar.AddSeparator()
 	keys := qt6.NewQToolButton2()
+	c.sendKeysButton = keys
 	keys.SetText("Send Key")
 	keys.SetIcon(themeIcon("input-keyboard", 0))
 	keys.SetToolButtonStyle(qt6.ToolButtonTextBesideIcon)
@@ -165,7 +179,30 @@ func (c *consoleWindow) build() {
 	offLayout.AddWidget3(c.startBtn.QWidget, 0, qt6.AlignHCenter)
 	offLayout.AddStretch()
 	c.stack.AddWidget(off)
-	c.stack.AddWidget(c.vnc.QWidget)
+	c.consoleTabs = qt6.NewQTabWidget2()
+	c.consoleTabs.SetDocumentMode(true)
+	c.consoleTabs.AddTab(c.vnc.QWidget, "Display")
+	c.consoleTabs.AddTab(c.serial.QWidget, "Serial")
+	c.consoleTabs.OnCurrentChanged(func(index int) {
+		serial := index == 1
+		c.scaleBox.SetEnabled(!serial)
+		scaleAction.SetEnabled(!serial)
+		c.sendKeysButton.SetEnabled(!serial)
+		sendKeys.SetEnabled(!serial)
+		if c.statusMode != nil {
+			if serial {
+				c.statusMode.SetText("Exclusive serial session")
+			} else {
+				c.statusMode.SetText("Shared display session")
+			}
+		}
+		if consoleAvailable(c.vm) {
+			c.disconnect(true)
+			c.banner.Hide()
+			c.connect()
+		}
+	})
+	c.stack.AddWidget(c.consoleTabs.QWidget)
 	layout.AddWidget2(c.stack.QWidget, 1)
 	c.SetCentralWidget(central)
 
@@ -179,7 +216,8 @@ func (c *consoleWindow) build() {
 	status.AddWidget(c.statusVM.QWidget)
 	status.AddWidget(verticalLine().QWidget)
 	status.AddWidget(c.statusAddress.QWidget)
-	status.AddPermanentWidget(mutedLabel("Shared session").QWidget)
+	c.statusMode = mutedLabel("Shared display session")
+	status.AddPermanentWidget(c.statusMode.QWidget)
 }
 
 func (c *consoleWindow) buildSendKeyMenu() *qt6.QMenu {
@@ -242,8 +280,8 @@ func (c *consoleWindow) vmChanged(vm *apprunnerv1.VirtualMachine) {
 	c.statusAddress.SetText(strings.Join(vmAddresses(vm), ", "))
 	c.updateActions()
 	if consoleAvailable(vm) {
-		c.stack.SetCurrentWidget(c.vnc.QWidget)
-		if c.client == nil && !c.connecting {
+		c.stack.SetCurrentWidget(c.consoleTabs.QWidget)
+		if c.client == nil && c.serialConn == nil && !c.connecting {
 			c.connect()
 		}
 		return
@@ -253,7 +291,7 @@ func (c *consoleWindow) vmChanged(vm *apprunnerv1.VirtualMachine) {
 		c.offLabel.SetText(c.offLabel.Text() + fmt.Sprintf(`<br><span style="color:%s">%s</span>`, colorNegative, escape(vm.GetLastError())))
 	}
 	c.stack.SetCurrentIndex(0)
-	if c.client != nil || c.connecting {
+	if c.client != nil || c.serialConn != nil || c.connecting {
 		c.disconnect(true)
 	}
 	c.setConnection(colorInactive, "Not connected")
@@ -287,7 +325,11 @@ func (c *consoleWindow) poll() {
 }
 
 func (c *consoleWindow) connect() {
-	if c.connecting || c.client != nil || c.closed {
+	if c.connecting || c.client != nil || c.serialConn != nil || c.closed {
+		return
+	}
+	if c.consoleTabs.CurrentIndex() == 1 {
+		c.connectSerial()
 		return
 	}
 	c.connecting = true
@@ -315,6 +357,65 @@ func (c *consoleWindow) connect() {
 		runErr := client.Run()
 		mainthread.Start(func() { c.disconnected(generation, runErr) })
 	}()
+}
+
+func (c *consoleWindow) connectSerial() {
+	c.connecting = true
+	c.expected = false
+	c.generation++
+	generation := c.generation
+	c.setConnection(colorNeutral, "Connecting…")
+	c.updateActions()
+	url := c.mw.client.consoleURL(c.vm.GetSerialConsolePath())
+	go func() {
+		dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		connection, err := serialconsole.DialHTTP(dialCtx, url)
+		dialCancel()
+		if err != nil {
+			mainthread.Start(func() { c.connectFailed(generation, err) })
+			return
+		}
+		mainthread.Start(func() {
+			if !c.serialConnected(generation, connection) {
+				return
+			}
+			go func() {
+				runErr := c.serial.run(connection)
+				_ = connection.Close()
+				mainthread.Start(func() { c.serialDisconnected(generation, connection, runErr) })
+			}()
+		})
+	}()
+}
+
+func (c *consoleWindow) serialConnected(generation int, connection io.ReadWriteCloser) bool {
+	if generation != c.generation || c.closed {
+		_ = connection.Close()
+		return false
+	}
+	c.connecting = false
+	c.serialConn = connection
+	c.banner.Hide()
+	c.setConnection(colorPositive, "Connected · "+c.vm.GetSerialConsolePath()+" · size not negotiated")
+	c.updateActions()
+	c.serial.focus()
+	return true
+}
+
+func (c *consoleWindow) serialDisconnected(generation int, connection io.ReadWriteCloser, err error) {
+	if generation != c.generation || c.closed {
+		return
+	}
+	if c.serialConn == connection {
+		c.serialConn = nil
+	}
+	c.connecting = false
+	c.setConnection(colorNegative, "Disconnected")
+	if err != nil && !c.expected {
+		c.banner.setActions(bannerAction{label: "Reconnect", handler: func() { c.connect() }})
+		c.banner.show(messageError, escape("The serial console connection ended unexpectedly: "+errorMessage(err)))
+	}
+	c.updateActions()
 }
 
 func (c *consoleWindow) connectFailed(generation int, err error) {
@@ -372,6 +473,10 @@ func (c *consoleWindow) disconnect(expected bool) {
 		c.client = nil
 		c.vnc.setClient(nil)
 	}
+	if c.serialConn != nil {
+		_ = c.serialConn.Close()
+		c.serialConn = nil
+	}
 	c.connecting = false
 	c.updateActions()
 }
@@ -379,6 +484,9 @@ func (c *consoleWindow) disconnect(expected bool) {
 // power runs a lifecycle operation; failures show in this window's banner.
 func (c *consoleWindow) power(action string) {
 	vm := c.vm
+	if action == "start" {
+		c.serial.clear()
+	}
 	switch action {
 	case "force":
 		if !confirm(c.QWidget, "Force Off", fmt.Sprintf("Force %s off? Unsaved guest data may be lost.", vm.GetName()), "Force Off", true) {
