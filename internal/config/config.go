@@ -181,6 +181,13 @@ func (c Config) CloudInitISOPath(id string) string {
 	return filepath.Join(c.VMStateDir(id), "cloud-init.iso")
 }
 
+// SerialLogPath is the append-only log of a VM's serial output for its
+// current run; the previous run is kept alongside with a .1 suffix. It is
+// application state, so it survives restarts and is removed with the VM.
+func (c Config) SerialLogPath(id string) string {
+	return filepath.Join(c.VMStateDir(id), "serial.log")
+}
+
 func (c Config) QMPSocketPath(id string) string {
 	return filepath.Join(c.RunDir, id+".qmp.sock")
 }

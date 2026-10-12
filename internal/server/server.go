@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"net/netip"
 	"os"
 	"os/signal"
 	"syscall"
@@ -63,7 +62,7 @@ func Run(args []string, frontend fs.FS) error {
 	if err != nil {
 		return err
 	}
-	serialConsoles := serialconsole.New(settings.SerialSocketPath)
+	serialConsoles := serialconsole.New(settings.SerialSocketPath, settings.SerialLogPath)
 	defer serialConsoles.Close()
 	machines, err := vm.NewManager(vm.ManagerOptions{
 		Settings: settings, Store: vm.NewJSONStore(settings.StateDir), Hypervisor: qemu.New(settings, serialConsoles),
@@ -77,14 +76,7 @@ func Run(args []string, frontend fs.FS) error {
 	if err != nil {
 		return err
 	}
-	bmcService := ipmi.NewManager(machines, func(bridge string) (netip.Prefix, bool) {
-		status := dhcpService.Status(bridge)
-		if !status.Enabled {
-			return netip.Prefix{}, false
-		}
-		prefix, err := netip.ParsePrefix(status.CIDR)
-		return prefix, err == nil
-	})
+	bmcService := ipmi.NewManager(machines, dhcpService.Prefix)
 	machines.SetIPMIController(bmcService)
 	vms, err := machines.List()
 	if err != nil {
@@ -92,7 +84,7 @@ func Run(args []string, frontend fs.FS) error {
 	}
 	for _, machine := range vms {
 		if machine.Status == vm.StatusRunning || machine.Status == vm.StatusStopping {
-			if err := serialConsoles.Start(machine.ID); err != nil {
+			if err := serialConsoles.Resume(machine.ID); err != nil {
 				slog.Warn("restore serial console", "vm", machine.Name, "error", err)
 			}
 		}

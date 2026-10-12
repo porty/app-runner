@@ -46,7 +46,7 @@ func startSerialConsoleServer(t *testing.T) (string, *httptest.Server, <-chan er
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
-	hub := serialconsole.New(settings.SerialSocketPath)
+	hub := serialconsole.New(settings.SerialSocketPath, nil)
 	t.Cleanup(hub.Close)
 	if err := hub.Start(machine.ID); err != nil {
 		t.Fatal(err)

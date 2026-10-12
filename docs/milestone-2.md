@@ -67,9 +67,9 @@ Launch and manage QEMU/KVM virtual machines from the web interface.
 - optionally exposes a persistent virtual BMC for each VM over IPMI 2.0/RMCP+ on UDP port 623
 - assigns each virtual BMC a unique IPv4 address on a selected management bridge and keeps it reachable while its guest is powered off
 - suggests unused addresses from `.2` through `.49` on managed `/24` networks, below the managed DHCP pool; other bridge networks accept an explicit address
-- supports authenticated `lanplus` sessions using encrypted cipher suite 17 and disables legacy IPMI 1.5 sessions
+- supports authenticated `lanplus` sessions using encrypted cipher suite 17 (preferred) or 3 and disables legacy IPMI 1.5 sessions
 - maps chassis status, power on, immediate power off, soft shutdown, reset, and power cycle to the VM manager and QMP
-- supports one-shot or persistent PXE, disk, and optical boot overrides through QEMU boot order
+- supports one-shot or persistent PXE, disk, and optical boot overrides through per-device QEMU `bootindex` properties, which both UEFI and BIOS firmware honour
 - stores credentials only in mode-`0600` VM metadata, omits passwords from API responses, and supports credential rotation
 - restores enabled listeners after an App Runner restart and removes their bridge addresses when disabled, deleted, or shut down
 - requires `CAP_NET_ADMIN` to assign management addresses and root or `CAP_NET_BIND_SERVICE` to bind UDP port 623

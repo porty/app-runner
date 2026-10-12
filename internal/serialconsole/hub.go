@@ -1,7 +1,7 @@
 // Package serialconsole owns the live byte streams between QEMU serial
 // devices and attached clients. It continuously drains each guest console,
-// retains bounded output for a later attachment, and permits one interactive
-// client at a time.
+// retains bounded output for a later attachment, appends all output to a
+// per-VM log file, and permits one interactive client at a time.
 package serialconsole
 
 import (
@@ -27,21 +27,37 @@ const (
 type Hub struct {
 	mu           sync.Mutex
 	socketPath   func(string) string
+	logPath      func(string) string
 	historyBytes int
 	dialTimeout  time.Duration
 	sessions     map[string]*session
 }
 
-func New(socketPath func(string) string) *Hub {
+// New returns a Hub that reaches each VM's QEMU serial socket at
+// socketPath(id) and, when logPath is not nil, also appends its output to
+// the file at logPath(id).
+func New(socketPath, logPath func(string) string) *Hub {
 	return &Hub{
-		socketPath: socketPath, historyBytes: defaultHistoryBytes,
+		socketPath: socketPath, logPath: logPath, historyBytes: defaultHistoryBytes,
 		dialTimeout: defaultDialTimeout, sessions: make(map[string]*session),
 	}
 }
 
-// Start connects to the QEMU serial socket and begins capturing output. It is
-// idempotent for a VM whose session is already running.
+// Start connects to the QEMU serial socket of a VM that has just been
+// started and begins capturing output. The previous run's log is kept as
+// LOG.1 and a new log is started. It is idempotent for a VM whose session
+// is already running.
 func (h *Hub) Start(id string) error {
+	return h.start(id, true)
+}
+
+// Resume reconnects to a VM that kept running while App Runner restarted,
+// appending to its existing log rather than starting a new one.
+func (h *Hub) Resume(id string) error {
+	return h.start(id, false)
+}
+
+func (h *Hub) start(id string, newRun bool) error {
 	h.mu.Lock()
 	if _, ok := h.sessions[id]; ok {
 		h.mu.Unlock()
@@ -50,6 +66,9 @@ func (h *Hub) Start(id string) error {
 	s := &session{historyLimit: h.historyBytes, stop: make(chan struct{})}
 	h.sessions[id] = s
 	h.mu.Unlock()
+	if h.logPath != nil {
+		s.setLog(openLog(h.logPath(id), newRun))
+	}
 
 	connection, err := dialUntil(h.socketPath(id), h.dialTimeout, s.stop)
 	if err != nil {
@@ -74,7 +93,8 @@ func (h *Hub) Start(id string) error {
 	return nil
 }
 
-// Stop forgets captured output and closes the upstream and attached client.
+// Stop forgets captured output and closes the upstream, the attached client,
+// and the log file.
 func (h *Hub) Stop(id string) {
 	h.mu.Lock()
 	s := h.sessions[id]
@@ -140,6 +160,7 @@ type session struct {
 	history      []byte
 	historyLimit int
 	attached     *attachment
+	log          *logFile
 	stop         chan struct{}
 	stopOnce     sync.Once
 }
@@ -156,12 +177,26 @@ func (s *session) setUpstream(connection net.Conn) bool {
 	return true
 }
 
+// setLog installs the session's log file unless the session has already
+// been closed, in which case the file is closed instead.
+func (s *session) setLog(log *logFile) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case <-s.stop:
+		log.Close()
+	default:
+		s.log = log
+	}
+}
+
 func (s *session) run(connection net.Conn, socketPath string) {
 	for {
 		buffer := make([]byte, 32*1024)
 		for {
 			count, err := connection.Read(buffer)
 			if count > 0 {
+				s.log.Write(buffer[:count])
 				s.publish(buffer[:count])
 			}
 			if err != nil {
@@ -275,7 +310,9 @@ func (s *session) close() {
 	if s.attached != nil {
 		s.detachLocked(s.attached)
 	}
+	log := s.log
 	s.mu.Unlock()
+	log.Close()
 }
 
 type attachment struct {

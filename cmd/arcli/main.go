@@ -1083,15 +1083,16 @@ func network(ctx context.Context, c apprunnerv1.AppRunnerService, args []string,
 	}
 }
 func networkBridge(ctx context.Context, c apprunnerv1.AppRunnerService, args []string, output *printer) error {
-	usage := "usage: arcli net bridge configure BRIDGE [--description TEXT] [--dhcp] [--cidr CIDR] [--nat] [--dns] [--dns-forwarders A,B] [--auto-dns] [--dns-suffix SUFFIX] [--http-boot-url URL]"
+	usage := "usage: arcli net bridge configure BRIDGE [--description TEXT] [--dhcp | --gateway-only] [--cidr CIDR] [--nat] [--dns] [--dns-forwarders A,B] [--auto-dns] [--dns-suffix SUFFIX] [--http-boot-url URL]"
 	if len(args) == 0 || args[0] != "configure" {
 		return errors.New(usage)
 	}
 	f := flags("net bridge configure")
 	description := f.String("description", "", "description")
 	dhcp := f.Bool("dhcp", false, "enable managed DHCP on the bridge")
-	cidr := f.String("cidr", "", "DHCP subnet CIDR (default 192.168.100.0/24)")
-	nat := f.Bool("nat", false, "enable NAT and outbound routing for the DHCP range")
+	gatewayOnly := f.Bool("gateway-only", false, "assign the --cidr gateway address (and --nat) without managed DHCP, for an external DHCP server")
+	cidr := f.String("cidr", "", "subnet CIDR (default 192.168.100.0/24 with --dhcp; required with --gateway-only)")
+	nat := f.Bool("nat", false, "enable NAT and outbound routing for the range")
 	dns := f.Bool("dns", false, "enable the managed forwarding DNS server")
 	forwarders := f.String("dns-forwarders", "", "comma-separated upstream DNS servers")
 	autoDNS := f.Bool("auto-dns", false, "publish A records for VMs on the bridge under --dns-suffix")
@@ -1103,8 +1104,14 @@ func networkBridge(ctx context.Context, c apprunnerv1.AppRunnerService, args []s
 	if e := require(f.Args(), 1, usage); e != nil {
 		return e
 	}
+	if *gatewayOnly && *dhcp {
+		return errors.New("--gateway-only and --dhcp are mutually exclusive")
+	}
+	if *gatewayOnly && strings.TrimSpace(*cidr) == "" {
+		return errors.New("--gateway-only requires --cidr")
+	}
 	r, e := c.ConfigureBridge(ctx, &apprunnerv1.ConfigureBridgeRequest{
-		BridgeName: f.Args()[0], Description: *description, DhcpEnabled: *dhcp, Cidr: *cidr, NatEnabled: *nat,
+		BridgeName: f.Args()[0], Description: *description, DhcpEnabled: *dhcp, GatewayOnly: *gatewayOnly, Cidr: *cidr, NatEnabled: *nat,
 		DnsEnabled: *dns, DnsForwarders: split(*forwarders), AutoDns: *autoDNS, DnsSuffix: *suffix, HttpBootUrl: *httpBootURL,
 	})
 	if e != nil {

@@ -346,7 +346,7 @@ func (d *settingsDialog) buildNetwork() *qt6.QWidget {
 	d.ipmiBridge = qt6.NewQComboBox2()
 	for _, bridge := range d.s.network.GetBridges() {
 		label := bridge.GetName()
-		if bridge.GetDhcp().GetEnabled() {
+		if managedSubnet(bridge) {
 			label += " · managed subnet"
 		}
 		d.ipmiBridge.AddItem3(label, qt6.NewQVariant14(bridge.GetName()))
@@ -522,7 +522,7 @@ func (d *settingsDialog) load(vm *apprunnerv1.VirtualMachine) {
 	bridgeName := ipmi.GetBridgeName()
 	if bridgeName == "" {
 		for _, bridge := range d.s.network.GetBridges() {
-			if bridge.GetDhcp().GetEnabled() {
+			if managedSubnet(bridge) {
 				bridgeName = bridge.GetName()
 				break
 			}

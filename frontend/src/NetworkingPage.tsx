@@ -384,7 +384,17 @@ function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply
           </Stack>
         </TableCell>
         <TableCell sx={{ verticalAlign: 'top', minWidth: 190 }}>
-          {!dhcp?.enabled && <Chip size="small" label="none" />}
+          {!dhcp?.enabled && !dhcp?.gateway_only && <Chip size="small" label="none" />}
+          {dhcp?.gateway_only && (
+            <Stack spacing={0.75} sx={{ alignItems: 'flex-start' }}>
+              <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+                <Tooltip title="App Runner assigns the gateway address; an external DHCP server serves this bridge"><Chip size="small" label="gateway only" /></Tooltip>
+                {dhcp.nat_enabled && <ServiceChip label="nat" running={dhcp.nat_running} />}
+              </Stack>
+              <Typography variant="caption" color="text.secondary">{dhcp.cidr} · gateway {dhcp.server_address}</Typography>
+              {dhcp.last_error && <Typography variant="caption" color="error">{dhcp.last_error}</Typography>}
+            </Stack>
+          )}
           {dhcp?.enabled && (
             <Stack spacing={0.75} sx={{ alignItems: 'flex-start' }}>
               <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
@@ -437,7 +447,7 @@ function BridgeRow({ bridge, disabled, configurationDisabled, canAttach, onApply
             <Button component={Link} to={`/configuration/networking/bridges/${encodeURIComponent(bridge.name)}`} aria-label={`Configure settings for ${bridge.name}`} disabled={configurationDisabled}>
               <Tooltip title="Settings"><span><SettingsEthernetRounded /></span></Tooltip>
             </Button>
-            <Button aria-label={`Delete bridge ${bridge.name}`} color="error" disabled={disabled || members.length > 0 || workloads.length > 0 || dhcp?.enabled} onClick={deleteBridge}>
+            <Button aria-label={`Delete bridge ${bridge.name}`} color="error" disabled={disabled || members.length > 0 || workloads.length > 0 || dhcp?.enabled || dhcp?.gateway_only} onClick={deleteBridge}>
               <Tooltip title="Delete bridge"><span><DeleteOutlineRounded /></span></Tooltip>
             </Button>
           </ButtonGroup>

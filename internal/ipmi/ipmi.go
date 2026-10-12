@@ -13,6 +13,7 @@ import (
 	"github.com/bougou/go-ipmi/pkg/bmc"
 	"github.com/bougou/go-ipmi/pkg/hal"
 	"github.com/bougou/go-ipmi/pkg/server"
+	"github.com/bougou/go-ipmi/pkg/transport"
 	"github.com/bougou/go-ipmi/pkg/transport/udp"
 	"github.com/bougou/go-ipmi/pkg/types"
 	"github.com/vishvananda/netlink"
@@ -23,6 +24,15 @@ import (
 )
 
 const Port = 623
+
+// cipherSuites are the RMCP+ cipher suites the virtual BMC advertises and
+// accepts, most preferred first. Suite 17 (RAKP-HMAC-SHA256, HMAC-SHA256-128,
+// AES-CBC-128) is preferred; suite 3 (RAKP-HMAC-SHA1, HMAC-SHA1-96,
+// AES-CBC-128) is the suite IPMI 2.0 requires BMCs to support and the one
+// many clients and older ipmitool builds default to. Both are implemented end
+// to end by the go-ipmi server; suites without authentication, integrity, or
+// encryption remain unavailable.
+var cipherSuites = []types.CipherSuiteID{types.CipherSuiteID17, types.CipherSuiteID3}
 
 type endpoint struct {
 	server     *server.Server
@@ -83,27 +93,17 @@ func (m *Manager) Configure(machine vm.VirtualMachine) error {
 		_ = removeAddress(machine.IPMI.BridgeName, prefix)
 		return fmt.Errorf("start IPMI listener: %w", err)
 	}
-	hardware := &chassisHAL{manager: m.vms, vmID: machine.ID}
-	var guid [16]byte
-	copy(guid[:], []byte(machine.ID))
-	device := bmc.New(bmc.DeviceInfo{
-		DeviceID: 32, DeviceRevision: 1, FirmwareMajor: 1, FirmwareMinor: 0,
-		IPMIVersion: 0x20, ManufacturerID: 0x00FFFFFF, ProductID: 1,
-	}, guid, hardware)
-	user, err := device.Users.Add(2, machine.IPMI.Username)
+	bmcServer, err := newBMCServer(machine.ID, &chassisHAL{manager: m.vms, vmID: machine.ID}, machine.IPMI.Username, machine.IPMI.Password, connection)
 	if err != nil {
 		_ = connection.Close()
 		_ = removeAddress(machine.IPMI.BridgeName, prefix)
-		return fmt.Errorf("configure IPMI user: %w", err)
+		return err
 	}
-	user.SetPassword([]byte(machine.IPMI.Password))
-	user.Enabled = true
-	user.ChannelAccess[1] = bmc.UserChannelAccess{MaxPrivilege: bmc.PrivilegeLevelAdministrator, Enabled: true}
 	runtime := &endpoint{
 		bridge: machine.IPMI.BridgeName, address: address, prefixBits: prefix.Bits(),
 		username: machine.IPMI.Username, password: machine.IPMI.Password, running: true,
+		server: bmcServer,
 	}
-	runtime.server = server.NewServer(device, connection, server.WithCipherSuites([]types.CipherSuiteID{types.CipherSuiteID17}), server.WithV15Disabled())
 	m.runtimes[machine.ID] = runtime
 	go func() {
 		err := runtime.server.Serve(context.Background())
@@ -120,6 +120,25 @@ func (m *Manager) Configure(machine vm.VirtualMachine) error {
 	}()
 	slog.Info("IPMI server started", "machine", machine.Name, "bridge", machine.IPMI.BridgeName, "address", address, "port", Port)
 	return nil
+}
+
+// newBMCServer builds the RMCP+ (lanplus) BMC for one VM with a single
+// administrator user. IPMI 1.5 sessions are disabled.
+func newBMCServer(vmID string, hardware hal.HAL, username, password string, connection transport.PacketConn) (*server.Server, error) {
+	var guid [16]byte
+	copy(guid[:], []byte(vmID))
+	device := bmc.New(bmc.DeviceInfo{
+		DeviceID: 32, DeviceRevision: 1, FirmwareMajor: 1, FirmwareMinor: 0,
+		IPMIVersion: 0x20, ManufacturerID: 0x00FFFFFF, ProductID: 1,
+	}, guid, hardware)
+	user, err := device.Users.Add(2, username)
+	if err != nil {
+		return nil, fmt.Errorf("configure IPMI user: %w", err)
+	}
+	user.SetPassword([]byte(password))
+	user.Enabled = true
+	user.ChannelAccess[1] = bmc.UserChannelAccess{MaxPrivilege: bmc.PrivilegeLevelAdministrator, Enabled: true}
+	return server.NewServer(device, connection, server.WithCipherSuites(cipherSuites), server.WithV15Disabled()), nil
 }
 
 func (m *Manager) Disable(machine vm.VirtualMachine) {

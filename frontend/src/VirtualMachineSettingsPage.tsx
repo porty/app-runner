@@ -107,7 +107,7 @@ export default function VirtualMachineSettingsPage() {
   const [error, setError] = useState('')
 
   const applyLoadedVM = useCallback((loadedVM: VirtualMachine, bridges: NetworkingStatus['bridges'], vms: VirtualMachine[]) => {
-    const ipmiBridge = loadedVM.ipmi?.bridge_name || (bridges ?? []).find((bridge) => bridge.dhcp?.enabled)?.name || (bridges ?? [])[0]?.name || ''
+    const ipmiBridge = loadedVM.ipmi?.bridge_name || (bridges ?? []).find((bridge) => bridge.dhcp?.enabled || bridge.dhcp?.gateway_only)?.name || (bridges ?? [])[0]?.name || ''
     setVM(loadedVM)
     setGeneral({
       id: loadedVM.id,
@@ -418,7 +418,7 @@ export default function VirtualMachineSettingsPage() {
                       const bridgeName = event.target.value
                       setIPMI({ ...ipmi, bridge_name: bridgeName, address: suggestIPMIAddress(bridgeName, bridges, virtualMachines, vm.id) })
                     }}>
-                      {bridges.map((bridge) => <MenuItem key={bridge.name} value={bridge.name}>{bridge.name}{bridge.dhcp?.enabled ? ' · managed subnet' : ''}</MenuItem>)}
+                      {bridges.map((bridge) => <MenuItem key={bridge.name} value={bridge.name}>{bridge.name}{bridge.dhcp?.enabled || bridge.dhcp?.gateway_only ? ' · managed subnet' : ''}</MenuItem>)}
                     </TextField>
                     <TextField label="Management IPv4 address" value={ipmi.address} onChange={(event) => setIPMI({ ...ipmi, address: event.target.value })} helperText="A unique address on this bridge; App Runner assigns it while IPMI is enabled." />
                     <TextField label="Username" value={ipmi.username} onChange={(event) => setIPMI({ ...ipmi, username: event.target.value })} slotProps={{ htmlInput: { maxLength: 16 } }} />
@@ -437,7 +437,7 @@ export default function VirtualMachineSettingsPage() {
 
 function suggestIPMIAddress(bridgeName: string, bridges: NetworkingStatus['bridges'], vms: VirtualMachine[], excludeVMID = ''): string {
   const bridge = (bridges ?? []).find((candidate) => candidate.name === bridgeName)
-  const cidr = bridge?.dhcp?.enabled ? bridge.dhcp.cidr : bridge?.addresses?.find((address) => address.includes('.'))
+  const cidr = bridge?.dhcp?.enabled || bridge?.dhcp?.gateway_only ? bridge.dhcp.cidr : bridge?.addresses?.find((address) => address.includes('.'))
   if (!cidr) return ''
   const [address, bitsText] = cidr.split('/')
   const bits = Number(bitsText)

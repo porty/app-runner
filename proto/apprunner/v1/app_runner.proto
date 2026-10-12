@@ -491,6 +491,10 @@ message BridgeDHCPStatus {
   // http_boot_url is offered to UEFI HTTP boot clients (vendor class
   // "HTTPClient") as their boot file; empty disables HTTP boot.
   string http_boot_url = 17;
+  // gateway_only reports that App Runner assigns server_address to the
+  // bridge as the cidr's gateway, with NAT when nat_enabled, but does not
+  // serve DHCP (enabled is false) because an external server does.
+  bool gateway_only = 18;
 }
 
 message DHCPLease {
@@ -550,7 +554,10 @@ message RevertNetworkChangeResponse {
 }
 
 // ConfigureBridge sets a bridge's description and its managed guest
-// network services (DHCP, and NAT and DNS on top of it).
+// network services (DHCP, and NAT and DNS on top of it). gateway_only is the
+// alternative to dhcp_enabled for bridges served by an external DHCP server:
+// it requires cidr, assigns the range's first address to the bridge as the
+// gateway, and allows nat_enabled, but not DNS or HTTP boot.
 message ConfigureBridgeRequest {
   string bridge_name = 1;
   string description = 2;
@@ -562,6 +569,7 @@ message ConfigureBridgeRequest {
   bool auto_dns = 8;
   string dns_suffix = 9;
   string http_boot_url = 10;
+  bool gateway_only = 11;
 }
 
 message ConfigureBridgeResponse {

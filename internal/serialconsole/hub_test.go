@@ -31,7 +31,7 @@ func startFakeSerial(t *testing.T) (string, <-chan net.Conn) {
 
 func TestHubReplaysOutputAndRelaysInBothDirections(t *testing.T) {
 	path, accepted := startFakeSerial(t)
-	hub := New(func(string) string { return path })
+	hub := New(func(string) string { return path }, nil)
 	t.Cleanup(hub.Close)
 	if err := hub.Start("vm"); err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestHubReplaysOutputAndRelaysInBothDirections(t *testing.T) {
 
 func TestHubAllowsOnlyOneAttachment(t *testing.T) {
 	path, accepted := startFakeSerial(t)
-	hub := New(func(string) string { return path })
+	hub := New(func(string) string { return path }, nil)
 	t.Cleanup(hub.Close)
 	if err := hub.Start("vm"); err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestHubAllowsOnlyOneAttachment(t *testing.T) {
 
 func TestHubReconnectsAfterUpstreamDisconnect(t *testing.T) {
 	path, accepted := startFakeSerial(t)
-	hub := New(func(string) string { return path })
+	hub := New(func(string) string { return path }, nil)
 	t.Cleanup(hub.Close)
 	if err := hub.Start("vm"); err != nil {
 		t.Fatal(err)
@@ -156,7 +156,7 @@ func TestHubReconnectsAfterUpstreamDisconnect(t *testing.T) {
 
 func TestHubKeepsOnlyBoundedHistory(t *testing.T) {
 	path, accepted := startFakeSerial(t)
-	hub := New(func(string) string { return path })
+	hub := New(func(string) string { return path }, nil)
 	hub.historyBytes = 4
 	t.Cleanup(hub.Close)
 	if err := hub.Start("vm"); err != nil {

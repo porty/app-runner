@@ -26,6 +26,7 @@ type bridgeDialog struct {
 
 	description *qt6.QLineEdit
 	dhcp        *qt6.QCheckBox
+	gatewayOnly *qt6.QCheckBox
 	cidr        *qt6.QLineEdit
 	nat         *qt6.QCheckBox
 	dns         *qt6.QCheckBox
@@ -96,7 +97,7 @@ func (d *bridgeDialog) build() {
 	buttons.SetContentsMargins(14, 8, 14, 12)
 	help := qt6.NewQPushButton3("Help")
 	help.OnClicked(func() {
-		qt6.QMessageBox_Information(d.QWidget, "Configure Bridge", "App Runner can run DHCP for guests on this bridge, with NAT for outbound traffic and a DNS forwarder that publishes VM names. The bridge takes the first address of the range and dynamic leases start at .50, leaving earlier addresses for static reservations.")
+		qt6.QMessageBox_Information(d.QWidget, "Configure Bridge", "App Runner can run DHCP for guests on this bridge, with NAT for outbound traffic and a DNS forwarder that publishes VM names. The bridge takes the first address of the range and dynamic leases start at .50, leaving earlier addresses for static reservations. Gateway only mode assigns the bridge address and optional NAT without App Runner DHCP, for bridges served by another DHCP server such as a provisioning service.")
 	})
 	buttons.AddWidget(help.QWidget)
 	buttons.AddStretch()
@@ -125,6 +126,9 @@ func (d *bridgeDialog) buildServices() *qt6.QWidget {
 	form.AddRow3("Description:", d.description.QWidget)
 	d.dhcp = qt6.NewQCheckBox3("Enable App Runner DHCP for this bridge")
 	form.AddRow3("", d.dhcp.QWidget)
+	d.gatewayOnly = qt6.NewQCheckBox3("Gateway only: assign the bridge address without App Runner DHCP")
+	d.gatewayOnly.SetToolTip("For bridges where an external DHCP server, such as a provisioning service, serves guests")
+	form.AddRow3("", d.gatewayOnly.QWidget)
 	d.cidr = qt6.NewQLineEdit2()
 	d.cidr.SetFont(monospaceFont())
 	d.cidr.SetMaximumWidth(220)
@@ -168,6 +172,17 @@ func (d *bridgeDialog) buildServices() *qt6.QWidget {
 	for _, box := range []*qt6.QCheckBox{d.dhcp, d.nat, d.dns, d.autoDNS} {
 		box.OnToggled(func(bool) { d.updateForm() })
 	}
+	d.dhcp.OnToggled(func(checked bool) {
+		if checked {
+			d.gatewayOnly.SetChecked(false)
+		}
+	})
+	d.gatewayOnly.OnToggled(func(checked bool) {
+		if checked {
+			d.dhcp.SetChecked(false)
+		}
+		d.updateForm()
+	})
 	for _, edit := range []*qt6.QLineEdit{d.description, d.cidr, d.forwarders, d.suffix, d.httpBoot} {
 		edit.OnTextChanged(func(string) { d.updateForm() })
 	}
@@ -283,6 +298,7 @@ func (d *bridgeDialog) load(bridge *apprunnerv1.NetworkBridge) {
 	dhcp := bridge.GetDhcp()
 	d.description.SetText(bridge.GetDescription())
 	d.dhcp.SetChecked(dhcp.GetEnabled())
+	d.gatewayOnly.SetChecked(dhcp.GetGatewayOnly())
 	d.cidr.SetText(firstNonEmpty(dhcp.GetCidr(), "192.168.100.0/24"))
 	d.nat.SetChecked(dhcp.GetNatEnabled())
 	d.dns.SetChecked(dhcp.GetDnsEnabled())
@@ -313,9 +329,11 @@ func (d *bridgeDialog) locking() bool {
 func (d *bridgeDialog) updateForm() {
 	locked := d.locking() || d.busy
 	enabled := d.dhcp.IsChecked()
+	subnet := enabled || d.gatewayOnly.IsChecked()
 	d.dhcp.SetEnabled(!locked)
-	d.cidr.SetEnabled(!locked && enabled)
-	d.nat.SetEnabled(!locked && enabled)
+	d.gatewayOnly.SetEnabled(!locked)
+	d.cidr.SetEnabled(!locked && subnet)
+	d.nat.SetEnabled(!locked && subnet)
 	d.dns.SetEnabled(!locked && enabled)
 	dns := enabled && d.dns.IsChecked()
 	d.forwarders.SetEnabled(!locked && dns)
@@ -333,14 +351,16 @@ func (d *bridgeDialog) updateForm() {
 
 func (d *bridgeDialog) request() *apprunnerv1.ConfigureBridgeRequest {
 	enabled := d.dhcp.IsChecked()
+	gatewayOnly := !enabled && d.gatewayOnly.IsChecked()
 	dns := enabled && d.dns.IsChecked()
 	auto := dns && d.autoDNS.IsChecked()
 	request := &apprunnerv1.ConfigureBridgeRequest{
 		BridgeName:  d.name,
 		Description: strings.TrimSpace(d.description.Text()),
 		DhcpEnabled: enabled,
+		GatewayOnly: gatewayOnly,
 		Cidr:        strings.TrimSpace(d.cidr.Text()),
-		NatEnabled:  enabled && d.nat.IsChecked(),
+		NatEnabled:  (enabled || gatewayOnly) && d.nat.IsChecked(),
 		DnsEnabled:  dns,
 		AutoDns:     auto,
 	}
@@ -361,11 +381,17 @@ func (d *bridgeDialog) request() *apprunnerv1.ConfigureBridgeRequest {
 func (d *bridgeDialog) dirty() bool {
 	r := d.request()
 	dhcp := d.bridge.GetDhcp()
+	if r.GatewayOnly != dhcp.GetGatewayOnly() || (r.GatewayOnly && (r.Cidr != dhcp.GetCidr() || r.NatEnabled != dhcp.GetNatEnabled())) {
+		return true
+	}
 	return r.Description != d.bridge.GetDescription() || r.DhcpEnabled != dhcp.GetEnabled() || (r.DhcpEnabled && (r.Cidr != dhcp.GetCidr() || r.NatEnabled != dhcp.GetNatEnabled() || r.DnsEnabled != dhcp.GetDnsEnabled() || strings.Join(r.DnsForwarders, ",") != strings.Join(dhcp.GetDnsForwarders(), ",") || r.AutoDns != dhcp.GetAutoDns() || r.DnsSuffix != dhcp.GetDnsSuffix() || r.HttpBootUrl != dhcp.GetHttpBootUrl()))
 }
 
 func (d *bridgeDialog) valid() bool {
 	r := d.request()
+	if r.GatewayOnly {
+		return r.Cidr != ""
+	}
 	if !r.DhcpEnabled {
 		return true
 	}

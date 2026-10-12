@@ -311,7 +311,7 @@ func (m *Manager) SetBridgeDHCPStaticLease(bridge, hardwareAddress, address stri
 	return m.dhcp.SetStaticLease(bridge, hardwareAddress, address)
 }
 
-func (m *Manager) ConfigureBridgeSettings(bridge, description string, enabled bool, cidr string, natEnabled bool, dnsConfig dns.Config, httpBootURL string) error {
+func (m *Manager) ConfigureBridgeSettings(bridge, description string, enabled, gatewayOnly bool, cidr string, natEnabled bool, dnsConfig dns.Config, httpBootURL string) error {
 	if m.dhcp == nil {
 		return errors.New("DHCP manager is not configured")
 	}
@@ -358,14 +358,14 @@ func (m *Manager) ConfigureBridgeSettings(bridge, description string, enabled bo
 		return errors.New("bridge descriptions are not supported by the network provider")
 	}
 	currentDHCP := m.dhcp.Status(bridge)
-	servicesChanged := bridgeServicesChanged(currentDHCP, enabled, cidr, natEnabled, dnsConfig, httpBootURL)
+	servicesChanged := bridgeServicesChanged(currentDHCP, enabled, gatewayOnly, cidr, natEnabled, dnsConfig, httpBootURL)
 	if descriptionChanged {
 		if err := descriptionProvider.SetBridgeDescription(bridge, description); err != nil {
 			return err
 		}
 	}
 	if servicesChanged {
-		if err := m.dhcp.Configure(bridge, enabled, cidr, natEnabled, dnsConfig, httpBootURL); err != nil {
+		if err := m.dhcp.Configure(bridge, enabled, gatewayOnly, cidr, natEnabled, dnsConfig, httpBootURL); err != nil {
 			if descriptionChanged {
 				_ = descriptionProvider.SetBridgeDescription(bridge, currentDescription)
 			}
@@ -375,11 +375,11 @@ func (m *Manager) ConfigureBridgeSettings(bridge, description string, enabled bo
 	return nil
 }
 
-func bridgeServicesChanged(current dhcp.BridgeStatus, enabled bool, cidr string, natEnabled bool, dnsConfig dns.Config, httpBootURL string) bool {
-	if current.Enabled != enabled {
+func bridgeServicesChanged(current dhcp.BridgeStatus, enabled, gatewayOnly bool, cidr string, natEnabled bool, dnsConfig dns.Config, httpBootURL string) bool {
+	if current.Enabled != enabled || current.GatewayOnly != gatewayOnly {
 		return true
 	}
-	if !enabled {
+	if !enabled && !gatewayOnly {
 		return false
 	}
 	if current.CIDR != strings.TrimSpace(cidr) || current.NATEnabled != natEnabled || current.DNSEnabled != dnsConfig.Enabled {
@@ -520,7 +520,7 @@ func (m *Manager) validateWorkloadSafety(change Change) error {
 		return nil
 	}
 	if change.Type == ChangeDeleteBridge && m.dhcp != nil && m.dhcp.Enabled(change.BridgeName) {
-		return fmt.Errorf("disable DHCP on bridge %s before deleting it", change.BridgeName)
+		return fmt.Errorf("disable DHCP or gateway-only mode on bridge %s before deleting it", change.BridgeName)
 	}
 	vms, err := m.vms.List()
 	if err != nil {

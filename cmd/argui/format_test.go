@@ -73,6 +73,26 @@ func TestSuggestIPMIAddress(t *testing.T) {
 	if got := suggestIPMIAddress("missing", network, nil, ""); got != "" {
 		t.Errorf("unknown bridge suggested %q", got)
 	}
+	gateway := &apprunnerv1.NetworkingStatus{Bridges: []*apprunnerv1.NetworkBridge{{
+		Name: "prov",
+		Dhcp: &apprunnerv1.BridgeDHCPStatus{GatewayOnly: true, Cidr: "172.22.0.0/24", ServerAddress: "172.22.0.1"},
+	}}}
+	if got := suggestIPMIAddress("prov", gateway, nil, ""); got != "172.22.0.2" {
+		t.Errorf("gateway-only bridge suggested %q", got)
+	}
+}
+
+func TestBridgeServicesDescribesGatewayOnlyMode(t *testing.T) {
+	bridge := &apprunnerv1.NetworkBridge{Dhcp: &apprunnerv1.BridgeDHCPStatus{GatewayOnly: true, NatEnabled: true, Cidr: "172.22.0.0/24"}}
+	if got := bridgeServices(bridge); got != "Gateway only · NAT" {
+		t.Errorf("bridgeServices = %q", got)
+	}
+	if !managedSubnet(bridge) {
+		t.Error("a gateway-only bridge was not treated as a managed subnet")
+	}
+	if got := bridgeServices(&apprunnerv1.NetworkBridge{}); got != "no services" {
+		t.Errorf("unconfigured bridgeServices = %q", got)
+	}
 }
 
 func TestFirstAvailableStaticAddress(t *testing.T) {

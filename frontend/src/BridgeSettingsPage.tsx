@@ -69,6 +69,7 @@ export default function BridgeSettingsPage({ refreshInterval }: { refreshInterva
   const [busy, setBusy] = useState(false)
   const [description, setDescription] = useState('')
   const [enabled, setEnabled] = useState(false)
+  const [gatewayOnly, setGatewayOnly] = useState(false)
   const [cidr, setCIDR] = useState('192.168.100.0/24')
   const [natEnabled, setNATEnabled] = useState(false)
   const [dnsEnabled, setDNSEnabled] = useState(false)
@@ -106,6 +107,7 @@ export default function BridgeSettingsPage({ refreshInterval }: { refreshInterva
     if (!bridge || loadedBridgeName === bridgeName) return
     setDescription(bridge.description ?? '')
     setEnabled(Boolean(bridge.dhcp?.enabled))
+    setGatewayOnly(Boolean(bridge.dhcp?.gateway_only))
     setCIDR(bridge.dhcp?.cidr || '192.168.100.0/24')
     setNATEnabled(Boolean(bridge.dhcp?.nat_enabled))
     setDNSEnabled(Boolean(bridge.dhcp?.dns_enabled))
@@ -132,8 +134,9 @@ export default function BridgeSettingsPage({ refreshInterval }: { refreshInterva
     bridge_name: bridgeName,
     description: description.trim(),
     dhcp_enabled: enabled,
+    gateway_only: !enabled && gatewayOnly,
     cidr: cidr.trim(),
-    nat_enabled: enabled && natEnabled,
+    nat_enabled: (enabled || gatewayOnly) && natEnabled,
     dns_enabled: enabled && dnsEnabled,
     dns_forwarders: dnsEnabled ? dnsForwarders.split(/[\s,]+/).filter(Boolean) : [],
     auto_dns: enabled && dnsEnabled && autoDNS,
@@ -168,10 +171,16 @@ export default function BridgeSettingsPage({ refreshInterval }: { refreshInterva
           <TextField fullWidth label="Description" value={description} onChange={(event) => setDescription(event.target.value)} helperText="Shown when selecting this bridge for a virtual machine" slotProps={{ htmlInput: { maxLength: 255 } }} />
           <FormControlLabel control={<Checkbox checked={enabled} disabled={runningWorkloads} onChange={(event) => {
             setEnabled(event.target.checked)
-            if (!event.target.checked) { setNATEnabled(false); setDNSEnabled(false); setAutoDNS(false) }
+            if (event.target.checked) setGatewayOnly(false)
+            if (!event.target.checked && !gatewayOnly) setNATEnabled(false)
+            if (!event.target.checked) { setDNSEnabled(false); setAutoDNS(false) }
           }} />} label="Enable App Runner DHCP for this bridge" />
-          <TextField fullWidth label="IPv4 range (CIDR)" value={cidr} onChange={(event) => setCIDR(event.target.value)} disabled={!enabled || runningWorkloads} helperText="The bridge uses .1; dynamic leases begin at .50, leaving earlier addresses for static reservations." />
-          <FormControlLabel control={<Checkbox checked={natEnabled} disabled={!enabled || runningWorkloads} onChange={(event) => setNATEnabled(event.target.checked)} />} label="Enable NAT and outbound routing for this range" />
+          <FormControlLabel control={<Checkbox checked={gatewayOnly} disabled={runningWorkloads} onChange={(event) => {
+            setGatewayOnly(event.target.checked)
+            if (event.target.checked) { setEnabled(false); setDNSEnabled(false); setAutoDNS(false) } else if (!enabled) setNATEnabled(false)
+          }} />} label="Gateway only: assign the bridge address without App Runner DHCP (an external DHCP server serves this bridge)" />
+          <TextField fullWidth label="IPv4 range (CIDR)" value={cidr} onChange={(event) => setCIDR(event.target.value)} disabled={!(enabled || gatewayOnly) || runningWorkloads} helperText={gatewayOnly ? 'The bridge uses .1 as the gateway; the external DHCP server allocates the rest of the range.' : 'The bridge uses .1; dynamic leases begin at .50, leaving earlier addresses for static reservations.'} />
+          <FormControlLabel control={<Checkbox checked={natEnabled} disabled={!(enabled || gatewayOnly) || runningWorkloads} onChange={(event) => setNATEnabled(event.target.checked)} />} label="Enable NAT and outbound routing for this range" />
           <Divider />
           <FormControlLabel control={<Checkbox checked={dnsEnabled} disabled={!enabled || runningWorkloads} onChange={(event) => { setDNSEnabled(event.target.checked); if (!event.target.checked) setAutoDNS(false) }} />} label="Enable managed DNS for this bridge" />
           <TextField fullWidth multiline minRows={2} label="Forwarding DNS servers" value={dnsForwarders} onChange={(event) => setDNSForwarders(event.target.value)} disabled={!enabled || !dnsEnabled || runningWorkloads} helperText="One IP address per line, or separate addresses with commas. An optional port is supported." />
@@ -179,7 +188,7 @@ export default function BridgeSettingsPage({ refreshInterval }: { refreshInterva
           <TextField fullWidth label="Auto DNS suffix" value={dnsSuffix} onChange={(event) => setDNSSuffix(event.target.value)} disabled={!enabled || !dnsEnabled || !autoDNS || runningWorkloads} error={enabled && dnsEnabled && autoDNS && !dnsSuffixValid} helperText={dnsSuffixValid ? `VMs are published as VM-NAME.${dnsSuffix}` : 'Use one or more DNS labels separated by dots'} />
           <Divider />
           <TextField fullWidth label="UEFI HTTP boot URL" value={httpBootURL} onChange={(event) => setHTTPBootURL(event.target.value)} disabled={!enabled || runningWorkloads} placeholder="http://192.168.100.50/boot/bootx64.efi" helperText="Offered as the boot file to UEFI HTTP boot clients on this bridge. Leave empty to disable." />
-          <Stack direction="row" sx={{ justifyContent: 'flex-end' }}><Button variant="contained" disabled={busy || (enabled && (!cidr.trim() || (dnsEnabled && (!dnsForwarders.trim() || (autoDNS && !dnsSuffixValid)))))} onClick={() => void save()}>Save settings</Button></Stack>
+          <Stack direction="row" sx={{ justifyContent: 'flex-end' }}><Button variant="contained" disabled={busy || (gatewayOnly && !cidr.trim()) || (enabled && (!cidr.trim() || (dnsEnabled && (!dnsForwarders.trim() || (autoDNS && !dnsSuffixValid)))))} onClick={() => void save()}>Save settings</Button></Stack>
         </Stack>
       </Card>
 

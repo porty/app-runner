@@ -19,7 +19,7 @@ import (
 )
 
 func newTestHypervisor(settings config.Config) *Hypervisor {
-	return New(settings, serialconsole.New(settings.SerialSocketPath))
+	return New(settings, serialconsole.New(settings.SerialSocketPath, nil))
 }
 
 func TestQEMUArgumentsUseRequiredVirtualisationProfile(t *testing.T) {
@@ -38,11 +38,11 @@ func TestQEMUArgumentsUseRequiredVirtualisationProfile(t *testing.T) {
 		"host",
 		"virtio-vga",
 		"file=" + settings.VMDiskPath("machine-id", "d0") + ",if=none,id=disk0,format=qcow2,cache=none",
-		"virtio-blk-pci,drive=disk0",
+		"virtio-blk-pci,drive=disk0,bootindex=0",
 		"virtio-scsi-pci,id=scsi0",
-		"scsi-cd,drive=install,bus=scsi0.0,id=cdromdev0",
+		"scsi-cd,drive=install,bus=scsi0.0,id=cdromdev0,bootindex=1",
 		"user,id=net0",
-		"virtio-net-pci,netdev=net0,mac=52:54:00:11:22:33",
+		"virtio-net-pci,netdev=net0,mac=52:54:00:11:22:33,bootindex=2",
 		"unix:" + settings.VNCSocketPath("machine-id"),
 		"socket,id=serial0,path=" + settings.SerialSocketPath("machine-id") + ",server=on,wait=on",
 		"chardev:serial0",
@@ -109,8 +109,8 @@ func TestQEMUArgumentsSupportMultipleNetworkInterfaces(t *testing.T) {
 	}})
 
 	for _, expected := range []string{
-		"bridge,id=net0,br=lab0", "virtio-net-pci,netdev=net0,mac=52:54:00:00:00:01",
-		"user,id=net1", "virtio-net-pci,netdev=net1,mac=52:54:00:00:00:02",
+		"bridge,id=net0,br=lab0", "virtio-net-pci,netdev=net0,mac=52:54:00:00:00:01,bootindex=0",
+		"user,id=net1", "virtio-net-pci,netdev=net1,mac=52:54:00:00:00:02,bootindex=1",
 	} {
 		if !slices.Contains(arguments, expected) {
 			t.Fatalf("network argument %q is missing: %#v", expected, arguments)
@@ -192,12 +192,99 @@ func TestQEMUArgumentsUsePersistentUEFIFirmware(t *testing.T) {
 	}
 }
 
-func TestQEMUArgumentsHonorIPMIBootDevice(t *testing.T) {
+// bootIndexes returns the bootindex of every -device argument, keyed by the
+// device's identifying prefix, and fails on duplicate indexes.
+func bootIndexes(t *testing.T, arguments []string) map[string]int {
+	t.Helper()
+	indexes := map[string]int{}
+	used := map[int]string{}
+	for position, argument := range arguments {
+		if strings.HasPrefix(argument, "bootindex=") || strings.Contains(argument, ",bootindex=") {
+			if position == 0 || arguments[position-1] != "-device" {
+				t.Fatalf("bootindex is only valid on -device arguments, found %q after %q", argument, arguments[position-1])
+			}
+			device, value, _ := strings.Cut(argument, ",bootindex=")
+			var index int
+			if _, err := fmt.Sscanf(value, "%d", &index); err != nil {
+				t.Fatalf("malformed bootindex in %q: %v", argument, err)
+			}
+			if other, found := used[index]; found {
+				t.Fatalf("bootindex %d is shared by %q and %q", index, other, device)
+			}
+			used[index] = device
+			indexes[device] = index
+		}
+	}
+	return indexes
+}
+
+func TestQEMUArgumentsOrderBootIndexesByIPMIBootDevice(t *testing.T) {
 	settings := config.Default(t.TempDir())
 	qemu := newTestHypervisor(settings)
-	arguments := qemu.arguments(vm.VirtualMachine{ID: "machine-id", IPMI: vm.IPMIConfig{BootDevice: uint8(1)}})
-	if !slices.Contains(arguments, "order=ncd,menu=on") {
-		t.Fatalf("PXE boot order is missing: %#v", arguments)
+	machine := vm.VirtualMachine{
+		ID:     "machine-id",
+		Disks:  []vm.Disk{{ID: "d0"}, {ID: "d1"}},
+		CDROMs: []vm.CDROM{{ID: "c0", ISOName: "installer.iso"}, {ID: "c1"}},
+		NICs: []vm.NIC{
+			{ID: "n0", Mode: vm.NetworkModeBridge, BridgeName: "prov0", MACAddress: "52:54:00:00:00:01"},
+			{ID: "n1", Mode: vm.NetworkModeNAT, MACAddress: "52:54:00:00:00:02"},
+		},
+		CloudInit: vm.CloudInit{Enabled: true},
+	}
+	disk0, disk1 := "virtio-blk-pci,drive=disk0", "virtio-blk-pci,drive=disk1"
+	cdrom0, cdrom1 := "scsi-cd,drive=install,bus=scsi0.0,id=cdromdev0", "scsi-cd,id=cdromdev1,bus=scsi0.0"
+	nic0, nic1 := "virtio-net-pci,netdev=net0,mac=52:54:00:00:00:01", "virtio-net-pci,netdev=net1,mac=52:54:00:00:00:02"
+	for _, test := range []struct {
+		name       string
+		bootDevice uint8
+		order      []string
+	}{
+		{"no override", 0, []string{disk0, disk1, cdrom0, cdrom1, nic0, nic1}},
+		{"force PXE", 1, []string{nic0, nic1, disk0, disk1, cdrom0, cdrom1}},
+		{"force hard drive", 2, []string{disk0, disk1, cdrom0, cdrom1, nic0, nic1}},
+		{"force CD-ROM", 5, []string{cdrom0, cdrom1, disk0, disk1, nic0, nic1}},
+		{"unsupported selector", 15, []string{disk0, disk1, cdrom0, cdrom1, nic0, nic1}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			machine.IPMI.BootDevice = test.bootDevice
+			arguments := qemu.arguments(machine)
+			indexes := bootIndexes(t, arguments)
+			if len(indexes) != len(test.order) {
+				t.Fatalf("expected %d boot devices, got %v", len(test.order), indexes)
+			}
+			for expected, device := range test.order {
+				if index, found := indexes[device]; !found || index != expected {
+					t.Errorf("%q has bootindex %d (present %v), want %d: %v", device, index, found, expected, indexes)
+				}
+			}
+			for _, argument := range arguments {
+				if strings.HasPrefix(argument, "order=") || strings.Contains(argument, ",order=") || strings.Contains(argument, "strict=") {
+					t.Errorf("legacy boot order argument %q remains", argument)
+				}
+			}
+			if !slices.Contains(arguments, "menu=on") {
+				t.Errorf("boot menu argument is missing: %#v", arguments)
+			}
+			if !slices.Contains(arguments, "scsi-cd,drive=cloudinit,bus=scsi0.0,id=cloudinitdev") {
+				t.Errorf("cloud-init seed should be attached without a bootindex: %#v", arguments)
+			}
+		})
+	}
+}
+
+func TestQEMUArgumentsBootDisklessVMFromNetwork(t *testing.T) {
+	settings := config.Default(t.TempDir())
+	settings.UEFICodePath = "/firmware/OVMF_CODE.fd"
+	qemu := newTestHypervisor(settings)
+	for _, bootDevice := range []uint8{0, 1, 2, 5} {
+		arguments := qemu.arguments(vm.VirtualMachine{
+			ID: "machine-id", Firmware: vm.FirmwareUEFI, IPMI: vm.IPMIConfig{BootDevice: bootDevice},
+			NICs: []vm.NIC{{ID: "n0", Mode: vm.NetworkModeBridge, BridgeName: "prov0", MACAddress: "52:54:00:00:00:01"}},
+		})
+		indexes := bootIndexes(t, arguments)
+		if len(indexes) != 1 || indexes["virtio-net-pci,netdev=net0,mac=52:54:00:00:00:01"] != 0 {
+			t.Fatalf("boot device %d: diskless VM should boot its NIC first: %v", bootDevice, indexes)
+		}
 	}
 }
 
