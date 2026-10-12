@@ -186,11 +186,12 @@ func (q *Hypervisor) arguments(machine vm.VirtualMachine) []string {
 			"-drive", "if=pflash,format=raw,unit=1,file="+q.settings.VMUEFIVarsPath(machine.ID),
 		)
 	}
+	boot := bootIndexBases(machine)
 	for diskIndex, disk := range machine.Disks {
 		driveID := "disk" + strconv.Itoa(diskIndex)
 		arguments = append(arguments,
 			"-drive", "file="+q.settings.VMDiskPath(machine.ID, disk.ID)+",if=none,id="+driveID+",format=qcow2,cache=none",
-			"-device", "virtio-blk-pci,drive="+driveID,
+			"-device", "virtio-blk-pci,drive="+driveID+bootIndex(boot.disk+diskIndex),
 		)
 	}
 	arguments = append(arguments, "-device", "virtio-scsi-pci,id=scsi0")
@@ -200,9 +201,9 @@ func (q *Hypervisor) arguments(machine vm.VirtualMachine) []string {
 		if cdrom.ISOName != "" {
 			isoPath := q.settings.ISOPath(cdrom.ISOName)
 			arguments = append(arguments, "-drive", "file="+isoPath+",if=none,id="+driveID+",media=cdrom,readonly=on")
-			arguments = append(arguments, "-device", "scsi-cd,drive="+driveID+",bus=scsi0.0,id="+deviceID)
+			arguments = append(arguments, "-device", "scsi-cd,drive="+driveID+",bus=scsi0.0,id="+deviceID+bootIndex(boot.cdrom+cdromIndex))
 		} else {
-			arguments = append(arguments, "-device", "scsi-cd,id="+deviceID+",bus=scsi0.0")
+			arguments = append(arguments, "-device", "scsi-cd,id="+deviceID+",bus=scsi0.0"+bootIndex(boot.cdrom+cdromIndex))
 		}
 	}
 	if machine.CloudInit.Enabled {
@@ -211,7 +212,7 @@ func (q *Hypervisor) arguments(machine vm.VirtualMachine) []string {
 			"-device", "scsi-cd,drive=cloudinit,bus=scsi0.0,id=cloudinitdev",
 		)
 	}
-	arguments = append(arguments, "-boot", "order="+q.bootOrder(machine)+",menu=on")
+	arguments = append(arguments, "-boot", "menu=on")
 	for nicIndex, nic := range machine.NICs {
 		netdevID := "net" + strconv.Itoa(nicIndex)
 		if nic.Mode == vm.NetworkModeBridge {
@@ -219,7 +220,7 @@ func (q *Hypervisor) arguments(machine vm.VirtualMachine) []string {
 		} else {
 			arguments = append(arguments, "-netdev", "user,id="+netdevID)
 		}
-		arguments = append(arguments, "-device", "virtio-net-pci,netdev="+netdevID+",mac="+nic.MACAddress)
+		arguments = append(arguments, "-device", "virtio-net-pci,netdev="+netdevID+",mac="+nic.MACAddress+bootIndex(boot.nic+nicIndex))
 	}
 	return append(arguments,
 		"-qmp", "unix:"+q.qmpSocket(machine.ID)+",server=on,wait=off",
@@ -227,17 +228,41 @@ func (q *Hypervisor) arguments(machine vm.VirtualMachine) []string {
 	)
 }
 
-func (q *Hypervisor) bootOrder(machine vm.VirtualMachine) string {
+// IPMI boot device selectors (IPMI 2.0 boot option parameter 5) that the
+// virtual BMC stores in vm.IPMIConfig.BootDevice.
+const (
+	ipmiBootForcePXE       uint8 = 1
+	ipmiBootForceHardDrive uint8 = 2
+	ipmiBootForceCDROM     uint8 = 5
+)
+
+// bootIndexBase holds the first bootindex given to each class of bootable
+// device; devices within a class are numbered consecutively from it.
+type bootIndexBase struct {
+	disk, cdrom, nic int
+}
+
+// bootIndexBases orders the VM's bootable devices for the selected IPMI boot
+// device. QEMU builds the fw_cfg "bootorder" file that OVMF and SeaBIOS read
+// only from per-device bootindex properties; the legacy -boot order= string
+// never reaches it, so UEFI guests would otherwise ignore the BMC selector.
+// Every device keeps an index so firmware can still fall back to the rest.
+func bootIndexBases(machine vm.VirtualMachine) bootIndexBase {
+	var base bootIndexBase
+	disks, cdroms, nics := len(machine.Disks), len(machine.CDROMs), len(machine.NICs)
 	switch machine.IPMI.BootDevice {
-	case 1:
-		return "ncd"
-	case 2:
-		return "cdn"
-	case 5:
-		return "dcn"
-	default:
-		return "dcn"
+	case ipmiBootForcePXE:
+		base.nic, base.disk, base.cdrom = 0, nics, nics+disks
+	case ipmiBootForceCDROM:
+		base.cdrom, base.disk, base.nic = 0, cdroms, cdroms+disks
+	default: // no override and ipmiBootForceHardDrive
+		base.disk, base.cdrom, base.nic = 0, disks, disks+cdroms
 	}
+	return base
+}
+
+func bootIndex(index int) string {
+	return ",bootindex=" + strconv.Itoa(index)
 }
 
 func (q *Hypervisor) qmpSocket(id string) string {
