@@ -222,6 +222,7 @@ export interface BridgeDHCPStatus {
   dns_suffix?: string
   dns_running: boolean
   http_boot_url?: string
+  gateway_only?: boolean
   leases?: DHCPLease[]
 }
 
@@ -237,6 +238,7 @@ export interface BridgeConfiguration {
   bridge_name: string
   description: string
   dhcp_enabled: boolean
+  gateway_only: boolean
   cidr: string
   nat_enabled: boolean
   dns_enabled: boolean

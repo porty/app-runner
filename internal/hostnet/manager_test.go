@@ -210,7 +210,7 @@ func TestNetworkingStatusIncludesBridgeDHCPConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dhcpService.Configure("br-lab", true, dhcp.DefaultCIDR, false, dns.Config{}, ""); err != nil {
+	if err := dhcpService.Configure("br-lab", true, false, dhcp.DefaultCIDR, false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	provider := &fakeNetworkProvider{status: Status{Bridges: []BridgeInfo{{Name: "br-lab", IsUp: true}}}}
@@ -236,7 +236,7 @@ func TestNetworkingStatusLabelsDHCPLeasesWithVMNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dhcpService.Configure("br-lab", true, dhcp.DefaultCIDR, false, dns.Config{}, ""); err != nil {
+	if err := dhcpService.Configure("br-lab", true, false, dhcp.DefaultCIDR, false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := dhcpService.SetStaticLease("br-lab", "52:54:00:44:81:f7", "192.168.100.10"); err != nil {
@@ -270,7 +270,7 @@ func TestNetworkingRejectsAutoDNSWhenLegacyVMNameIsInvalid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = manager.ConfigureBridgeSettings("br0", "", true, dhcp.DefaultCIDR, false, dns.Config{
+	err = manager.ConfigureBridgeSettings("br0", "", true, false, dhcp.DefaultCIDR, false, dns.Config{
 		Enabled: true, Forwarders: []string{"1.1.1.1"}, Auto: true, Suffix: "br0.internal",
 	}, "")
 	if err == nil {
@@ -290,10 +290,10 @@ func TestNetworkManagerReportsValidationAndLookupErrorsDistinctly(t *testing.T) 
 		t.Fatal(err)
 	}
 	var fieldErr *validate.FieldError
-	if err := manager.ConfigureBridgeSettings("br0", "", true, "not-a-cidr", false, dns.Config{}, ""); !errors.As(err, &fieldErr) || fieldErr.Field != "cidr" {
+	if err := manager.ConfigureBridgeSettings("br0", "", true, false, "not-a-cidr", false, dns.Config{}, ""); !errors.As(err, &fieldErr) || fieldErr.Field != "cidr" {
 		t.Fatalf("invalid CIDR = %v, want a cidr field error", err)
 	}
-	if err := manager.ConfigureBridgeSettings("missing", "", true, dhcp.DefaultCIDR, false, dns.Config{}, ""); !errors.Is(err, ErrBridgeNotFound) {
+	if err := manager.ConfigureBridgeSettings("missing", "", true, false, dhcp.DefaultCIDR, false, dns.Config{}, ""); !errors.Is(err, ErrBridgeNotFound) {
 		t.Fatalf("missing bridge = %v, want ErrBridgeNotFound", err)
 	}
 	if err := manager.Confirm("no-such-change"); !errors.Is(err, ErrPendingChangeNotFound) {
@@ -302,7 +302,7 @@ func TestNetworkManagerReportsValidationAndLookupErrorsDistinctly(t *testing.T) 
 	if _, err := manager.Leases("br0"); !errors.Is(err, ErrBridgeNotFound) {
 		t.Fatalf("leases without DHCP = %v, want ErrBridgeNotFound", err)
 	}
-	if err := manager.ConfigureBridgeSettings("br0", "", true, dhcp.DefaultCIDR, false, dns.Config{}, ""); err != nil {
+	if err := manager.ConfigureBridgeSettings("br0", "", true, false, dhcp.DefaultCIDR, false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if leases, err := manager.Leases("br0"); err != nil || len(leases) != 0 {
@@ -322,11 +322,47 @@ func TestNetworkManagerUpdatesBridgeDescriptionWithoutChangingServices(t *testin
 		t.Fatal(err)
 	}
 	current := dhcpService.Status("br0")
-	if err := manager.ConfigureBridgeSettings("br0", "VM network", false, current.CIDR, false, dns.Config{}, ""); err != nil {
+	if err := manager.ConfigureBridgeSettings("br0", "VM network", false, false, current.CIDR, false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if provider.descriptions["br0"] != "VM network" {
 		t.Fatalf("bridge description was not updated: %#v", provider.descriptions)
+	}
+}
+
+func TestNetworkManagerConfiguresGatewayOnlyBridge(t *testing.T) {
+	vms, _, settings := vmtest.NewManager(t)
+	dhcpService, err := dhcp.NewManager(settings.StateDir, &fakeDHCPBridgeProvider{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeNetworkProvider{status: Status{Bridges: []BridgeInfo{{Name: "prov0"}}}}
+	manager, err := NewManager(ManagerOptions{Provider: provider, VMs: vms, DHCP: dhcpService, StateDirectory: settings.StateDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ConfigureBridgeSettings("prov0", "", false, true, "172.22.0.0/24", true, dns.Config{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	status, err := manager.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge := status.Bridges[0].DHCP
+	if bridge.Enabled || !bridge.GatewayOnly || !bridge.NATEnabled || bridge.ServerAddress != "172.22.0.1" {
+		t.Fatalf("gateway-only mode was not reported: %#v", bridge)
+	}
+	if _, err := manager.Leases("prov0"); !errors.Is(err, ErrBridgeNotFound) {
+		t.Fatalf("leases on a gateway-only bridge = %v, want ErrBridgeNotFound", err)
+	}
+	if bridgeServicesChanged(bridge, false, true, "172.22.0.0/24", true, dns.Config{}, "") {
+		t.Fatal("unchanged gateway-only settings were reported as a change")
+	}
+	if !bridgeServicesChanged(bridge, true, false, "172.22.0.0/24", true, dns.Config{}, "") || !bridgeServicesChanged(bridge, false, true, "172.22.0.0/24", false, dns.Config{}, "") {
+		t.Fatal("a change away from the gateway-only settings was not detected")
+	}
+	if err := manager.validateWorkloadSafety(Change{Type: ChangeDeleteBridge, BridgeName: "prov0"}); err == nil {
+		t.Fatal("a gateway-only bridge could be deleted while configured")
 	}
 }
 

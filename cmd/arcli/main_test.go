@@ -325,6 +325,40 @@ func TestNetBridgeConfigureDefaultsServicesOff(t *testing.T) {
 	}
 }
 
+func TestNetBridgeConfigureGatewayOnly(t *testing.T) {
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, r *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		_, _ = response.Write([]byte(`{"status":{"can_manage":true}}`))
+	}))
+	t.Cleanup(server.Close)
+	var output bytes.Buffer
+	if err := run([]string{"--server", server.URL, "net", "bridge", "configure", "prov0", "--gateway-only", "--cidr", "172.22.0.0/24", "--nat"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if request["bridge_name"] != "prov0" || request["gateway_only"] != true || request["cidr"] != "172.22.0.0/24" || request["nat_enabled"] != true {
+		t.Errorf("request = %+v", request)
+	}
+	if value, present := request["dhcp_enabled"]; present && value != false {
+		t.Errorf("gateway-only request enabled DHCP: %+v", request)
+	}
+	request = nil
+	for _, args := range [][]string{
+		{"net", "bridge", "configure", "prov0", "--gateway-only"},
+		{"net", "bridge", "configure", "prov0", "--gateway-only", "--dhcp", "--cidr", "172.22.0.0/24"},
+	} {
+		if err := run(append([]string{"--server", server.URL}, args...), &output); err == nil {
+			t.Errorf("%v was accepted", args)
+		}
+	}
+	if request != nil {
+		t.Errorf("an invalid gateway-only command reached the server: %+v", request)
+	}
+}
+
 func TestVMStopForceAfterIsNotTheRequestTimeout(t *testing.T) {
 	var request struct {
 		ID             string `json:"id"`

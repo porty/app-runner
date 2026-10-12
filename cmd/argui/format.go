@@ -241,7 +241,7 @@ func suggestIPMIAddress(bridgeName string, network *apprunnerv1.NetworkingStatus
 		return ""
 	}
 	cidr := ""
-	if bridge.GetDhcp().GetEnabled() {
+	if managedSubnet(bridge) {
 		cidr = bridge.GetDhcp().GetCidr()
 	} else {
 		for _, address := range bridge.GetAddresses() {
@@ -298,8 +298,21 @@ func firstAvailableStaticAddress(cidr, poolStart string, leases []*apprunnerv1.D
 	return ""
 }
 
+// managedSubnet reports whether App Runner owns the bridge's subnet, either
+// serving DHCP or assigning only the gateway for an external DHCP server.
+func managedSubnet(bridge *apprunnerv1.NetworkBridge) bool {
+	return bridge.GetDhcp().GetEnabled() || bridge.GetDhcp().GetGatewayOnly()
+}
+
 func bridgeServices(bridge *apprunnerv1.NetworkBridge) string {
 	dhcp := bridge.GetDhcp()
+	if dhcp.GetGatewayOnly() {
+		services := []string{"Gateway only"}
+		if dhcp.GetNatEnabled() {
+			services = append(services, "NAT")
+		}
+		return strings.Join(services, " · ")
+	}
 	if !dhcp.GetEnabled() {
 		return "no services"
 	}

@@ -37,8 +37,13 @@ const (
 	httpBootClass   = "HTTPClient"
 )
 
+// BridgeConfig is the persisted guest network configuration of a bridge.
+// Enabled means App Runner manages the bridge's subnet at all; GatewayOnly
+// narrows that to assigning the gateway address and optional NAT while an
+// external DHCP server, such as Ironic's dnsmasq, serves the bridge.
 type BridgeConfig struct {
 	Enabled     bool       `json:"enabled"`
+	GatewayOnly bool       `json:"gateway_only,omitempty"`
 	CIDR        string     `json:"cidr"`
 	NAT         bool       `json:"nat,omitempty"`
 	DNS         dns.Config `json:"dns,omitempty"`
@@ -59,8 +64,12 @@ type persistedState struct {
 	Leases  map[string]map[string]Lease `json:"leases,omitempty"`
 }
 
+// BridgeStatus reports a bridge's guest network services. Enabled means App
+// Runner serves DHCP; GatewayOnly means it only assigns ServerAddress as the
+// gateway (with optional NAT) and leaves DHCP to another server.
 type BridgeStatus struct {
 	Enabled       bool
+	GatewayOnly   bool
 	CIDR          string
 	ServerAddress string
 	PoolStart     string
@@ -79,12 +88,21 @@ type BridgeStatus struct {
 	Leases        []Lease
 }
 
+// Range describes a managed subnet. Gateway-only subnets have no lease pool,
+// so PoolStart and PoolEnd are the zero Addr.
 type Range struct {
 	Prefix    netip.Prefix
 	Server    netip.Addr
 	PoolStart netip.Addr
 	PoolEnd   netip.Addr
 	Broadcast netip.Addr
+}
+
+func (c BridgeConfig) network() (Range, error) {
+	if c.GatewayOnly {
+		return ParseGatewayRange(c.CIDR)
+	}
+	return ParseRange(c.CIDR)
 }
 
 type BridgeProvider interface {
@@ -158,13 +176,20 @@ func newInProcessServer(bridge string, handler server4.Handler) (Server, error) 
 	return server4.NewServer(bridge, &net.UDPAddr{IP: net.IPv4zero, Port: dhcpv4.ServerPort}, handler)
 }
 
-func (m *Manager) Configure(bridge string, enabled bool, cidr string, natEnabled bool, dnsConfig dns.Config, httpBootURL string) error {
+// Configure sets a bridge's guest network services. enabled runs App
+// Runner's DHCP server on the bridge; gatewayOnly instead assigns only the
+// subnet's gateway address (and NAT when requested) for an external DHCP
+// server to use. Disabling both removes the bridge's configuration.
+func (m *Manager) Configure(bridge string, enabled, gatewayOnly bool, cidr string, natEnabled bool, dnsConfig dns.Config, httpBootURL string) error {
 	if err := validate.InterfaceName(bridge); err != nil {
 		return validate.Field("bridge_name", err.Error())
 	}
 	parsed := Range{}
-	if natEnabled && !enabled {
-		return validate.Field("nat_enabled", "NAT requires managed DHCP to be enabled")
+	if gatewayOnly && enabled {
+		return validate.Field("gateway_only", "gateway-only mode cannot be combined with managed DHCP")
+	}
+	if natEnabled && !enabled && !gatewayOnly {
+		return validate.Field("nat_enabled", "NAT requires managed DHCP or gateway-only mode to be enabled")
 	}
 	httpBootURL = strings.TrimSpace(httpBootURL)
 	if httpBootURL != "" {
@@ -180,6 +205,20 @@ func (m *Manager) Configure(bridge string, enabled bool, cidr string, natEnabled
 	}
 	if dnsConfig.Auto && !dnsConfig.Enabled {
 		return validate.Field("auto_dns", "Auto DNS requires managed DNS to be enabled")
+	}
+	if gatewayOnly {
+		if strings.TrimSpace(cidr) == "" {
+			return validate.Field("cidr", "gateway-only mode requires an IPv4 CIDR")
+		}
+		var err error
+		parsed, err = ParseGatewayRange(cidr)
+		if err != nil {
+			return validate.Field("cidr", err.Error())
+		}
+		if err := m.provider.ValidateBridgeDHCP(bridge, parsed); err != nil {
+			return err
+		}
+		dnsConfig = dns.Config{}
 	}
 	if enabled {
 		if strings.TrimSpace(cidr) == "" {
@@ -220,25 +259,26 @@ func (m *Manager) Configure(bridge string, enabled bool, cidr string, natEnabled
 	if runtime := m.runtimes[bridge]; runtime != nil && len(runtime.users) != 0 {
 		return fmt.Errorf("stop all running workloads on bridge %s before changing its DHCP configuration", bridge)
 	}
-	if enabled {
+	configured := enabled || gatewayOnly
+	if configured {
 		for otherBridge, otherConfig := range m.state.Bridges {
 			if otherBridge == bridge || !otherConfig.Enabled {
 				continue
 			}
-			otherRange, parseErr := ParseRange(otherConfig.CIDR)
+			otherRange, parseErr := otherConfig.network()
 			if parseErr == nil && prefixesOverlap(parsed.Prefix, otherRange.Prefix) {
-				return fmt.Errorf("DHCP range %s overlaps range %s configured for bridge %s", parsed.Prefix, otherRange.Prefix, otherBridge)
+				return fmt.Errorf("range %s overlaps range %s configured for bridge %s", parsed.Prefix, otherRange.Prefix, otherBridge)
 			}
 		}
 	}
 	previous, found := m.state.Bridges[bridge]
 	previousLeases := m.state.Leases[bridge]
-	if enabled {
-		m.state.Bridges[bridge] = BridgeConfig{Enabled: true, CIDR: parsed.Prefix.String(), NAT: natEnabled, DNS: dnsConfig, HTTPBootURL: httpBootURL}
+	if configured {
+		m.state.Bridges[bridge] = BridgeConfig{Enabled: true, GatewayOnly: gatewayOnly, CIDR: parsed.Prefix.String(), NAT: natEnabled, DNS: dnsConfig, HTTPBootURL: httpBootURL}
 	} else {
 		delete(m.state.Bridges, bridge)
 	}
-	if !found || previous.CIDR != parsed.Prefix.String() || previous.Enabled != enabled {
+	if !found || previous.CIDR != parsed.Prefix.String() || previous.Enabled != configured || previous.GatewayOnly != gatewayOnly {
 		delete(m.state.Leases, bridge)
 	}
 	delete(m.errors, bridge)
@@ -256,10 +296,29 @@ func (m *Manager) Configure(bridge string, enabled bool, cidr string, natEnabled
 	return nil
 }
 
+// Enabled reports whether App Runner manages the bridge's subnet, either by
+// serving DHCP or in gateway-only mode.
 func (m *Manager) Enabled(bridge string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.state.Bridges[bridge].Enabled
+}
+
+// Prefix returns the subnet App Runner manages on a bridge, in either managed
+// DHCP or gateway-only mode, so host-side services such as virtual BMCs can
+// place addresses on it even before the gateway address is assigned.
+func (m *Manager) Prefix(bridge string) (netip.Prefix, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	config, found := m.state.Bridges[bridge]
+	if !found || !config.Enabled {
+		return netip.Prefix{}, false
+	}
+	parsed, err := config.network()
+	if err != nil {
+		return netip.Prefix{}, false
+	}
+	return parsed.Prefix, true
 }
 
 func (m *Manager) Status(bridge string) BridgeStatus {
@@ -273,7 +332,8 @@ func (m *Manager) Status(bridge string) BridgeStatus {
 	if !found || !config.Enabled {
 		return status
 	}
-	status.Enabled = true
+	status.Enabled = !config.GatewayOnly
+	status.GatewayOnly = config.GatewayOnly
 	status.NATEnabled = config.NAT
 	status.DNSEnabled = config.DNS.Enabled
 	status.AutoDNS = config.DNS.Auto
@@ -285,14 +345,16 @@ func (m *Manager) Status(bridge string) BridgeStatus {
 	}
 	status.HTTPBootURL = config.HTTPBootURL
 	status.CIDR = config.CIDR
-	parsed, err := ParseRange(config.CIDR)
+	parsed, err := config.network()
 	if err != nil {
 		status.LastError = err.Error()
 		return status
 	}
 	status.ServerAddress = parsed.Server.String()
-	status.PoolStart = parsed.PoolStart.String()
-	status.PoolEnd = parsed.PoolEnd.String()
+	if !config.GatewayOnly {
+		status.PoolStart = parsed.PoolStart.String()
+		status.PoolEnd = parsed.PoolEnd.String()
+	}
 	status.Running = m.runtimes[bridge] != nil && m.runtimes[bridge].running
 	status.NATRunning = m.nat != nil && m.nat.Running(bridge)
 	if m.dns != nil {
@@ -336,7 +398,7 @@ func (m *Manager) suggestCIDRLocked(bridge string) string {
 		if otherBridge == bridge || !config.Enabled {
 			continue
 		}
-		if parsed, err := ParseRange(config.CIDR); err == nil {
+		if parsed, err := config.network(); err == nil {
 			used = append(used, parsed.Prefix)
 		}
 	}
@@ -380,7 +442,7 @@ func (m *Manager) prepareBridge(bridge string, machine vm.VirtualMachine) error 
 	if !config.Enabled {
 		return nil
 	}
-	parsed, err := ParseRange(config.CIDR)
+	parsed, err := config.network()
 	if err != nil {
 		return err
 	}
@@ -390,7 +452,9 @@ func (m *Manager) prepareBridge(bridge string, machine vm.VirtualMachine) error 
 		}
 	}
 	runtime := m.runtimes[bridge]
-	if runtime != nil && runtime.running {
+	// A gateway-only runtime has no DHCP server; existing at all means its
+	// address and NAT are already in place.
+	if runtime != nil && (runtime.running || config.GatewayOnly) {
 		if config.DNS.Enabled {
 			if m.dns == nil {
 				return errors.New("DNS manager is not configured")
@@ -452,6 +516,15 @@ func (m *Manager) prepareBridge(bridge string, machine vm.VirtualMachine) error 
 			return fmt.Errorf("start DNS for %s: %w", bridge, err)
 		}
 		dnsStarted = !wasRunning
+	}
+	if config.GatewayOnly {
+		runtime.users[machine.ID] = struct{}{}
+		runtime.vms[machine.ID] = machine
+		m.runtimes[bridge] = runtime
+		runtime.nat = config.NAT
+		delete(m.errors, bridge)
+		slog.Info("bridge gateway prepared without managed DHCP", "bridge", bridge, "gateway", parsed.Server, "nat", config.NAT)
+		return nil
 	}
 	handler := func(connection net.PacketConn, peer net.Addr, request *dhcpv4.DHCPv4) {
 		m.handlePacket(bridge, parsed, config, connection, peer, request)
@@ -892,7 +965,7 @@ func (m *Manager) SetStaticLease(bridge, hardwareAddress, addressValue string) e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	config, found := m.state.Bridges[bridge]
-	if !found || !config.Enabled {
+	if !found || !config.Enabled || config.GatewayOnly {
 		return fmt.Errorf("DHCP is not enabled on bridge %s", bridge)
 	}
 	network, err := ParseRange(config.CIDR)
@@ -1028,6 +1101,23 @@ func ParseRange(value string) (Range, error) {
 	return result, nil
 }
 
+// ParseGatewayRange parses the subnet of a gateway-only bridge. The bridge
+// takes the first host address as its gateway; there is no lease pool
+// because another DHCP server allocates the rest of the subnet.
+func ParseGatewayRange(value string) (Range, error) {
+	prefix, err := netip.ParsePrefix(strings.TrimSpace(value))
+	if err != nil || !prefix.Addr().Is4() {
+		return Range{}, errors.New("range must be an IPv4 CIDR such as 172.22.0.0/24")
+	}
+	prefix = prefix.Masked()
+	if prefix.Bits() < 8 || prefix.Bits() > 30 {
+		return Range{}, errors.New("gateway range prefix must be between /8 and /30")
+	}
+	network := ipv4ToUint32(prefix.Addr())
+	broadcast := network | (uint32(1)<<uint32(32-prefix.Bits()) - 1)
+	return Range{Prefix: prefix, Server: uint32ToIPv4(network + 1), Broadcast: uint32ToIPv4(broadcast)}, nil
+}
+
 func requestedAddress(request *dhcpv4.DHCPv4) netip.Addr {
 	requested := request.RequestedIPAddress()
 	if requested == nil || requested.Equal(net.IPv4zero) {
@@ -1047,7 +1137,7 @@ func clientKey(request *dhcpv4.DHCPv4) string {
 }
 
 func addressInPool(network Range, address netip.Addr) bool {
-	return address.Is4() && compareIPv4(address, network.PoolStart) >= 0 && compareIPv4(address, network.PoolEnd) <= 0
+	return address.Is4() && network.PoolStart.IsValid() && compareIPv4(address, network.PoolStart) >= 0 && compareIPv4(address, network.PoolEnd) <= 0
 }
 
 func addressInStaticRange(network Range, address netip.Addr) bool {
@@ -1086,7 +1176,8 @@ func uint32ToIPv4(value uint32) netip.Addr {
 // interfaces or with a different prefix length conflict whenever the subnets
 // overlap. On the bridge itself the server address is expected, and other
 // host-side service addresses in the subnet, such as virtual BMC endpoints,
-// are fine as long as they sit outside the lease pool.
+// are fine as long as they sit outside the lease pool; a gateway-only range
+// has no pool, so any address in its subnet is fine there.
 func AddressConflicts(network Range, onBridge bool, existing netip.Prefix) bool {
 	subnet := existing.Masked()
 	if !network.Prefix.Contains(subnet.Addr()) && !subnet.Contains(network.Prefix.Addr()) {

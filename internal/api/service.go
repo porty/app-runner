@@ -339,7 +339,7 @@ func (s *Service) RevertNetworkChange(ctx context.Context, request *apprunnerv1.
 
 func (s *Service) ConfigureBridge(ctx context.Context, request *apprunnerv1.ConfigureBridgeRequest) (*apprunnerv1.ConfigureBridgeResponse, error) {
 	if err := s.networking.ConfigureBridgeSettings(
-		request.GetBridgeName(), request.GetDescription(), request.GetDhcpEnabled(), request.GetCidr(), request.GetNatEnabled(),
+		request.GetBridgeName(), request.GetDescription(), request.GetDhcpEnabled(), request.GetGatewayOnly(), request.GetCidr(), request.GetNatEnabled(),
 		dns.Config{
 			Enabled: request.GetDnsEnabled(), Forwarders: request.GetDnsForwarders(),
 			Auto: request.GetAutoDns(), Suffix: request.GetDnsSuffix(),
@@ -572,7 +572,7 @@ func networkingStatusToProto(status hostnet.Status) *apprunnerv1.NetworkingStatu
 			HardwareAddress: bridge.HardwareAddress, Addresses: bridge.Addresses,
 			MemberInterfaces: bridge.MemberInterfaces, UsableByQemu: bridge.UsableByQEMU,
 			Dhcp: &apprunnerv1.BridgeDHCPStatus{
-				Enabled: bridge.DHCP.Enabled, Cidr: bridge.DHCP.CIDR, ServerAddress: bridge.DHCP.ServerAddress,
+				Enabled: bridge.DHCP.Enabled, GatewayOnly: bridge.DHCP.GatewayOnly, Cidr: bridge.DHCP.CIDR, ServerAddress: bridge.DHCP.ServerAddress,
 				PoolStart: bridge.DHCP.PoolStart, PoolEnd: bridge.DHCP.PoolEnd, Running: bridge.DHCP.Running,
 				ActiveLeases: bridge.DHCP.ActiveLeases, LastError: bridge.DHCP.LastError,
 				NatEnabled: bridge.DHCP.NATEnabled, NatRunning: bridge.DHCP.NATRunning,

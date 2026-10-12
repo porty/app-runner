@@ -14,6 +14,7 @@ import (
 
 	"github.com/roflware/app-runner/internal/dns"
 	"github.com/roflware/app-runner/internal/testutil"
+	"github.com/roflware/app-runner/internal/validate"
 	"github.com/roflware/app-runner/internal/vm"
 )
 
@@ -155,7 +156,7 @@ func TestDHCPManagerPersistsLeasesAndHonoursRequestedAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager.now = func() time.Time { return time.Date(2026, 8, 20, 1, 0, 0, 0, time.UTC) }
-	if err := manager.Configure("br0", true, DefaultCIDR, false, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br0", true, false, DefaultCIDR, false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	network, _ := ParseRange(DefaultCIDR)
@@ -187,7 +188,7 @@ func TestDHCPStatusListsOnlyActiveLeases(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
 	manager.now = func() time.Time { return now }
-	if err := manager.Configure("br0", true, DefaultCIDR, false, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br0", true, false, DefaultCIDR, false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	manager.state.Leases["br0"] = map[string]Lease{
@@ -208,7 +209,7 @@ func TestDHCPManagerConsolidatesLeasesForTheSameHardwareAddress(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 24, 1, 0, 0, 0, time.UTC)
 	manager.now = func() time.Time { return now }
-	if err := manager.Configure("br0", true, DefaultCIDR, false, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br0", true, false, DefaultCIDR, false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	manager.state.Leases["br0"] = map[string]Lease{
@@ -257,7 +258,7 @@ func TestDHCPManagerMovesLeaseToStaticAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Configure("br0", true, DefaultCIDR, false, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br0", true, false, DefaultCIDR, false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	manager.state.Leases["br0"] = map[string]Lease{
@@ -290,7 +291,7 @@ func TestDHCPManagerStartsOnceAndStopsAfterLastVM(t *testing.T) {
 		servers = append(servers, server)
 		return server, nil
 	}
-	if err := manager.Configure("br0", true, DefaultCIDR, false, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br0", true, false, DefaultCIDR, false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	first := bridgedTestVM("one", "br0", "52:54:00:00:00:11")
@@ -304,7 +305,7 @@ func TestDHCPManagerStartsOnceAndStopsAfterLastVM(t *testing.T) {
 	if len(servers) != 1 || len(provider.ensured) != 1 || !manager.Status("br0").Running {
 		t.Fatalf("expected one running server: servers=%d ensured=%d status=%#v", len(servers), len(provider.ensured), manager.Status("br0"))
 	}
-	if err := manager.Configure("br0", false, "", false, dns.Config{}, ""); err == nil {
+	if err := manager.Configure("br0", false, false, "", false, dns.Config{}, ""); err == nil {
 		t.Fatal("DHCP configuration changed while VMs were active")
 	}
 	manager.Release(first)
@@ -334,7 +335,7 @@ func TestDHCPHandlerOffersFirstPoolAddress(t *testing.T) {
 		handler = supplied
 		return newFakeManagedDHCPServer(), nil
 	}
-	if err := manager.Configure("br0", true, DefaultCIDR, false, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br0", true, false, DefaultCIDR, false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	machine := bridgedTestVM("one", "br0", "52:54:00:00:00:11")
@@ -439,7 +440,7 @@ func TestDHCPNATStartsOnceAndSuppliesBridgeAsRouter(t *testing.T) {
 		handler = supplied
 		return newFakeManagedDHCPServer(), nil
 	}
-	if err := manager.Configure("br0", true, DefaultCIDR, true, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br0", true, false, DefaultCIDR, true, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	first := bridgedTestVM("one", "br0", "52:54:00:00:00:11")
@@ -487,7 +488,7 @@ func TestDHCPOffersHTTPBootFileOnlyToHTTPClients(t *testing.T) {
 		return newFakeManagedDHCPServer(), nil
 	}
 	bootURL := "http://192.168.100.50/boot/bootx64.efi"
-	if err := manager.Configure("br0", true, DefaultCIDR, false, dns.Config{}, bootURL); err != nil {
+	if err := manager.Configure("br0", true, false, DefaultCIDR, false, dns.Config{}, bootURL); err != nil {
 		t.Fatal(err)
 	}
 	if status := manager.Status("br0"); status.HTTPBootURL != bootURL {
@@ -544,11 +545,11 @@ func TestDHCPRejectsInvalidHTTPBootURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, value := range []string{"tftp://192.168.100.1/boot", "192.168.100.50/boot/bootx64.efi", "http://192.168.100.50", "http://192.168.100.50/"} {
-		if err := manager.Configure("br0", true, DefaultCIDR, false, dns.Config{}, value); err == nil {
+		if err := manager.Configure("br0", true, false, DefaultCIDR, false, dns.Config{}, value); err == nil {
 			t.Fatalf("HTTP boot URL %q was accepted", value)
 		}
 	}
-	if err := manager.Configure("br0", false, "", false, dns.Config{}, "http://192.168.100.50/boot/bootx64.efi"); err == nil {
+	if err := manager.Configure("br0", false, false, "", false, dns.Config{}, "http://192.168.100.50/boot/bootx64.efi"); err == nil {
 		t.Fatal("HTTP boot without managed DHCP was accepted")
 	}
 }
@@ -558,8 +559,149 @@ func TestDHCPRejectsNATWithoutDHCP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Configure("br0", false, "", true, dns.Config{}, ""); err == nil {
+	if err := manager.Configure("br0", false, false, "", true, dns.Config{}, ""); err == nil {
 		t.Fatal("NAT without managed DHCP was accepted")
+	}
+}
+
+func TestGatewayOnlyConfigureValidation(t *testing.T) {
+	provider := &fakeDHCPBridgeProvider{}
+	manager, err := NewManager(t.TempDir(), provider, newFakeBridgeNATController(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name        string
+		enabled     bool
+		cidr        string
+		dnsConfig   dns.Config
+		httpBootURL string
+		field       string
+	}{
+		{name: "combined with managed DHCP", enabled: true, cidr: "172.22.0.0/24", field: "gateway_only"},
+		{name: "missing CIDR", cidr: " ", field: "cidr"},
+		{name: "invalid CIDR", cidr: "not-a-cidr", field: "cidr"},
+		{name: "IPv6 CIDR", cidr: "fd00::/64", field: "cidr"},
+		{name: "prefix too long", cidr: "172.22.0.0/31", field: "cidr"},
+		{name: "DNS", cidr: "172.22.0.0/24", dnsConfig: dns.Config{Enabled: true, Forwarders: []string{"1.1.1.1"}}, field: "dns_enabled"},
+		{name: "HTTP boot", cidr: "172.22.0.0/24", httpBootURL: "http://172.22.0.2/boot/bootx64.efi", field: "http_boot_url"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var fieldErr *validate.FieldError
+			err := manager.Configure("br0", test.enabled, true, test.cidr, true, test.dnsConfig, test.httpBootURL)
+			if !errors.As(err, &fieldErr) || fieldErr.Field != test.field {
+				t.Fatalf("expected a %s field error, got %v", test.field, err)
+			}
+		})
+	}
+	if _, found := manager.state.Bridges["br0"]; found {
+		t.Fatal("a rejected gateway-only configuration was stored")
+	}
+	if err := manager.Configure("br0", false, true, "172.22.0.9/28", true, dns.Config{}, ""); err != nil {
+		t.Fatalf("a small gateway-only subnet with NAT was rejected: %v", err)
+	}
+	if err := manager.Configure("br1", false, true, "172.22.0.0/24", false, dns.Config{}, ""); err == nil {
+		t.Fatal("a gateway-only range overlapping another bridge was accepted")
+	}
+	if err := manager.Configure("br1", true, false, "172.22.0.0/24", false, dns.Config{}, ""); err == nil {
+		t.Fatal("a managed DHCP range overlapping a gateway-only bridge was accepted")
+	}
+	if err := manager.Configure("br1", false, true, "172.23.0.0/24", false, dns.Config{}, ""); err != nil {
+		t.Fatalf("a gateway-only bridge without NAT was rejected: %v", err)
+	}
+	if err := manager.SetStaticLease("br1", "52:54:00:00:00:01", "172.23.0.5"); err == nil {
+		t.Fatal("a static lease was accepted on a bridge without managed DHCP")
+	}
+	if err := manager.Configure("br1", false, false, "", false, dns.Config{}, ""); err != nil || manager.Enabled("br1") {
+		t.Fatalf("gateway-only mode was not disabled: %v", err)
+	}
+}
+
+func TestGatewayOnlyStatusPrefixAndLifecycle(t *testing.T) {
+	provider := &fakeDHCPBridgeProvider{}
+	natController := newFakeBridgeNATController()
+	directory := t.TempDir()
+	manager, err := NewManager(directory, provider, natController, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.newServer = func(string, server4.Handler) (Server, error) {
+		t.Fatal("a DHCP server was started on a gateway-only bridge")
+		return nil, nil
+	}
+	if err := manager.Configure("prov0", false, true, "172.22.0.0/24", true, dns.Config{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	status := manager.Status("prov0")
+	if status.Enabled || !status.GatewayOnly || status.CIDR != "172.22.0.0/24" || status.ServerAddress != "172.22.0.1" ||
+		status.PoolStart != "" || status.PoolEnd != "" || !status.NATEnabled || status.NATRunning || status.Running || status.DNSEnabled {
+		t.Fatalf("unexpected gateway-only status: %#v", status)
+	}
+	if prefix, found := manager.Prefix("prov0"); !found || prefix != netip.MustParsePrefix("172.22.0.0/24") {
+		t.Fatalf("gateway-only prefix = %v, %v", prefix, found)
+	}
+	if _, found := manager.Prefix("other"); found {
+		t.Fatal("an unconfigured bridge reported a prefix")
+	}
+	if !manager.Enabled("prov0") {
+		t.Fatal("a gateway-only bridge was not reported as managed")
+	}
+
+	first := bridgedTestVM("one", "prov0", "52:54:00:00:00:21")
+	second := bridgedTestVM("two", "prov0", "52:54:00:00:00:22")
+	if err := manager.Prepare(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Prepare(second); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.ensured) != 1 || provider.ensured[0] != "prov0" {
+		t.Fatalf("gateway address was not assigned exactly once: %v", provider.ensured)
+	}
+	if natController.started["prov0"] != netip.MustParsePrefix("172.22.0.0/24") {
+		t.Fatalf("NAT was not started for the gateway-only range: %v", natController.started)
+	}
+	if status := manager.Status("prov0"); !status.NATRunning || status.Running || status.ActiveLeases != 0 {
+		t.Fatalf("unexpected running gateway-only status: %#v", status)
+	}
+	if err := manager.Configure("prov0", false, true, "172.22.0.0/24", false, dns.Config{}, ""); err == nil {
+		t.Fatal("gateway-only settings changed while workloads were running")
+	}
+	manager.Release(first)
+	if !natController.Running("prov0") {
+		t.Fatal("NAT stopped while a VM still used the bridge")
+	}
+	manager.Release(second)
+	if natController.Running("prov0") || len(natController.stopped) != 1 {
+		t.Fatalf("NAT was not stopped with the last VM: %v", natController.stopped)
+	}
+
+	reloaded, err := NewManager(directory, provider, natController, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := reloaded.Status("prov0"); !status.GatewayOnly || status.Enabled || status.CIDR != "172.22.0.0/24" {
+		t.Fatalf("gateway-only mode did not persist: %#v", status)
+	}
+}
+
+func TestDHCPAddressConflictsInGatewayOnlyRange(t *testing.T) {
+	network, err := ParseGatewayRange("172.22.0.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if network.Server != netip.MustParseAddr("172.22.0.1") || network.PoolStart.IsValid() {
+		t.Fatalf("unexpected gateway range: %#v", network)
+	}
+	// An external DHCP server owns the whole subnet, so host addresses such
+	// as Ironic's provisioning IP or virtual BMCs anywhere in it are fine.
+	for _, existing := range []string{"172.22.0.1/24", "172.22.0.3/24", "172.22.0.200/24"} {
+		if AddressConflicts(network, true, netip.MustParsePrefix(existing)) {
+			t.Errorf("%s on the bridge conflicted with a gateway-only range", existing)
+		}
+	}
+	if !AddressConflicts(network, false, netip.MustParsePrefix("172.22.0.3/24")) {
+		t.Error("the subnet on another interface did not conflict")
 	}
 }
 
@@ -577,7 +719,7 @@ func TestDHCPDNSLifecycleOptionsAndAutomaticRecords(t *testing.T) {
 		return newFakeManagedDHCPServer(), nil
 	}
 	config := dns.Config{Enabled: true, Forwarders: []string{"1.1.1.1"}, Auto: true, Suffix: "br0.internal"}
-	if err := manager.Configure("br0", true, DefaultCIDR, false, config, ""); err != nil {
+	if err := manager.Configure("br0", true, false, DefaultCIDR, false, config, ""); err != nil {
 		t.Fatal(err)
 	}
 	machine := bridgedTestVM("one", "br0", "52:54:00:00:00:04")
@@ -619,7 +761,7 @@ func TestDHCPManagerPersistsDNSConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := dns.Config{Enabled: true, Forwarders: []string{"1.1.1.1", "9.9.9.9"}, Auto: true, Suffix: "BR0.Internal."}
-	if err := manager.Configure("br0", true, DefaultCIDR, false, config, ""); err != nil {
+	if err := manager.Configure("br0", true, false, DefaultCIDR, false, config, ""); err != nil {
 		t.Fatal(err)
 	}
 	reloaded, err := NewManager(directory, provider, nil, nil)
@@ -641,7 +783,7 @@ func TestDHCPRollsBackDNSWhenDHCPListenerCannotStart(t *testing.T) {
 	manager.newServer = func(string, server4.Handler) (Server, error) {
 		return nil, errors.New("port 67 unavailable")
 	}
-	if err := manager.Configure("br0", true, DefaultCIDR, false, dns.Config{
+	if err := manager.Configure("br0", true, false, DefaultCIDR, false, dns.Config{
 		Enabled: true, Forwarders: []string{"1.1.1.1"},
 	}, ""); err != nil {
 		t.Fatal(err)
@@ -662,7 +804,7 @@ func TestDHCPManagerReportsBridgePreparationFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider.err = nil
-	if err := manager.Configure("br0", true, DefaultCIDR, false, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br0", true, false, DefaultCIDR, false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	provider.err = errors.New("conflicting address")
@@ -678,13 +820,13 @@ func TestDHCPManagerSuggestsAndEnforcesDistinctBridgeRanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Configure("br0", true, "192.168.100.0/24", false, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br0", true, false, "192.168.100.0/24", false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if suggestion := manager.Status("br1").CIDR; suggestion != "192.168.101.0/24" {
 		t.Fatalf("unexpected range suggestion for second bridge: %s", suggestion)
 	}
-	if err := manager.Configure("br1", true, "192.168.100.0/24", false, dns.Config{}, ""); err == nil {
+	if err := manager.Configure("br1", true, false, "192.168.100.0/24", false, dns.Config{}, ""); err == nil {
 		t.Fatal("overlapping bridge DHCP ranges were accepted")
 	}
 }
@@ -696,10 +838,10 @@ func TestDHCPManagerPreparesEveryBridgeAVMUses(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager.newServer = func(string, server4.Handler) (Server, error) { return newFakeManagedDHCPServer(), nil }
-	if err := manager.Configure("br0", true, "192.168.100.0/24", false, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br0", true, false, "192.168.100.0/24", false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Configure("br1", true, "192.168.101.0/24", false, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br1", true, false, "192.168.101.0/24", false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	machine := vm.VirtualMachine{ID: "dual", Name: "dual", NICs: []vm.NIC{
@@ -731,10 +873,10 @@ func TestDHCPManagerRollsBackEarlierBridgesWhenALaterOneFails(t *testing.T) {
 		}
 		return newFakeManagedDHCPServer(), nil
 	}
-	if err := manager.Configure("br0", true, "192.168.100.0/24", false, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br0", true, false, "192.168.100.0/24", false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Configure("br1", true, "192.168.101.0/24", false, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br1", true, false, "192.168.101.0/24", false, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	machine := vm.VirtualMachine{ID: "dual", Name: "dual", NICs: []vm.NIC{
@@ -758,7 +900,7 @@ func TestDHCPShutdownClosesListenersButKeepsNAT(t *testing.T) {
 	}
 	server := newFakeManagedDHCPServer()
 	manager.newServer = func(string, server4.Handler) (Server, error) { return server, nil }
-	if err := manager.Configure("br0", true, DefaultCIDR, true, dns.Config{}, ""); err != nil {
+	if err := manager.Configure("br0", true, false, DefaultCIDR, true, dns.Config{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.Prepare(bridgedTestVM("one", "br0", "52:54:00:00:00:51")); err != nil {

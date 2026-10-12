@@ -4141,7 +4141,11 @@ type BridgeDHCPStatus struct {
 	Leases        []*DHCPLease           `protobuf:"bytes,16,rep,name=leases,proto3" json:"leases,omitempty"`
 	// http_boot_url is offered to UEFI HTTP boot clients (vendor class
 	// "HTTPClient") as their boot file; empty disables HTTP boot.
-	HttpBootUrl   string `protobuf:"bytes,17,opt,name=http_boot_url,json=httpBootUrl,proto3" json:"http_boot_url,omitempty"`
+	HttpBootUrl string `protobuf:"bytes,17,opt,name=http_boot_url,json=httpBootUrl,proto3" json:"http_boot_url,omitempty"`
+	// gateway_only reports that App Runner assigns server_address to the
+	// bridge as the cidr's gateway, with NAT when nat_enabled, but does not
+	// serve DHCP (enabled is false) because an external server does.
+	GatewayOnly   bool `protobuf:"varint,18,opt,name=gateway_only,json=gatewayOnly,proto3" json:"gateway_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4293,6 +4297,13 @@ func (x *BridgeDHCPStatus) GetHttpBootUrl() string {
 		return x.HttpBootUrl
 	}
 	return ""
+}
+
+func (x *BridgeDHCPStatus) GetGatewayOnly() bool {
+	if x != nil {
+		return x.GatewayOnly
+	}
+	return false
 }
 
 type DHCPLease struct {
@@ -4884,7 +4895,10 @@ func (x *RevertNetworkChangeResponse) GetStatus() *NetworkingStatus {
 }
 
 // ConfigureBridge sets a bridge's description and its managed guest
-// network services (DHCP, and NAT and DNS on top of it).
+// network services (DHCP, and NAT and DNS on top of it). gateway_only is the
+// alternative to dhcp_enabled for bridges served by an external DHCP server:
+// it requires cidr, assigns the range's first address to the bridge as the
+// gateway, and allows nat_enabled, but not DNS or HTTP boot.
 type ConfigureBridgeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	BridgeName    string                 `protobuf:"bytes,1,opt,name=bridge_name,json=bridgeName,proto3" json:"bridge_name,omitempty"`
@@ -4897,6 +4911,7 @@ type ConfigureBridgeRequest struct {
 	AutoDns       bool                   `protobuf:"varint,8,opt,name=auto_dns,json=autoDns,proto3" json:"auto_dns,omitempty"`
 	DnsSuffix     string                 `protobuf:"bytes,9,opt,name=dns_suffix,json=dnsSuffix,proto3" json:"dns_suffix,omitempty"`
 	HttpBootUrl   string                 `protobuf:"bytes,10,opt,name=http_boot_url,json=httpBootUrl,proto3" json:"http_boot_url,omitempty"`
+	GatewayOnly   bool                   `protobuf:"varint,11,opt,name=gateway_only,json=gatewayOnly,proto3" json:"gateway_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4999,6 +5014,13 @@ func (x *ConfigureBridgeRequest) GetHttpBootUrl() string {
 		return x.HttpBootUrl
 	}
 	return ""
+}
+
+func (x *ConfigureBridgeRequest) GetGatewayOnly() bool {
+	if x != nil {
+		return x.GatewayOnly
+	}
+	return false
 }
 
 type ConfigureBridgeResponse struct {
@@ -6116,7 +6138,7 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\x0eusable_by_qemu\x18\t \x01(\bR\fusableByQemu\x122\n" +
 	"\x04dhcp\x18\n" +
 	" \x01(\v2\x1e.apprunner.v1.BridgeDHCPStatusR\x04dhcp\x12 \n" +
-	"\vdescription\x18\v \x01(\tR\vdescription\"\xb9\x04\n" +
+	"\vdescription\x18\v \x01(\tR\vdescription\"\xdc\x04\n" +
 	"\x10BridgeDHCPStatus\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x12\n" +
 	"\x04cidr\x18\x02 \x01(\tR\x04cidr\x12%\n" +
@@ -6142,7 +6164,8 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\vdns_running\x18\x0f \x01(\bR\n" +
 	"dnsRunning\x12/\n" +
 	"\x06leases\x18\x10 \x03(\v2\x17.apprunner.v1.DHCPLeaseR\x06leases\x12\"\n" +
-	"\rhttp_boot_url\x18\x11 \x01(\tR\vhttpBootUrl\"\xa5\x01\n" +
+	"\rhttp_boot_url\x18\x11 \x01(\tR\vhttpBootUrl\x12!\n" +
+	"\fgateway_only\x18\x12 \x01(\bR\vgatewayOnly\"\xa5\x01\n" +
 	"\tDHCPLease\x12)\n" +
 	"\x10hardware_address\x18\x01 \x01(\tR\x0fhardwareAddress\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x1d\n" +
@@ -6183,7 +6206,7 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\x1aRevertNetworkChangeRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"U\n" +
 	"\x1bRevertNetworkChangeResponse\x126\n" +
-	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\"\xd9\x02\n" +
+	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\"\xfc\x02\n" +
 	"\x16ConfigureBridgeRequest\x12\x1f\n" +
 	"\vbridge_name\x18\x01 \x01(\tR\n" +
 	"bridgeName\x12 \n" +
@@ -6199,7 +6222,8 @@ const file_apprunner_v1_app_runner_proto_rawDesc = "" +
 	"\n" +
 	"dns_suffix\x18\t \x01(\tR\tdnsSuffix\x12\"\n" +
 	"\rhttp_boot_url\x18\n" +
-	" \x01(\tR\vhttpBootUrl\"Q\n" +
+	" \x01(\tR\vhttpBootUrl\x12!\n" +
+	"\fgateway_only\x18\v \x01(\bR\vgatewayOnly\"Q\n" +
 	"\x17ConfigureBridgeResponse\x126\n" +
 	"\x06status\x18\x01 \x01(\v2\x1e.apprunner.v1.NetworkingStatusR\x06status\":\n" +
 	"\x17ListBridgeLeasesRequest\x12\x1f\n" +

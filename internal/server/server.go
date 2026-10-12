@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"net/netip"
 	"os"
 	"os/signal"
 	"syscall"
@@ -77,14 +76,7 @@ func Run(args []string, frontend fs.FS) error {
 	if err != nil {
 		return err
 	}
-	bmcService := ipmi.NewManager(machines, func(bridge string) (netip.Prefix, bool) {
-		status := dhcpService.Status(bridge)
-		if !status.Enabled {
-			return netip.Prefix{}, false
-		}
-		prefix, err := netip.ParsePrefix(status.CIDR)
-		return prefix, err == nil
-	})
+	bmcService := ipmi.NewManager(machines, dhcpService.Prefix)
 	machines.SetIPMIController(bmcService)
 	vms, err := machines.List()
 	if err != nil {

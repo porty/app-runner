@@ -340,7 +340,21 @@ func (v *bridgeView) refresh(s *snapshot) {
 	}
 
 	dhcp := bridge.GetDhcp()
-	if !dhcp.GetEnabled() {
+	if dhcp.GetGatewayOnly() {
+		parts := []string{chipHTML("Gateway only "+dhcp.GetCidr(), colorHighlight)}
+		if dhcp.GetNatEnabled() {
+			label, color := "NAT", colorPositive
+			if !dhcp.GetNatRunning() {
+				label, color = "NAT · not running", colorNeutral
+			}
+			parts = append(parts, chipHTML(label, color))
+		}
+		text := strings.Join(parts, " ") + "<br>" + mutedHTML(fmt.Sprintf("Gateway %s · DHCP is served by another server on this bridge", dhcp.GetServerAddress()))
+		if dhcp.GetLastError() != "" {
+			text += fmt.Sprintf(`<br><span style="color:%s">%s</span>`, colorNegative, escape(dhcp.GetLastError()))
+		}
+		v.services.SetText(text)
+	} else if !dhcp.GetEnabled() {
 		v.services.SetText(mutedHTML("No managed services. App Runner DHCP, NAT, and DNS can be enabled with Configure Bridge…"))
 	} else {
 		serviceChip := func(label string, running bool) string {

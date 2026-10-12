@@ -802,7 +802,7 @@ func (mw *mainWindow) updateActions() {
 	}
 	n.restore.SetVisible(onBridge && bridgeMissing(bridge))
 	n.restore.SetEnabled(onBridge && canManage && bridgeMissing(bridge))
-	n.deleteBridge.SetEnabled(onBridge && canManage && len(bridge.GetMemberInterfaces()) == 0 && len(bridge.GetWorkloads()) == 0 && !bridge.GetDhcp().GetEnabled())
+	n.deleteBridge.SetEnabled(onBridge && canManage && len(bridge.GetMemberInterfaces()) == 0 && len(bridge.GetWorkloads()) == 0 && !managedSubnet(bridge))
 	mw.updateTitle()
 }
 
