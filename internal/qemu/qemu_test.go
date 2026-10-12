@@ -19,7 +19,7 @@ import (
 )
 
 func newTestHypervisor(settings config.Config) *Hypervisor {
-	return New(settings, serialconsole.New(settings.SerialSocketPath))
+	return New(settings, serialconsole.New(settings.SerialSocketPath, nil))
 }
 
 func TestQEMUArgumentsUseRequiredVirtualisationProfile(t *testing.T) {
