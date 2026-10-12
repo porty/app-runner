@@ -20,6 +20,7 @@ require (
 
 require (
 	github.com/fatih/color v1.15.0 // indirect
+	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.1.2 // indirect
 	github.com/josharian/native v1.1.0 // indirect
@@ -42,4 +43,5 @@ require (
 	github.com/vishvananda/netns v0.0.5 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/term v0.45.0 // indirect
 )
